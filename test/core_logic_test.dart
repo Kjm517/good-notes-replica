@@ -1,0 +1,110 @@
+import 'package:flutter/widgets.dart' show Size;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:notably/core/ink/ink_stroke.dart';
+import 'package:notably/core/models/enums.dart';
+import 'package:notably/core/models/margin_spec.dart';
+import 'package:notably/core/models/page_geometry.dart';
+import 'package:notably/features/editor/ink/stroke_renderer.dart';
+
+void main() {
+  group('MarginSpec', () {
+    test('round-trips through JSON', () {
+      const spec = MarginSpec(
+        enabled: true,
+        left: 72,
+        top: 10,
+        right: 5,
+        bottom: 20,
+        showGuides: false,
+      );
+      final restored = MarginSpec.fromJson(spec.toJson());
+      expect(restored, spec);
+    });
+
+    test('leftRule preset enables a left inset', () {
+      final spec = MarginSpec.leftRule(inset: 60);
+      expect(spec.enabled, isTrue);
+      expect(spec.left, 60);
+    });
+
+    test('contentRect insets by all edges when enabled', () {
+      const spec =
+          MarginSpec(enabled: true, left: 10, top: 20, right: 30, bottom: 40);
+      final rect = spec.contentRect(const Size(200, 300));
+      expect(rect.left, 10);
+      expect(rect.top, 20);
+      expect(rect.right, 170);
+      expect(rect.bottom, 260);
+    });
+
+    test('contentRect is full page when disabled', () {
+      final rect = MarginSpec.none.contentRect(const Size(200, 300));
+      expect(rect.left, 0);
+      expect(rect.right, 200);
+    });
+  });
+
+  group('InkStroke packing', () {
+    test('packs and unpacks points losslessly', () {
+      final stroke = InkStroke(
+        id: 'a',
+        tool: ToolType.pen,
+        color: 0xFF112233,
+        width: 3,
+        points: const [
+          StrokePoint(1, 2, 0.5),
+          StrokePoint(3.5, 4.25, 0.9),
+          StrokePoint(10, 11, 1.0),
+        ],
+      );
+      final bytes = stroke.packPoints();
+      final restored = InkStroke.unpackPoints(bytes);
+      expect(restored.length, 3);
+      expect(restored[1].x, closeTo(3.5, 1e-4));
+      expect(restored[1].y, closeTo(4.25, 1e-4));
+      expect(restored[2].pressure, closeTo(1.0, 1e-4));
+    });
+
+    test('bounds inflate by width', () {
+      final stroke = InkStroke(
+        id: 'a',
+        tool: ToolType.pen,
+        color: 0xFF000000,
+        width: 4,
+        points: const [StrokePoint(10, 10, 1), StrokePoint(20, 30, 1)],
+      );
+      final b = stroke.bounds;
+      expect(b.left, lessThanOrEqualTo(6));
+      expect(b.right, greaterThanOrEqualTo(24));
+    });
+  });
+
+  group('StrokeRenderer', () {
+    test('produces a non-empty path for a multi-point stroke', () {
+      final path = StrokeRenderer.pathFrom(
+        ToolType.pen,
+        3,
+        const [
+          StrokePoint(0, 0, 0.5),
+          StrokePoint(10, 0, 0.6),
+          StrokePoint(20, 5, 0.7),
+        ],
+      );
+      expect(path.getBounds().isEmpty, isFalse);
+    });
+
+    test('empty points yield an empty path', () {
+      final path = StrokeRenderer.pathFrom(ToolType.pen, 3, const []);
+      expect(path.getBounds().isEmpty, isTrue);
+    });
+  });
+
+  group('PageSizePreset', () {
+    test('landscape swaps dimensions', () {
+      final p = PageSizePreset.a4.size(PageOrientation.portrait);
+      final l = PageSizePreset.a4.size(PageOrientation.landscape);
+      expect(l.width, p.height);
+      expect(l.height, p.width);
+    });
+  });
+}
