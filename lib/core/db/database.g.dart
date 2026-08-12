@@ -9,6 +9,54 @@ class $DocumentsTable extends Documents
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $DocumentsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _remoteUpdatedAtMeta = const VerificationMeta(
+    'remoteUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> remoteUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'remote_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -95,6 +143,28 @@ class $DocumentsTable extends Documents
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _ownerUidMeta = const VerificationMeta(
+    'ownerUid',
+  );
+  @override
+  late final GeneratedColumn<String> ownerUid = GeneratedColumn<String>(
+    'owner_uid',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _coverThumbMeta = const VerificationMeta(
+    'coverThumb',
+  );
+  @override
+  late final GeneratedColumn<String> coverThumb = GeneratedColumn<String>(
+    'cover_thumb',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _trashedAtMeta = const VerificationMeta(
     'trashedAt',
   );
@@ -130,18 +200,6 @@ class $DocumentsTable extends Documents
     requiredDuringInsert: false,
     defaultValue: currentDateAndTime,
   );
-  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
-    'updatedAt',
-  );
-  @override
-  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
-    'updated_at',
-    aliasedName,
-    false,
-    type: DriftSqlType.dateTime,
-    requiredDuringInsert: false,
-    defaultValue: currentDateAndTime,
-  );
   static const VerificationMeta _lastOpenedAtMeta = const VerificationMeta(
     'lastOpenedAt',
   );
@@ -155,6 +213,10 @@ class $DocumentsTable extends Documents
   );
   @override
   List<GeneratedColumn> get $columns => [
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     type,
     title,
@@ -163,10 +225,11 @@ class $DocumentsTable extends Documents
     orientation,
     pageSize,
     starred,
+    ownerUid,
+    coverThumb,
     trashedAt,
     sortIndex,
     createdAt,
-    updatedAt,
     lastOpenedAt,
   ];
   @override
@@ -181,6 +244,33 @@ class $DocumentsTable extends Documents
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    if (data.containsKey('remote_updated_at')) {
+      context.handle(
+        _remoteUpdatedAtMeta,
+        remoteUpdatedAt.isAcceptableOrUnknown(
+          data['remote_updated_at']!,
+          _remoteUpdatedAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -210,6 +300,18 @@ class $DocumentsTable extends Documents
         starred.isAcceptableOrUnknown(data['starred']!, _starredMeta),
       );
     }
+    if (data.containsKey('owner_uid')) {
+      context.handle(
+        _ownerUidMeta,
+        ownerUid.isAcceptableOrUnknown(data['owner_uid']!, _ownerUidMeta),
+      );
+    }
+    if (data.containsKey('cover_thumb')) {
+      context.handle(
+        _coverThumbMeta,
+        coverThumb.isAcceptableOrUnknown(data['cover_thumb']!, _coverThumbMeta),
+      );
+    }
     if (data.containsKey('trashed_at')) {
       context.handle(
         _trashedAtMeta,
@@ -226,12 +328,6 @@ class $DocumentsTable extends Documents
       context.handle(
         _createdAtMeta,
         createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
-      );
-    }
-    if (data.containsKey('updated_at')) {
-      context.handle(
-        _updatedAtMeta,
-        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
       );
     }
     if (data.containsKey('last_opened_at')) {
@@ -252,6 +348,22 @@ class $DocumentsTable extends Documents
   Document map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Document(
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+      remoteUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}remote_updated_at'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -290,6 +402,14 @@ class $DocumentsTable extends Documents
         DriftSqlType.bool,
         data['${effectivePrefix}starred'],
       )!,
+      ownerUid: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}owner_uid'],
+      ),
+      coverThumb: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cover_thumb'],
+      ),
       trashedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}trashed_at'],
@@ -301,10 +421,6 @@ class $DocumentsTable extends Documents
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
-      )!,
-      updatedAt: attachedDatabase.typeMapping.read(
-        DriftSqlType.dateTime,
-        data['${effectivePrefix}updated_at'],
       )!,
       lastOpenedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
@@ -327,6 +443,10 @@ class $DocumentsTable extends Documents
 }
 
 class Document extends DataClass implements Insertable<Document> {
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final bool dirty;
+  final DateTime? remoteUpdatedAt;
   final String id;
   final DocumentType type;
   final String title;
@@ -338,15 +458,33 @@ class Document extends DataClass implements Insertable<Document> {
   final PageSizePreset pageSize;
   final bool starred;
 
+  /// Firebase uid of the account this belongs to.
+  ///
+  /// Null means "created on this device while signed out" — those stay
+  /// visible to everyone and are claimed by the first account that signs in.
+  /// Anything owned by an account is hidden unless that account is signed in;
+  /// otherwise signing out would leave one user's notes on screen for the
+  /// next person to open the app.
+  final String? ownerUid;
+
+  /// Small base64 PNG of the first page, rendered once at import.
+  ///
+  /// Without this the library has to open the whole source PDF just to draw a
+  /// card-sized preview — a 150 MB textbook took over 20 seconds.
+  final String? coverThumb;
+
   /// Null unless soft-deleted (in trash).
   final DateTime? trashedAt;
 
   /// Manual ordering within a folder.
   final int sortIndex;
   final DateTime createdAt;
-  final DateTime updatedAt;
   final DateTime? lastOpenedAt;
   const Document({
+    required this.updatedAt,
+    this.deletedAt,
+    required this.dirty,
+    this.remoteUpdatedAt,
     required this.id,
     required this.type,
     required this.title,
@@ -355,15 +493,24 @@ class Document extends DataClass implements Insertable<Document> {
     required this.orientation,
     required this.pageSize,
     required this.starred,
+    this.ownerUid,
+    this.coverThumb,
     this.trashedAt,
     required this.sortIndex,
     required this.createdAt,
-    required this.updatedAt,
     this.lastOpenedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['dirty'] = Variable<bool>(dirty);
+    if (!nullToAbsent || remoteUpdatedAt != null) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt);
+    }
     map['id'] = Variable<String>(id);
     {
       map['type'] = Variable<int>($DocumentsTable.$convertertype.toSql(type));
@@ -384,12 +531,17 @@ class Document extends DataClass implements Insertable<Document> {
       );
     }
     map['starred'] = Variable<bool>(starred);
+    if (!nullToAbsent || ownerUid != null) {
+      map['owner_uid'] = Variable<String>(ownerUid);
+    }
+    if (!nullToAbsent || coverThumb != null) {
+      map['cover_thumb'] = Variable<String>(coverThumb);
+    }
     if (!nullToAbsent || trashedAt != null) {
       map['trashed_at'] = Variable<DateTime>(trashedAt);
     }
     map['sort_index'] = Variable<int>(sortIndex);
     map['created_at'] = Variable<DateTime>(createdAt);
-    map['updated_at'] = Variable<DateTime>(updatedAt);
     if (!nullToAbsent || lastOpenedAt != null) {
       map['last_opened_at'] = Variable<DateTime>(lastOpenedAt);
     }
@@ -398,6 +550,14 @@ class Document extends DataClass implements Insertable<Document> {
 
   DocumentsCompanion toCompanion(bool nullToAbsent) {
     return DocumentsCompanion(
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      dirty: Value(dirty),
+      remoteUpdatedAt: remoteUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteUpdatedAt),
       id: Value(id),
       type: Value(type),
       title: Value(title),
@@ -408,12 +568,17 @@ class Document extends DataClass implements Insertable<Document> {
       orientation: Value(orientation),
       pageSize: Value(pageSize),
       starred: Value(starred),
+      ownerUid: ownerUid == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ownerUid),
+      coverThumb: coverThumb == null && nullToAbsent
+          ? const Value.absent()
+          : Value(coverThumb),
       trashedAt: trashedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(trashedAt),
       sortIndex: Value(sortIndex),
       createdAt: Value(createdAt),
-      updatedAt: Value(updatedAt),
       lastOpenedAt: lastOpenedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastOpenedAt),
@@ -426,6 +591,10 @@ class Document extends DataClass implements Insertable<Document> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Document(
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+      remoteUpdatedAt: serializer.fromJson<DateTime?>(json['remoteUpdatedAt']),
       id: serializer.fromJson<String>(json['id']),
       type: $DocumentsTable.$convertertype.fromJson(
         serializer.fromJson<int>(json['type']),
@@ -440,10 +609,11 @@ class Document extends DataClass implements Insertable<Document> {
         serializer.fromJson<int>(json['pageSize']),
       ),
       starred: serializer.fromJson<bool>(json['starred']),
+      ownerUid: serializer.fromJson<String?>(json['ownerUid']),
+      coverThumb: serializer.fromJson<String?>(json['coverThumb']),
       trashedAt: serializer.fromJson<DateTime?>(json['trashedAt']),
       sortIndex: serializer.fromJson<int>(json['sortIndex']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
-      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       lastOpenedAt: serializer.fromJson<DateTime?>(json['lastOpenedAt']),
     );
   }
@@ -451,6 +621,10 @@ class Document extends DataClass implements Insertable<Document> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'dirty': serializer.toJson<bool>(dirty),
+      'remoteUpdatedAt': serializer.toJson<DateTime?>(remoteUpdatedAt),
       'id': serializer.toJson<String>(id),
       'type': serializer.toJson<int>(
         $DocumentsTable.$convertertype.toJson(type),
@@ -465,15 +639,20 @@ class Document extends DataClass implements Insertable<Document> {
         $DocumentsTable.$converterpageSize.toJson(pageSize),
       ),
       'starred': serializer.toJson<bool>(starred),
+      'ownerUid': serializer.toJson<String?>(ownerUid),
+      'coverThumb': serializer.toJson<String?>(coverThumb),
       'trashedAt': serializer.toJson<DateTime?>(trashedAt),
       'sortIndex': serializer.toJson<int>(sortIndex),
       'createdAt': serializer.toJson<DateTime>(createdAt),
-      'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'lastOpenedAt': serializer.toJson<DateTime?>(lastOpenedAt),
     };
   }
 
   Document copyWith({
+    DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    bool? dirty,
+    Value<DateTime?> remoteUpdatedAt = const Value.absent(),
     String? id,
     DocumentType? type,
     String? title,
@@ -482,12 +661,19 @@ class Document extends DataClass implements Insertable<Document> {
     PageOrientation? orientation,
     PageSizePreset? pageSize,
     bool? starred,
+    Value<String?> ownerUid = const Value.absent(),
+    Value<String?> coverThumb = const Value.absent(),
     Value<DateTime?> trashedAt = const Value.absent(),
     int? sortIndex,
     DateTime? createdAt,
-    DateTime? updatedAt,
     Value<DateTime?> lastOpenedAt = const Value.absent(),
   }) => Document(
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    dirty: dirty ?? this.dirty,
+    remoteUpdatedAt: remoteUpdatedAt.present
+        ? remoteUpdatedAt.value
+        : this.remoteUpdatedAt,
     id: id ?? this.id,
     type: type ?? this.type,
     title: title ?? this.title,
@@ -496,14 +682,21 @@ class Document extends DataClass implements Insertable<Document> {
     orientation: orientation ?? this.orientation,
     pageSize: pageSize ?? this.pageSize,
     starred: starred ?? this.starred,
+    ownerUid: ownerUid.present ? ownerUid.value : this.ownerUid,
+    coverThumb: coverThumb.present ? coverThumb.value : this.coverThumb,
     trashedAt: trashedAt.present ? trashedAt.value : this.trashedAt,
     sortIndex: sortIndex ?? this.sortIndex,
     createdAt: createdAt ?? this.createdAt,
-    updatedAt: updatedAt ?? this.updatedAt,
     lastOpenedAt: lastOpenedAt.present ? lastOpenedAt.value : this.lastOpenedAt,
   );
   Document copyWithCompanion(DocumentsCompanion data) {
     return Document(
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+      remoteUpdatedAt: data.remoteUpdatedAt.present
+          ? data.remoteUpdatedAt.value
+          : this.remoteUpdatedAt,
       id: data.id.present ? data.id.value : this.id,
       type: data.type.present ? data.type.value : this.type,
       title: data.title.present ? data.title.value : this.title,
@@ -516,10 +709,13 @@ class Document extends DataClass implements Insertable<Document> {
           : this.orientation,
       pageSize: data.pageSize.present ? data.pageSize.value : this.pageSize,
       starred: data.starred.present ? data.starred.value : this.starred,
+      ownerUid: data.ownerUid.present ? data.ownerUid.value : this.ownerUid,
+      coverThumb: data.coverThumb.present
+          ? data.coverThumb.value
+          : this.coverThumb,
       trashedAt: data.trashedAt.present ? data.trashedAt.value : this.trashedAt,
       sortIndex: data.sortIndex.present ? data.sortIndex.value : this.sortIndex,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
-      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       lastOpenedAt: data.lastOpenedAt.present
           ? data.lastOpenedAt.value
           : this.lastOpenedAt,
@@ -529,6 +725,10 @@ class Document extends DataClass implements Insertable<Document> {
   @override
   String toString() {
     return (StringBuffer('Document(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('type: $type, ')
           ..write('title: $title, ')
@@ -537,10 +737,11 @@ class Document extends DataClass implements Insertable<Document> {
           ..write('orientation: $orientation, ')
           ..write('pageSize: $pageSize, ')
           ..write('starred: $starred, ')
+          ..write('ownerUid: $ownerUid, ')
+          ..write('coverThumb: $coverThumb, ')
           ..write('trashedAt: $trashedAt, ')
           ..write('sortIndex: $sortIndex, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt, ')
           ..write('lastOpenedAt: $lastOpenedAt')
           ..write(')'))
         .toString();
@@ -548,6 +749,10 @@ class Document extends DataClass implements Insertable<Document> {
 
   @override
   int get hashCode => Object.hash(
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     type,
     title,
@@ -556,16 +761,21 @@ class Document extends DataClass implements Insertable<Document> {
     orientation,
     pageSize,
     starred,
+    ownerUid,
+    coverThumb,
     trashedAt,
     sortIndex,
     createdAt,
-    updatedAt,
     lastOpenedAt,
   );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Document &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.dirty == this.dirty &&
+          other.remoteUpdatedAt == this.remoteUpdatedAt &&
           other.id == this.id &&
           other.type == this.type &&
           other.title == this.title &&
@@ -574,14 +784,19 @@ class Document extends DataClass implements Insertable<Document> {
           other.orientation == this.orientation &&
           other.pageSize == this.pageSize &&
           other.starred == this.starred &&
+          other.ownerUid == this.ownerUid &&
+          other.coverThumb == this.coverThumb &&
           other.trashedAt == this.trashedAt &&
           other.sortIndex == this.sortIndex &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt &&
           other.lastOpenedAt == this.lastOpenedAt);
 }
 
 class DocumentsCompanion extends UpdateCompanion<Document> {
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<bool> dirty;
+  final Value<DateTime?> remoteUpdatedAt;
   final Value<String> id;
   final Value<DocumentType> type;
   final Value<String> title;
@@ -590,13 +805,18 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
   final Value<PageOrientation> orientation;
   final Value<PageSizePreset> pageSize;
   final Value<bool> starred;
+  final Value<String?> ownerUid;
+  final Value<String?> coverThumb;
   final Value<DateTime?> trashedAt;
   final Value<int> sortIndex;
   final Value<DateTime> createdAt;
-  final Value<DateTime> updatedAt;
   final Value<DateTime?> lastOpenedAt;
   final Value<int> rowid;
   const DocumentsCompanion({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     this.id = const Value.absent(),
     this.type = const Value.absent(),
     this.title = const Value.absent(),
@@ -605,14 +825,19 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     this.orientation = const Value.absent(),
     this.pageSize = const Value.absent(),
     this.starred = const Value.absent(),
+    this.ownerUid = const Value.absent(),
+    this.coverThumb = const Value.absent(),
     this.trashedAt = const Value.absent(),
     this.sortIndex = const Value.absent(),
     this.createdAt = const Value.absent(),
-    this.updatedAt = const Value.absent(),
     this.lastOpenedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DocumentsCompanion.insert({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     required String id,
     required DocumentType type,
     this.title = const Value.absent(),
@@ -621,15 +846,20 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     this.orientation = const Value.absent(),
     this.pageSize = const Value.absent(),
     this.starred = const Value.absent(),
+    this.ownerUid = const Value.absent(),
+    this.coverThumb = const Value.absent(),
     this.trashedAt = const Value.absent(),
     this.sortIndex = const Value.absent(),
     this.createdAt = const Value.absent(),
-    this.updatedAt = const Value.absent(),
     this.lastOpenedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        type = Value(type);
   static Insertable<Document> custom({
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<bool>? dirty,
+    Expression<DateTime>? remoteUpdatedAt,
     Expression<String>? id,
     Expression<int>? type,
     Expression<String>? title,
@@ -638,14 +868,19 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     Expression<int>? orientation,
     Expression<int>? pageSize,
     Expression<bool>? starred,
+    Expression<String>? ownerUid,
+    Expression<String>? coverThumb,
     Expression<DateTime>? trashedAt,
     Expression<int>? sortIndex,
     Expression<DateTime>? createdAt,
-    Expression<DateTime>? updatedAt,
     Expression<DateTime>? lastOpenedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (dirty != null) 'dirty': dirty,
+      if (remoteUpdatedAt != null) 'remote_updated_at': remoteUpdatedAt,
       if (id != null) 'id': id,
       if (type != null) 'type': type,
       if (title != null) 'title': title,
@@ -654,16 +889,21 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
       if (orientation != null) 'orientation': orientation,
       if (pageSize != null) 'page_size': pageSize,
       if (starred != null) 'starred': starred,
+      if (ownerUid != null) 'owner_uid': ownerUid,
+      if (coverThumb != null) 'cover_thumb': coverThumb,
       if (trashedAt != null) 'trashed_at': trashedAt,
       if (sortIndex != null) 'sort_index': sortIndex,
       if (createdAt != null) 'created_at': createdAt,
-      if (updatedAt != null) 'updated_at': updatedAt,
       if (lastOpenedAt != null) 'last_opened_at': lastOpenedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
 
   DocumentsCompanion copyWith({
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<bool>? dirty,
+    Value<DateTime?>? remoteUpdatedAt,
     Value<String>? id,
     Value<DocumentType>? type,
     Value<String>? title,
@@ -672,14 +912,19 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     Value<PageOrientation>? orientation,
     Value<PageSizePreset>? pageSize,
     Value<bool>? starred,
+    Value<String?>? ownerUid,
+    Value<String?>? coverThumb,
     Value<DateTime?>? trashedAt,
     Value<int>? sortIndex,
     Value<DateTime>? createdAt,
-    Value<DateTime>? updatedAt,
     Value<DateTime?>? lastOpenedAt,
     Value<int>? rowid,
   }) {
     return DocumentsCompanion(
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      dirty: dirty ?? this.dirty,
+      remoteUpdatedAt: remoteUpdatedAt ?? this.remoteUpdatedAt,
       id: id ?? this.id,
       type: type ?? this.type,
       title: title ?? this.title,
@@ -688,10 +933,11 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
       orientation: orientation ?? this.orientation,
       pageSize: pageSize ?? this.pageSize,
       starred: starred ?? this.starred,
+      ownerUid: ownerUid ?? this.ownerUid,
+      coverThumb: coverThumb ?? this.coverThumb,
       trashedAt: trashedAt ?? this.trashedAt,
       sortIndex: sortIndex ?? this.sortIndex,
       createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
       lastOpenedAt: lastOpenedAt ?? this.lastOpenedAt,
       rowid: rowid ?? this.rowid,
     );
@@ -700,6 +946,18 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (remoteUpdatedAt.present) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -730,6 +988,12 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     if (starred.present) {
       map['starred'] = Variable<bool>(starred.value);
     }
+    if (ownerUid.present) {
+      map['owner_uid'] = Variable<String>(ownerUid.value);
+    }
+    if (coverThumb.present) {
+      map['cover_thumb'] = Variable<String>(coverThumb.value);
+    }
     if (trashedAt.present) {
       map['trashed_at'] = Variable<DateTime>(trashedAt.value);
     }
@@ -738,9 +1002,6 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
-    }
-    if (updatedAt.present) {
-      map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
     if (lastOpenedAt.present) {
       map['last_opened_at'] = Variable<DateTime>(lastOpenedAt.value);
@@ -754,6 +1015,10 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
   @override
   String toString() {
     return (StringBuffer('DocumentsCompanion(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('type: $type, ')
           ..write('title: $title, ')
@@ -762,10 +1027,11 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
           ..write('orientation: $orientation, ')
           ..write('pageSize: $pageSize, ')
           ..write('starred: $starred, ')
+          ..write('ownerUid: $ownerUid, ')
+          ..write('coverThumb: $coverThumb, ')
           ..write('trashedAt: $trashedAt, ')
           ..write('sortIndex: $sortIndex, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt, ')
           ..write('lastOpenedAt: $lastOpenedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -779,6 +1045,54 @@ class $NotePagesTable extends NotePages
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $NotePagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _remoteUpdatedAtMeta = const VerificationMeta(
+    'remoteUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> remoteUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'remote_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -865,12 +1179,52 @@ class $NotePagesTable extends NotePages
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _bgAssetIdMeta = const VerificationMeta(
+    'bgAssetId',
+  );
+  @override
+  late final GeneratedColumn<String> bgAssetId = GeneratedColumn<String>(
+    'bg_asset_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _pageWMeta = const VerificationMeta('pageW');
+  @override
+  late final GeneratedColumn<double> pageW = GeneratedColumn<double>(
+    'page_w',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _pageHMeta = const VerificationMeta('pageH');
+  @override
+  late final GeneratedColumn<double> pageH = GeneratedColumn<double>(
+    'page_h',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _bookmarkTitleMeta = const VerificationMeta(
     'bookmarkTitle',
   );
   @override
   late final GeneratedColumn<String> bookmarkTitle = GeneratedColumn<String>(
     'bookmark_title',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _searchTextMeta = const VerificationMeta(
+    'searchText',
+  );
+  @override
+  late final GeneratedColumn<String> searchText = GeneratedColumn<String>(
+    'search_text',
     aliasedName,
     true,
     type: DriftSqlType.string,
@@ -888,20 +1242,12 @@ class $NotePagesTable extends NotePages
     requiredDuringInsert: false,
     defaultValue: currentDateAndTime,
   );
-  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
-    'updatedAt',
-  );
-  @override
-  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
-    'updated_at',
-    aliasedName,
-    false,
-    type: DriftSqlType.dateTime,
-    requiredDuringInsert: false,
-    defaultValue: currentDateAndTime,
-  );
   @override
   List<GeneratedColumn> get $columns => [
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     documentId,
     pageIndex,
@@ -910,9 +1256,12 @@ class $NotePagesTable extends NotePages
     marginSpec,
     pdfAssetId,
     pdfPageIndex,
+    bgAssetId,
+    pageW,
+    pageH,
     bookmarkTitle,
+    searchText,
     createdAt,
-    updatedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -926,6 +1275,33 @@ class $NotePagesTable extends NotePages
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    if (data.containsKey('remote_updated_at')) {
+      context.handle(
+        _remoteUpdatedAtMeta,
+        remoteUpdatedAt.isAcceptableOrUnknown(
+          data['remote_updated_at']!,
+          _remoteUpdatedAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -965,6 +1341,24 @@ class $NotePagesTable extends NotePages
         ),
       );
     }
+    if (data.containsKey('bg_asset_id')) {
+      context.handle(
+        _bgAssetIdMeta,
+        bgAssetId.isAcceptableOrUnknown(data['bg_asset_id']!, _bgAssetIdMeta),
+      );
+    }
+    if (data.containsKey('page_w')) {
+      context.handle(
+        _pageWMeta,
+        pageW.isAcceptableOrUnknown(data['page_w']!, _pageWMeta),
+      );
+    }
+    if (data.containsKey('page_h')) {
+      context.handle(
+        _pageHMeta,
+        pageH.isAcceptableOrUnknown(data['page_h']!, _pageHMeta),
+      );
+    }
     if (data.containsKey('bookmark_title')) {
       context.handle(
         _bookmarkTitleMeta,
@@ -974,16 +1368,16 @@ class $NotePagesTable extends NotePages
         ),
       );
     }
+    if (data.containsKey('search_text')) {
+      context.handle(
+        _searchTextMeta,
+        searchText.isAcceptableOrUnknown(data['search_text']!, _searchTextMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
         createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
-      );
-    }
-    if (data.containsKey('updated_at')) {
-      context.handle(
-        _updatedAtMeta,
-        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
       );
     }
     return context;
@@ -995,6 +1389,22 @@ class $NotePagesTable extends NotePages
   NotePage map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return NotePage(
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+      remoteUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}remote_updated_at'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -1033,17 +1443,29 @@ class $NotePagesTable extends NotePages
         DriftSqlType.int,
         data['${effectivePrefix}pdf_page_index'],
       ),
+      bgAssetId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}bg_asset_id'],
+      ),
+      pageW: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}page_w'],
+      ),
+      pageH: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}page_h'],
+      ),
       bookmarkTitle: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}bookmark_title'],
       ),
+      searchText: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}search_text'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
-      )!,
-      updatedAt: attachedDatabase.typeMapping.read(
-        DriftSqlType.dateTime,
-        data['${effectivePrefix}updated_at'],
       )!,
     );
   }
@@ -1062,6 +1484,10 @@ class $NotePagesTable extends NotePages
 }
 
 class NotePage extends DataClass implements Insertable<NotePage> {
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final bool dirty;
+  final DateTime? remoteUpdatedAt;
   final String id;
   final String documentId;
   final int pageIndex;
@@ -1074,10 +1500,28 @@ class NotePage extends DataClass implements Insertable<NotePage> {
   /// For PDF-backed pages: the source asset + which page of it.
   final String? pdfAssetId;
   final int? pdfPageIndex;
+
+  /// For image-backed pages: the source image asset.
+  final String? bgAssetId;
+
+  /// Per-page size override (points) for PDF/image pages whose dimensions
+  /// differ from the document preset. Null = use the document preset size.
+  final double? pageW;
+  final double? pageH;
   final String? bookmarkTitle;
+
+  /// Text extracted from the source PDF page, lower-cased for searching.
+  ///
+  /// Extracted once (in the background after import) so "find in document"
+  /// never has to re-parse the file. Null means not extracted yet; empty
+  /// means the page genuinely has no text (a scan, or a picture page).
+  final String? searchText;
   final DateTime createdAt;
-  final DateTime updatedAt;
   const NotePage({
+    required this.updatedAt,
+    this.deletedAt,
+    required this.dirty,
+    this.remoteUpdatedAt,
     required this.id,
     required this.documentId,
     required this.pageIndex,
@@ -1086,13 +1530,24 @@ class NotePage extends DataClass implements Insertable<NotePage> {
     required this.marginSpec,
     this.pdfAssetId,
     this.pdfPageIndex,
+    this.bgAssetId,
+    this.pageW,
+    this.pageH,
     this.bookmarkTitle,
+    this.searchText,
     required this.createdAt,
-    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['dirty'] = Variable<bool>(dirty);
+    if (!nullToAbsent || remoteUpdatedAt != null) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt);
+    }
     map['id'] = Variable<String>(id);
     map['document_id'] = Variable<String>(documentId);
     map['page_index'] = Variable<int>(pageIndex);
@@ -1117,16 +1572,35 @@ class NotePage extends DataClass implements Insertable<NotePage> {
     if (!nullToAbsent || pdfPageIndex != null) {
       map['pdf_page_index'] = Variable<int>(pdfPageIndex);
     }
+    if (!nullToAbsent || bgAssetId != null) {
+      map['bg_asset_id'] = Variable<String>(bgAssetId);
+    }
+    if (!nullToAbsent || pageW != null) {
+      map['page_w'] = Variable<double>(pageW);
+    }
+    if (!nullToAbsent || pageH != null) {
+      map['page_h'] = Variable<double>(pageH);
+    }
     if (!nullToAbsent || bookmarkTitle != null) {
       map['bookmark_title'] = Variable<String>(bookmarkTitle);
     }
+    if (!nullToAbsent || searchText != null) {
+      map['search_text'] = Variable<String>(searchText);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
-    map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
 
   NotePagesCompanion toCompanion(bool nullToAbsent) {
     return NotePagesCompanion(
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      dirty: Value(dirty),
+      remoteUpdatedAt: remoteUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteUpdatedAt),
       id: Value(id),
       documentId: Value(documentId),
       pageIndex: Value(pageIndex),
@@ -1139,11 +1613,22 @@ class NotePage extends DataClass implements Insertable<NotePage> {
       pdfPageIndex: pdfPageIndex == null && nullToAbsent
           ? const Value.absent()
           : Value(pdfPageIndex),
+      bgAssetId: bgAssetId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(bgAssetId),
+      pageW: pageW == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pageW),
+      pageH: pageH == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pageH),
       bookmarkTitle: bookmarkTitle == null && nullToAbsent
           ? const Value.absent()
           : Value(bookmarkTitle),
+      searchText: searchText == null && nullToAbsent
+          ? const Value.absent()
+          : Value(searchText),
       createdAt: Value(createdAt),
-      updatedAt: Value(updatedAt),
     );
   }
 
@@ -1153,6 +1638,10 @@ class NotePage extends DataClass implements Insertable<NotePage> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return NotePage(
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+      remoteUpdatedAt: serializer.fromJson<DateTime?>(json['remoteUpdatedAt']),
       id: serializer.fromJson<String>(json['id']),
       documentId: serializer.fromJson<String>(json['documentId']),
       pageIndex: serializer.fromJson<int>(json['pageIndex']),
@@ -1165,15 +1654,22 @@ class NotePage extends DataClass implements Insertable<NotePage> {
       marginSpec: serializer.fromJson<MarginSpec>(json['marginSpec']),
       pdfAssetId: serializer.fromJson<String?>(json['pdfAssetId']),
       pdfPageIndex: serializer.fromJson<int?>(json['pdfPageIndex']),
+      bgAssetId: serializer.fromJson<String?>(json['bgAssetId']),
+      pageW: serializer.fromJson<double?>(json['pageW']),
+      pageH: serializer.fromJson<double?>(json['pageH']),
       bookmarkTitle: serializer.fromJson<String?>(json['bookmarkTitle']),
+      searchText: serializer.fromJson<String?>(json['searchText']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
-      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
   @override
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'dirty': serializer.toJson<bool>(dirty),
+      'remoteUpdatedAt': serializer.toJson<DateTime?>(remoteUpdatedAt),
       'id': serializer.toJson<String>(id),
       'documentId': serializer.toJson<String>(documentId),
       'pageIndex': serializer.toJson<int>(pageIndex),
@@ -1186,13 +1682,20 @@ class NotePage extends DataClass implements Insertable<NotePage> {
       'marginSpec': serializer.toJson<MarginSpec>(marginSpec),
       'pdfAssetId': serializer.toJson<String?>(pdfAssetId),
       'pdfPageIndex': serializer.toJson<int?>(pdfPageIndex),
+      'bgAssetId': serializer.toJson<String?>(bgAssetId),
+      'pageW': serializer.toJson<double?>(pageW),
+      'pageH': serializer.toJson<double?>(pageH),
       'bookmarkTitle': serializer.toJson<String?>(bookmarkTitle),
+      'searchText': serializer.toJson<String?>(searchText),
       'createdAt': serializer.toJson<DateTime>(createdAt),
-      'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
 
   NotePage copyWith({
+    DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    bool? dirty,
+    Value<DateTime?> remoteUpdatedAt = const Value.absent(),
     String? id,
     String? documentId,
     int? pageIndex,
@@ -1201,10 +1704,19 @@ class NotePage extends DataClass implements Insertable<NotePage> {
     MarginSpec? marginSpec,
     Value<String?> pdfAssetId = const Value.absent(),
     Value<int?> pdfPageIndex = const Value.absent(),
+    Value<String?> bgAssetId = const Value.absent(),
+    Value<double?> pageW = const Value.absent(),
+    Value<double?> pageH = const Value.absent(),
     Value<String?> bookmarkTitle = const Value.absent(),
+    Value<String?> searchText = const Value.absent(),
     DateTime? createdAt,
-    DateTime? updatedAt,
   }) => NotePage(
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    dirty: dirty ?? this.dirty,
+    remoteUpdatedAt: remoteUpdatedAt.present
+        ? remoteUpdatedAt.value
+        : this.remoteUpdatedAt,
     id: id ?? this.id,
     documentId: documentId ?? this.documentId,
     pageIndex: pageIndex ?? this.pageIndex,
@@ -1213,14 +1725,23 @@ class NotePage extends DataClass implements Insertable<NotePage> {
     marginSpec: marginSpec ?? this.marginSpec,
     pdfAssetId: pdfAssetId.present ? pdfAssetId.value : this.pdfAssetId,
     pdfPageIndex: pdfPageIndex.present ? pdfPageIndex.value : this.pdfPageIndex,
+    bgAssetId: bgAssetId.present ? bgAssetId.value : this.bgAssetId,
+    pageW: pageW.present ? pageW.value : this.pageW,
+    pageH: pageH.present ? pageH.value : this.pageH,
     bookmarkTitle: bookmarkTitle.present
         ? bookmarkTitle.value
         : this.bookmarkTitle,
+    searchText: searchText.present ? searchText.value : this.searchText,
     createdAt: createdAt ?? this.createdAt,
-    updatedAt: updatedAt ?? this.updatedAt,
   );
   NotePage copyWithCompanion(NotePagesCompanion data) {
     return NotePage(
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+      remoteUpdatedAt: data.remoteUpdatedAt.present
+          ? data.remoteUpdatedAt.value
+          : this.remoteUpdatedAt,
       id: data.id.present ? data.id.value : this.id,
       documentId: data.documentId.present
           ? data.documentId.value
@@ -1239,17 +1760,26 @@ class NotePage extends DataClass implements Insertable<NotePage> {
       pdfPageIndex: data.pdfPageIndex.present
           ? data.pdfPageIndex.value
           : this.pdfPageIndex,
+      bgAssetId: data.bgAssetId.present ? data.bgAssetId.value : this.bgAssetId,
+      pageW: data.pageW.present ? data.pageW.value : this.pageW,
+      pageH: data.pageH.present ? data.pageH.value : this.pageH,
       bookmarkTitle: data.bookmarkTitle.present
           ? data.bookmarkTitle.value
           : this.bookmarkTitle,
+      searchText: data.searchText.present
+          ? data.searchText.value
+          : this.searchText,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
-      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
   @override
   String toString() {
     return (StringBuffer('NotePage(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('documentId: $documentId, ')
           ..write('pageIndex: $pageIndex, ')
@@ -1258,15 +1788,22 @@ class NotePage extends DataClass implements Insertable<NotePage> {
           ..write('marginSpec: $marginSpec, ')
           ..write('pdfAssetId: $pdfAssetId, ')
           ..write('pdfPageIndex: $pdfPageIndex, ')
+          ..write('bgAssetId: $bgAssetId, ')
+          ..write('pageW: $pageW, ')
+          ..write('pageH: $pageH, ')
           ..write('bookmarkTitle: $bookmarkTitle, ')
-          ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('searchText: $searchText, ')
+          ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode => Object.hash(
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     documentId,
     pageIndex,
@@ -1275,14 +1812,21 @@ class NotePage extends DataClass implements Insertable<NotePage> {
     marginSpec,
     pdfAssetId,
     pdfPageIndex,
+    bgAssetId,
+    pageW,
+    pageH,
     bookmarkTitle,
+    searchText,
     createdAt,
-    updatedAt,
   );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is NotePage &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.dirty == this.dirty &&
+          other.remoteUpdatedAt == this.remoteUpdatedAt &&
           other.id == this.id &&
           other.documentId == this.documentId &&
           other.pageIndex == this.pageIndex &&
@@ -1291,12 +1835,19 @@ class NotePage extends DataClass implements Insertable<NotePage> {
           other.marginSpec == this.marginSpec &&
           other.pdfAssetId == this.pdfAssetId &&
           other.pdfPageIndex == this.pdfPageIndex &&
+          other.bgAssetId == this.bgAssetId &&
+          other.pageW == this.pageW &&
+          other.pageH == this.pageH &&
           other.bookmarkTitle == this.bookmarkTitle &&
-          other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.searchText == this.searchText &&
+          other.createdAt == this.createdAt);
 }
 
 class NotePagesCompanion extends UpdateCompanion<NotePage> {
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<bool> dirty;
+  final Value<DateTime?> remoteUpdatedAt;
   final Value<String> id;
   final Value<String> documentId;
   final Value<int> pageIndex;
@@ -1305,11 +1856,18 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
   final Value<MarginSpec> marginSpec;
   final Value<String?> pdfAssetId;
   final Value<int?> pdfPageIndex;
+  final Value<String?> bgAssetId;
+  final Value<double?> pageW;
+  final Value<double?> pageH;
   final Value<String?> bookmarkTitle;
+  final Value<String?> searchText;
   final Value<DateTime> createdAt;
-  final Value<DateTime> updatedAt;
   final Value<int> rowid;
   const NotePagesCompanion({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     this.id = const Value.absent(),
     this.documentId = const Value.absent(),
     this.pageIndex = const Value.absent(),
@@ -1318,12 +1876,19 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
     this.marginSpec = const Value.absent(),
     this.pdfAssetId = const Value.absent(),
     this.pdfPageIndex = const Value.absent(),
+    this.bgAssetId = const Value.absent(),
+    this.pageW = const Value.absent(),
+    this.pageH = const Value.absent(),
     this.bookmarkTitle = const Value.absent(),
+    this.searchText = const Value.absent(),
     this.createdAt = const Value.absent(),
-    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NotePagesCompanion.insert({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     required String id,
     required String documentId,
     required int pageIndex,
@@ -1332,14 +1897,21 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
     this.marginSpec = const Value.absent(),
     this.pdfAssetId = const Value.absent(),
     this.pdfPageIndex = const Value.absent(),
+    this.bgAssetId = const Value.absent(),
+    this.pageW = const Value.absent(),
+    this.pageH = const Value.absent(),
     this.bookmarkTitle = const Value.absent(),
+    this.searchText = const Value.absent(),
     this.createdAt = const Value.absent(),
-    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        documentId = Value(documentId),
        pageIndex = Value(pageIndex);
   static Insertable<NotePage> custom({
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<bool>? dirty,
+    Expression<DateTime>? remoteUpdatedAt,
     Expression<String>? id,
     Expression<String>? documentId,
     Expression<int>? pageIndex,
@@ -1348,12 +1920,19 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
     Expression<String>? marginSpec,
     Expression<String>? pdfAssetId,
     Expression<int>? pdfPageIndex,
+    Expression<String>? bgAssetId,
+    Expression<double>? pageW,
+    Expression<double>? pageH,
     Expression<String>? bookmarkTitle,
+    Expression<String>? searchText,
     Expression<DateTime>? createdAt,
-    Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (dirty != null) 'dirty': dirty,
+      if (remoteUpdatedAt != null) 'remote_updated_at': remoteUpdatedAt,
       if (id != null) 'id': id,
       if (documentId != null) 'document_id': documentId,
       if (pageIndex != null) 'page_index': pageIndex,
@@ -1362,14 +1941,21 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
       if (marginSpec != null) 'margin_spec': marginSpec,
       if (pdfAssetId != null) 'pdf_asset_id': pdfAssetId,
       if (pdfPageIndex != null) 'pdf_page_index': pdfPageIndex,
+      if (bgAssetId != null) 'bg_asset_id': bgAssetId,
+      if (pageW != null) 'page_w': pageW,
+      if (pageH != null) 'page_h': pageH,
       if (bookmarkTitle != null) 'bookmark_title': bookmarkTitle,
+      if (searchText != null) 'search_text': searchText,
       if (createdAt != null) 'created_at': createdAt,
-      if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
 
   NotePagesCompanion copyWith({
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<bool>? dirty,
+    Value<DateTime?>? remoteUpdatedAt,
     Value<String>? id,
     Value<String>? documentId,
     Value<int>? pageIndex,
@@ -1378,12 +1964,19 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
     Value<MarginSpec>? marginSpec,
     Value<String?>? pdfAssetId,
     Value<int?>? pdfPageIndex,
+    Value<String?>? bgAssetId,
+    Value<double?>? pageW,
+    Value<double?>? pageH,
     Value<String?>? bookmarkTitle,
+    Value<String?>? searchText,
     Value<DateTime>? createdAt,
-    Value<DateTime>? updatedAt,
     Value<int>? rowid,
   }) {
     return NotePagesCompanion(
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      dirty: dirty ?? this.dirty,
+      remoteUpdatedAt: remoteUpdatedAt ?? this.remoteUpdatedAt,
       id: id ?? this.id,
       documentId: documentId ?? this.documentId,
       pageIndex: pageIndex ?? this.pageIndex,
@@ -1392,9 +1985,12 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
       marginSpec: marginSpec ?? this.marginSpec,
       pdfAssetId: pdfAssetId ?? this.pdfAssetId,
       pdfPageIndex: pdfPageIndex ?? this.pdfPageIndex,
+      bgAssetId: bgAssetId ?? this.bgAssetId,
+      pageW: pageW ?? this.pageW,
+      pageH: pageH ?? this.pageH,
       bookmarkTitle: bookmarkTitle ?? this.bookmarkTitle,
+      searchText: searchText ?? this.searchText,
       createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1402,6 +1998,18 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (remoteUpdatedAt.present) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -1432,14 +2040,23 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
     if (pdfPageIndex.present) {
       map['pdf_page_index'] = Variable<int>(pdfPageIndex.value);
     }
+    if (bgAssetId.present) {
+      map['bg_asset_id'] = Variable<String>(bgAssetId.value);
+    }
+    if (pageW.present) {
+      map['page_w'] = Variable<double>(pageW.value);
+    }
+    if (pageH.present) {
+      map['page_h'] = Variable<double>(pageH.value);
+    }
     if (bookmarkTitle.present) {
       map['bookmark_title'] = Variable<String>(bookmarkTitle.value);
     }
+    if (searchText.present) {
+      map['search_text'] = Variable<String>(searchText.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
-    }
-    if (updatedAt.present) {
-      map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
@@ -1450,6 +2067,10 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
   @override
   String toString() {
     return (StringBuffer('NotePagesCompanion(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('documentId: $documentId, ')
           ..write('pageIndex: $pageIndex, ')
@@ -1458,9 +2079,12 @@ class NotePagesCompanion extends UpdateCompanion<NotePage> {
           ..write('marginSpec: $marginSpec, ')
           ..write('pdfAssetId: $pdfAssetId, ')
           ..write('pdfPageIndex: $pdfPageIndex, ')
+          ..write('bgAssetId: $bgAssetId, ')
+          ..write('pageW: $pageW, ')
+          ..write('pageH: $pageH, ')
           ..write('bookmarkTitle: $bookmarkTitle, ')
+          ..write('searchText: $searchText, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1472,6 +2096,54 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $StrokesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _remoteUpdatedAtMeta = const VerificationMeta(
+    'remoteUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> remoteUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'remote_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -1541,6 +2213,39 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
     type: DriftSqlType.blob,
     requiredDuringInsert: true,
   );
+  @override
+  late final GeneratedColumnWithTypeConverter<StrokeStyle, int> style =
+      GeneratedColumn<int>(
+        'style',
+        aliasedName,
+        false,
+        type: DriftSqlType.int,
+        requiredDuringInsert: false,
+        defaultValue: const Constant(0),
+      ).withConverter<StrokeStyle>($StrokesTable.$converterstyle);
+  static const VerificationMeta _filledMeta = const VerificationMeta('filled');
+  @override
+  late final GeneratedColumn<bool> filled = GeneratedColumn<bool>(
+    'filled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("filled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<StrokeTip, int> tip =
+      GeneratedColumn<int>(
+        'tip',
+        aliasedName,
+        false,
+        type: DriftSqlType.int,
+        requiredDuringInsert: false,
+        defaultValue: const Constant(0),
+      ).withConverter<StrokeTip>($StrokesTable.$convertertip);
   static const VerificationMeta _bboxLMeta = const VerificationMeta('bboxL');
   @override
   late final GeneratedColumn<double> bboxL = GeneratedColumn<double>(
@@ -1600,6 +2305,10 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
   );
   @override
   List<GeneratedColumn> get $columns => [
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     pageId,
     tool,
@@ -1607,6 +2316,9 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
     width,
     opacity,
     points,
+    style,
+    filled,
+    tip,
     bboxL,
     bboxT,
     bboxR,
@@ -1626,6 +2338,33 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    if (data.containsKey('remote_updated_at')) {
+      context.handle(
+        _remoteUpdatedAtMeta,
+        remoteUpdatedAt.isAcceptableOrUnknown(
+          data['remote_updated_at']!,
+          _remoteUpdatedAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -1668,6 +2407,12 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
       );
     } else if (isInserting) {
       context.missing(_pointsMeta);
+    }
+    if (data.containsKey('filled')) {
+      context.handle(
+        _filledMeta,
+        filled.isAcceptableOrUnknown(data['filled']!, _filledMeta),
+      );
     }
     if (data.containsKey('bbox_l')) {
       context.handle(
@@ -1724,6 +2469,22 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
   Stroke map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Stroke(
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+      remoteUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}remote_updated_at'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -1754,6 +2515,22 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
         DriftSqlType.blob,
         data['${effectivePrefix}points'],
       )!,
+      style: $StrokesTable.$converterstyle.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.int,
+          data['${effectivePrefix}style'],
+        )!,
+      ),
+      filled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}filled'],
+      )!,
+      tip: $StrokesTable.$convertertip.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.int,
+          data['${effectivePrefix}tip'],
+        )!,
+      ),
       bboxL: attachedDatabase.typeMapping.read(
         DriftSqlType.double,
         data['${effectivePrefix}bbox_l'],
@@ -1788,9 +2565,17 @@ class $StrokesTable extends Strokes with TableInfo<$StrokesTable, Stroke> {
 
   static JsonTypeConverter2<ToolType, int, int> $convertertool =
       const EnumIndexConverter<ToolType>(ToolType.values);
+  static JsonTypeConverter2<StrokeStyle, int, int> $converterstyle =
+      const EnumIndexConverter<StrokeStyle>(StrokeStyle.values);
+  static JsonTypeConverter2<StrokeTip, int, int> $convertertip =
+      const EnumIndexConverter<StrokeTip>(StrokeTip.values);
 }
 
 class Stroke extends DataClass implements Insertable<Stroke> {
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final bool dirty;
+  final DateTime? remoteUpdatedAt;
   final String id;
   final String pageId;
   final ToolType tool;
@@ -1800,6 +2585,15 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   final double width;
   final double opacity;
   final Uint8List points;
+
+  /// Solid / dashed / dotted line style.
+  final StrokeStyle style;
+
+  /// Shapes only: fill the closed outline with the stroke colour.
+  final bool filled;
+
+  /// Nib shape: round or square (chisel). Mainly for highlighter and tape.
+  final StrokeTip tip;
   final double bboxL;
   final double bboxT;
   final double bboxR;
@@ -1809,6 +2603,10 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   final int seq;
   final DateTime createdAt;
   const Stroke({
+    required this.updatedAt,
+    this.deletedAt,
+    required this.dirty,
+    this.remoteUpdatedAt,
     required this.id,
     required this.pageId,
     required this.tool,
@@ -1816,6 +2614,9 @@ class Stroke extends DataClass implements Insertable<Stroke> {
     required this.width,
     required this.opacity,
     required this.points,
+    required this.style,
+    required this.filled,
+    required this.tip,
     required this.bboxL,
     required this.bboxT,
     required this.bboxR,
@@ -1826,6 +2627,14 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['dirty'] = Variable<bool>(dirty);
+    if (!nullToAbsent || remoteUpdatedAt != null) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt);
+    }
     map['id'] = Variable<String>(id);
     map['page_id'] = Variable<String>(pageId);
     {
@@ -1835,6 +2644,13 @@ class Stroke extends DataClass implements Insertable<Stroke> {
     map['width'] = Variable<double>(width);
     map['opacity'] = Variable<double>(opacity);
     map['points'] = Variable<Uint8List>(points);
+    {
+      map['style'] = Variable<int>($StrokesTable.$converterstyle.toSql(style));
+    }
+    map['filled'] = Variable<bool>(filled);
+    {
+      map['tip'] = Variable<int>($StrokesTable.$convertertip.toSql(tip));
+    }
     map['bbox_l'] = Variable<double>(bboxL);
     map['bbox_t'] = Variable<double>(bboxT);
     map['bbox_r'] = Variable<double>(bboxR);
@@ -1846,6 +2662,14 @@ class Stroke extends DataClass implements Insertable<Stroke> {
 
   StrokesCompanion toCompanion(bool nullToAbsent) {
     return StrokesCompanion(
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      dirty: Value(dirty),
+      remoteUpdatedAt: remoteUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteUpdatedAt),
       id: Value(id),
       pageId: Value(pageId),
       tool: Value(tool),
@@ -1853,6 +2677,9 @@ class Stroke extends DataClass implements Insertable<Stroke> {
       width: Value(width),
       opacity: Value(opacity),
       points: Value(points),
+      style: Value(style),
+      filled: Value(filled),
+      tip: Value(tip),
       bboxL: Value(bboxL),
       bboxT: Value(bboxT),
       bboxR: Value(bboxR),
@@ -1868,6 +2695,10 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Stroke(
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+      remoteUpdatedAt: serializer.fromJson<DateTime?>(json['remoteUpdatedAt']),
       id: serializer.fromJson<String>(json['id']),
       pageId: serializer.fromJson<String>(json['pageId']),
       tool: $StrokesTable.$convertertool.fromJson(
@@ -1877,6 +2708,13 @@ class Stroke extends DataClass implements Insertable<Stroke> {
       width: serializer.fromJson<double>(json['width']),
       opacity: serializer.fromJson<double>(json['opacity']),
       points: serializer.fromJson<Uint8List>(json['points']),
+      style: $StrokesTable.$converterstyle.fromJson(
+        serializer.fromJson<int>(json['style']),
+      ),
+      filled: serializer.fromJson<bool>(json['filled']),
+      tip: $StrokesTable.$convertertip.fromJson(
+        serializer.fromJson<int>(json['tip']),
+      ),
       bboxL: serializer.fromJson<double>(json['bboxL']),
       bboxT: serializer.fromJson<double>(json['bboxT']),
       bboxR: serializer.fromJson<double>(json['bboxR']),
@@ -1889,6 +2727,10 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'dirty': serializer.toJson<bool>(dirty),
+      'remoteUpdatedAt': serializer.toJson<DateTime?>(remoteUpdatedAt),
       'id': serializer.toJson<String>(id),
       'pageId': serializer.toJson<String>(pageId),
       'tool': serializer.toJson<int>($StrokesTable.$convertertool.toJson(tool)),
@@ -1896,6 +2738,11 @@ class Stroke extends DataClass implements Insertable<Stroke> {
       'width': serializer.toJson<double>(width),
       'opacity': serializer.toJson<double>(opacity),
       'points': serializer.toJson<Uint8List>(points),
+      'style': serializer.toJson<int>(
+        $StrokesTable.$converterstyle.toJson(style),
+      ),
+      'filled': serializer.toJson<bool>(filled),
+      'tip': serializer.toJson<int>($StrokesTable.$convertertip.toJson(tip)),
       'bboxL': serializer.toJson<double>(bboxL),
       'bboxT': serializer.toJson<double>(bboxT),
       'bboxR': serializer.toJson<double>(bboxR),
@@ -1906,6 +2753,10 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   }
 
   Stroke copyWith({
+    DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    bool? dirty,
+    Value<DateTime?> remoteUpdatedAt = const Value.absent(),
     String? id,
     String? pageId,
     ToolType? tool,
@@ -1913,6 +2764,9 @@ class Stroke extends DataClass implements Insertable<Stroke> {
     double? width,
     double? opacity,
     Uint8List? points,
+    StrokeStyle? style,
+    bool? filled,
+    StrokeTip? tip,
     double? bboxL,
     double? bboxT,
     double? bboxR,
@@ -1920,6 +2774,12 @@ class Stroke extends DataClass implements Insertable<Stroke> {
     int? seq,
     DateTime? createdAt,
   }) => Stroke(
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    dirty: dirty ?? this.dirty,
+    remoteUpdatedAt: remoteUpdatedAt.present
+        ? remoteUpdatedAt.value
+        : this.remoteUpdatedAt,
     id: id ?? this.id,
     pageId: pageId ?? this.pageId,
     tool: tool ?? this.tool,
@@ -1927,6 +2787,9 @@ class Stroke extends DataClass implements Insertable<Stroke> {
     width: width ?? this.width,
     opacity: opacity ?? this.opacity,
     points: points ?? this.points,
+    style: style ?? this.style,
+    filled: filled ?? this.filled,
+    tip: tip ?? this.tip,
     bboxL: bboxL ?? this.bboxL,
     bboxT: bboxT ?? this.bboxT,
     bboxR: bboxR ?? this.bboxR,
@@ -1936,6 +2799,12 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   );
   Stroke copyWithCompanion(StrokesCompanion data) {
     return Stroke(
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+      remoteUpdatedAt: data.remoteUpdatedAt.present
+          ? data.remoteUpdatedAt.value
+          : this.remoteUpdatedAt,
       id: data.id.present ? data.id.value : this.id,
       pageId: data.pageId.present ? data.pageId.value : this.pageId,
       tool: data.tool.present ? data.tool.value : this.tool,
@@ -1943,6 +2812,9 @@ class Stroke extends DataClass implements Insertable<Stroke> {
       width: data.width.present ? data.width.value : this.width,
       opacity: data.opacity.present ? data.opacity.value : this.opacity,
       points: data.points.present ? data.points.value : this.points,
+      style: data.style.present ? data.style.value : this.style,
+      filled: data.filled.present ? data.filled.value : this.filled,
+      tip: data.tip.present ? data.tip.value : this.tip,
       bboxL: data.bboxL.present ? data.bboxL.value : this.bboxL,
       bboxT: data.bboxT.present ? data.bboxT.value : this.bboxT,
       bboxR: data.bboxR.present ? data.bboxR.value : this.bboxR,
@@ -1955,6 +2827,10 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   @override
   String toString() {
     return (StringBuffer('Stroke(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('pageId: $pageId, ')
           ..write('tool: $tool, ')
@@ -1962,6 +2838,9 @@ class Stroke extends DataClass implements Insertable<Stroke> {
           ..write('width: $width, ')
           ..write('opacity: $opacity, ')
           ..write('points: $points, ')
+          ..write('style: $style, ')
+          ..write('filled: $filled, ')
+          ..write('tip: $tip, ')
           ..write('bboxL: $bboxL, ')
           ..write('bboxT: $bboxT, ')
           ..write('bboxR: $bboxR, ')
@@ -1974,6 +2853,10 @@ class Stroke extends DataClass implements Insertable<Stroke> {
 
   @override
   int get hashCode => Object.hash(
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     pageId,
     tool,
@@ -1981,6 +2864,9 @@ class Stroke extends DataClass implements Insertable<Stroke> {
     width,
     opacity,
     $driftBlobEquality.hash(points),
+    style,
+    filled,
+    tip,
     bboxL,
     bboxT,
     bboxR,
@@ -1992,6 +2878,10 @@ class Stroke extends DataClass implements Insertable<Stroke> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Stroke &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.dirty == this.dirty &&
+          other.remoteUpdatedAt == this.remoteUpdatedAt &&
           other.id == this.id &&
           other.pageId == this.pageId &&
           other.tool == this.tool &&
@@ -1999,6 +2889,9 @@ class Stroke extends DataClass implements Insertable<Stroke> {
           other.width == this.width &&
           other.opacity == this.opacity &&
           $driftBlobEquality.equals(other.points, this.points) &&
+          other.style == this.style &&
+          other.filled == this.filled &&
+          other.tip == this.tip &&
           other.bboxL == this.bboxL &&
           other.bboxT == this.bboxT &&
           other.bboxR == this.bboxR &&
@@ -2008,6 +2901,10 @@ class Stroke extends DataClass implements Insertable<Stroke> {
 }
 
 class StrokesCompanion extends UpdateCompanion<Stroke> {
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<bool> dirty;
+  final Value<DateTime?> remoteUpdatedAt;
   final Value<String> id;
   final Value<String> pageId;
   final Value<ToolType> tool;
@@ -2015,6 +2912,9 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
   final Value<double> width;
   final Value<double> opacity;
   final Value<Uint8List> points;
+  final Value<StrokeStyle> style;
+  final Value<bool> filled;
+  final Value<StrokeTip> tip;
   final Value<double> bboxL;
   final Value<double> bboxT;
   final Value<double> bboxR;
@@ -2023,6 +2923,10 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
   final Value<DateTime> createdAt;
   final Value<int> rowid;
   const StrokesCompanion({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     this.id = const Value.absent(),
     this.pageId = const Value.absent(),
     this.tool = const Value.absent(),
@@ -2030,6 +2934,9 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
     this.width = const Value.absent(),
     this.opacity = const Value.absent(),
     this.points = const Value.absent(),
+    this.style = const Value.absent(),
+    this.filled = const Value.absent(),
+    this.tip = const Value.absent(),
     this.bboxL = const Value.absent(),
     this.bboxT = const Value.absent(),
     this.bboxR = const Value.absent(),
@@ -2039,6 +2946,10 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
     this.rowid = const Value.absent(),
   });
   StrokesCompanion.insert({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     required String id,
     required String pageId,
     required ToolType tool,
@@ -2046,6 +2957,9 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
     required double width,
     this.opacity = const Value.absent(),
     required Uint8List points,
+    this.style = const Value.absent(),
+    this.filled = const Value.absent(),
+    this.tip = const Value.absent(),
     required double bboxL,
     required double bboxT,
     required double bboxR,
@@ -2065,6 +2979,10 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
        bboxB = Value(bboxB),
        seq = Value(seq);
   static Insertable<Stroke> custom({
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<bool>? dirty,
+    Expression<DateTime>? remoteUpdatedAt,
     Expression<String>? id,
     Expression<String>? pageId,
     Expression<int>? tool,
@@ -2072,6 +2990,9 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
     Expression<double>? width,
     Expression<double>? opacity,
     Expression<Uint8List>? points,
+    Expression<int>? style,
+    Expression<bool>? filled,
+    Expression<int>? tip,
     Expression<double>? bboxL,
     Expression<double>? bboxT,
     Expression<double>? bboxR,
@@ -2081,6 +3002,10 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (dirty != null) 'dirty': dirty,
+      if (remoteUpdatedAt != null) 'remote_updated_at': remoteUpdatedAt,
       if (id != null) 'id': id,
       if (pageId != null) 'page_id': pageId,
       if (tool != null) 'tool': tool,
@@ -2088,6 +3013,9 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
       if (width != null) 'width': width,
       if (opacity != null) 'opacity': opacity,
       if (points != null) 'points': points,
+      if (style != null) 'style': style,
+      if (filled != null) 'filled': filled,
+      if (tip != null) 'tip': tip,
       if (bboxL != null) 'bbox_l': bboxL,
       if (bboxT != null) 'bbox_t': bboxT,
       if (bboxR != null) 'bbox_r': bboxR,
@@ -2099,6 +3027,10 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
   }
 
   StrokesCompanion copyWith({
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<bool>? dirty,
+    Value<DateTime?>? remoteUpdatedAt,
     Value<String>? id,
     Value<String>? pageId,
     Value<ToolType>? tool,
@@ -2106,6 +3038,9 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
     Value<double>? width,
     Value<double>? opacity,
     Value<Uint8List>? points,
+    Value<StrokeStyle>? style,
+    Value<bool>? filled,
+    Value<StrokeTip>? tip,
     Value<double>? bboxL,
     Value<double>? bboxT,
     Value<double>? bboxR,
@@ -2115,6 +3050,10 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
     Value<int>? rowid,
   }) {
     return StrokesCompanion(
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      dirty: dirty ?? this.dirty,
+      remoteUpdatedAt: remoteUpdatedAt ?? this.remoteUpdatedAt,
       id: id ?? this.id,
       pageId: pageId ?? this.pageId,
       tool: tool ?? this.tool,
@@ -2122,6 +3061,9 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
       width: width ?? this.width,
       opacity: opacity ?? this.opacity,
       points: points ?? this.points,
+      style: style ?? this.style,
+      filled: filled ?? this.filled,
+      tip: tip ?? this.tip,
       bboxL: bboxL ?? this.bboxL,
       bboxT: bboxT ?? this.bboxT,
       bboxR: bboxR ?? this.bboxR,
@@ -2135,6 +3077,18 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (remoteUpdatedAt.present) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -2157,6 +3111,17 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
     }
     if (points.present) {
       map['points'] = Variable<Uint8List>(points.value);
+    }
+    if (style.present) {
+      map['style'] = Variable<int>(
+        $StrokesTable.$converterstyle.toSql(style.value),
+      );
+    }
+    if (filled.present) {
+      map['filled'] = Variable<bool>(filled.value);
+    }
+    if (tip.present) {
+      map['tip'] = Variable<int>($StrokesTable.$convertertip.toSql(tip.value));
     }
     if (bboxL.present) {
       map['bbox_l'] = Variable<double>(bboxL.value);
@@ -2185,6 +3150,10 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
   @override
   String toString() {
     return (StringBuffer('StrokesCompanion(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('pageId: $pageId, ')
           ..write('tool: $tool, ')
@@ -2192,6 +3161,9 @@ class StrokesCompanion extends UpdateCompanion<Stroke> {
           ..write('width: $width, ')
           ..write('opacity: $opacity, ')
           ..write('points: $points, ')
+          ..write('style: $style, ')
+          ..write('filled: $filled, ')
+          ..write('tip: $tip, ')
           ..write('bboxL: $bboxL, ')
           ..write('bboxT: $bboxT, ')
           ..write('bboxR: $bboxR, ')
@@ -2210,6 +3182,54 @@ class $CanvasElementsTable extends CanvasElements
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $CanvasElementsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _remoteUpdatedAtMeta = const VerificationMeta(
+    'remoteUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> remoteUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'remote_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -2333,20 +3353,12 @@ class $CanvasElementsTable extends CanvasElements
     requiredDuringInsert: false,
     defaultValue: currentDateAndTime,
   );
-  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
-    'updatedAt',
-  );
-  @override
-  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
-    'updated_at',
-    aliasedName,
-    false,
-    type: DriftSqlType.dateTime,
-    requiredDuringInsert: false,
-    defaultValue: currentDateAndTime,
-  );
   @override
   List<GeneratedColumn> get $columns => [
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     pageId,
     type,
@@ -2359,7 +3371,6 @@ class $CanvasElementsTable extends CanvasElements
     rotation,
     z,
     createdAt,
-    updatedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2373,6 +3384,33 @@ class $CanvasElementsTable extends CanvasElements
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    if (data.containsKey('remote_updated_at')) {
+      context.handle(
+        _remoteUpdatedAtMeta,
+        remoteUpdatedAt.isAcceptableOrUnknown(
+          data['remote_updated_at']!,
+          _remoteUpdatedAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -2433,12 +3471,6 @@ class $CanvasElementsTable extends CanvasElements
         createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
       );
     }
-    if (data.containsKey('updated_at')) {
-      context.handle(
-        _updatedAtMeta,
-        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
-      );
-    }
     return context;
   }
 
@@ -2448,6 +3480,22 @@ class $CanvasElementsTable extends CanvasElements
   CanvasElement map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return CanvasElement(
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+      remoteUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}remote_updated_at'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -2498,10 +3546,6 @@ class $CanvasElementsTable extends CanvasElements
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
-      updatedAt: attachedDatabase.typeMapping.read(
-        DriftSqlType.dateTime,
-        data['${effectivePrefix}updated_at'],
-      )!,
     );
   }
 
@@ -2515,6 +3559,10 @@ class $CanvasElementsTable extends CanvasElements
 }
 
 class CanvasElement extends DataClass implements Insertable<CanvasElement> {
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final bool dirty;
+  final DateTime? remoteUpdatedAt;
   final String id;
   final String pageId;
   final ElementType type;
@@ -2529,8 +3577,11 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
   final double rotation;
   final int z;
   final DateTime createdAt;
-  final DateTime updatedAt;
   const CanvasElement({
+    required this.updatedAt,
+    this.deletedAt,
+    required this.dirty,
+    this.remoteUpdatedAt,
     required this.id,
     required this.pageId,
     required this.type,
@@ -2543,11 +3594,18 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
     required this.rotation,
     required this.z,
     required this.createdAt,
-    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['dirty'] = Variable<bool>(dirty);
+    if (!nullToAbsent || remoteUpdatedAt != null) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt);
+    }
     map['id'] = Variable<String>(id);
     map['page_id'] = Variable<String>(pageId);
     {
@@ -2564,12 +3622,19 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
     map['rotation'] = Variable<double>(rotation);
     map['z'] = Variable<int>(z);
     map['created_at'] = Variable<DateTime>(createdAt);
-    map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
 
   CanvasElementsCompanion toCompanion(bool nullToAbsent) {
     return CanvasElementsCompanion(
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      dirty: Value(dirty),
+      remoteUpdatedAt: remoteUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteUpdatedAt),
       id: Value(id),
       pageId: Value(pageId),
       type: Value(type),
@@ -2582,7 +3647,6 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
       rotation: Value(rotation),
       z: Value(z),
       createdAt: Value(createdAt),
-      updatedAt: Value(updatedAt),
     );
   }
 
@@ -2592,6 +3656,10 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return CanvasElement(
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+      remoteUpdatedAt: serializer.fromJson<DateTime?>(json['remoteUpdatedAt']),
       id: serializer.fromJson<String>(json['id']),
       pageId: serializer.fromJson<String>(json['pageId']),
       type: $CanvasElementsTable.$convertertype.fromJson(
@@ -2606,13 +3674,16 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
       rotation: serializer.fromJson<double>(json['rotation']),
       z: serializer.fromJson<int>(json['z']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
-      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
   @override
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'dirty': serializer.toJson<bool>(dirty),
+      'remoteUpdatedAt': serializer.toJson<DateTime?>(remoteUpdatedAt),
       'id': serializer.toJson<String>(id),
       'pageId': serializer.toJson<String>(pageId),
       'type': serializer.toJson<int>(
@@ -2627,11 +3698,14 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
       'rotation': serializer.toJson<double>(rotation),
       'z': serializer.toJson<int>(z),
       'createdAt': serializer.toJson<DateTime>(createdAt),
-      'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
 
   CanvasElement copyWith({
+    DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    bool? dirty,
+    Value<DateTime?> remoteUpdatedAt = const Value.absent(),
     String? id,
     String? pageId,
     ElementType? type,
@@ -2644,8 +3718,13 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
     double? rotation,
     int? z,
     DateTime? createdAt,
-    DateTime? updatedAt,
   }) => CanvasElement(
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    dirty: dirty ?? this.dirty,
+    remoteUpdatedAt: remoteUpdatedAt.present
+        ? remoteUpdatedAt.value
+        : this.remoteUpdatedAt,
     id: id ?? this.id,
     pageId: pageId ?? this.pageId,
     type: type ?? this.type,
@@ -2658,10 +3737,15 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
     rotation: rotation ?? this.rotation,
     z: z ?? this.z,
     createdAt: createdAt ?? this.createdAt,
-    updatedAt: updatedAt ?? this.updatedAt,
   );
   CanvasElement copyWithCompanion(CanvasElementsCompanion data) {
     return CanvasElement(
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+      remoteUpdatedAt: data.remoteUpdatedAt.present
+          ? data.remoteUpdatedAt.value
+          : this.remoteUpdatedAt,
       id: data.id.present ? data.id.value : this.id,
       pageId: data.pageId.present ? data.pageId.value : this.pageId,
       type: data.type.present ? data.type.value : this.type,
@@ -2674,13 +3758,16 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
       rotation: data.rotation.present ? data.rotation.value : this.rotation,
       z: data.z.present ? data.z.value : this.z,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
-      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
   @override
   String toString() {
     return (StringBuffer('CanvasElement(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('pageId: $pageId, ')
           ..write('type: $type, ')
@@ -2692,14 +3779,17 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
           ..write('scale: $scale, ')
           ..write('rotation: $rotation, ')
           ..write('z: $z, ')
-          ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode => Object.hash(
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     pageId,
     type,
@@ -2712,12 +3802,15 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
     rotation,
     z,
     createdAt,
-    updatedAt,
   );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is CanvasElement &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.dirty == this.dirty &&
+          other.remoteUpdatedAt == this.remoteUpdatedAt &&
           other.id == this.id &&
           other.pageId == this.pageId &&
           other.type == this.type &&
@@ -2729,11 +3822,14 @@ class CanvasElement extends DataClass implements Insertable<CanvasElement> {
           other.scale == this.scale &&
           other.rotation == this.rotation &&
           other.z == this.z &&
-          other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.createdAt == this.createdAt);
 }
 
 class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<bool> dirty;
+  final Value<DateTime?> remoteUpdatedAt;
   final Value<String> id;
   final Value<String> pageId;
   final Value<ElementType> type;
@@ -2746,9 +3842,12 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
   final Value<double> rotation;
   final Value<int> z;
   final Value<DateTime> createdAt;
-  final Value<DateTime> updatedAt;
   final Value<int> rowid;
   const CanvasElementsCompanion({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     this.id = const Value.absent(),
     this.pageId = const Value.absent(),
     this.type = const Value.absent(),
@@ -2761,10 +3860,13 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
     this.rotation = const Value.absent(),
     this.z = const Value.absent(),
     this.createdAt = const Value.absent(),
-    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CanvasElementsCompanion.insert({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     required String id,
     required String pageId,
     required ElementType type,
@@ -2777,13 +3879,16 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
     this.rotation = const Value.absent(),
     this.z = const Value.absent(),
     this.createdAt = const Value.absent(),
-    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        pageId = Value(pageId),
        type = Value(type),
        data = Value(data);
   static Insertable<CanvasElement> custom({
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<bool>? dirty,
+    Expression<DateTime>? remoteUpdatedAt,
     Expression<String>? id,
     Expression<String>? pageId,
     Expression<int>? type,
@@ -2796,10 +3901,13 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
     Expression<double>? rotation,
     Expression<int>? z,
     Expression<DateTime>? createdAt,
-    Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (dirty != null) 'dirty': dirty,
+      if (remoteUpdatedAt != null) 'remote_updated_at': remoteUpdatedAt,
       if (id != null) 'id': id,
       if (pageId != null) 'page_id': pageId,
       if (type != null) 'type': type,
@@ -2812,12 +3920,15 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
       if (rotation != null) 'rotation': rotation,
       if (z != null) 'z': z,
       if (createdAt != null) 'created_at': createdAt,
-      if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
 
   CanvasElementsCompanion copyWith({
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<bool>? dirty,
+    Value<DateTime?>? remoteUpdatedAt,
     Value<String>? id,
     Value<String>? pageId,
     Value<ElementType>? type,
@@ -2830,10 +3941,13 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
     Value<double>? rotation,
     Value<int>? z,
     Value<DateTime>? createdAt,
-    Value<DateTime>? updatedAt,
     Value<int>? rowid,
   }) {
     return CanvasElementsCompanion(
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      dirty: dirty ?? this.dirty,
+      remoteUpdatedAt: remoteUpdatedAt ?? this.remoteUpdatedAt,
       id: id ?? this.id,
       pageId: pageId ?? this.pageId,
       type: type ?? this.type,
@@ -2846,7 +3960,6 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
       rotation: rotation ?? this.rotation,
       z: z ?? this.z,
       createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2854,6 +3967,18 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (remoteUpdatedAt.present) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -2892,9 +4017,6 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
-    if (updatedAt.present) {
-      map['updated_at'] = Variable<DateTime>(updatedAt.value);
-    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2904,6 +4026,10 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
   @override
   String toString() {
     return (StringBuffer('CanvasElementsCompanion(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('pageId: $pageId, ')
           ..write('type: $type, ')
@@ -2916,7 +4042,6 @@ class CanvasElementsCompanion extends UpdateCompanion<CanvasElement> {
           ..write('rotation: $rotation, ')
           ..write('z: $z, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2928,6 +4053,54 @@ class $AssetsTable extends Assets with TableInfo<$AssetsTable, Asset> {
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $AssetsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _remoteUpdatedAtMeta = const VerificationMeta(
+    'remoteUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> remoteUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'remote_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -2953,12 +4126,64 @@ class $AssetsTable extends Assets with TableInfo<$AssetsTable, Asset> {
     aliasedName,
     false,
     type: DriftSqlType.string,
-    requiredDuringInsert: true,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
   );
   static const VerificationMeta _mimeMeta = const VerificationMeta('mime');
   @override
   late final GeneratedColumn<String> mime = GeneratedColumn<String>(
     'mime',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _dataMeta = const VerificationMeta('data');
+  @override
+  late final GeneratedColumn<String> data = GeneratedColumn<String>(
+    'data',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _localPathMeta = const VerificationMeta(
+    'localPath',
+  );
+  @override
+  late final GeneratedColumn<String> localPath = GeneratedColumn<String>(
+    'local_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sha256Meta = const VerificationMeta('sha256');
+  @override
+  late final GeneratedColumn<String> sha256 = GeneratedColumn<String>(
+    'sha256',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sizeBytesMeta = const VerificationMeta(
+    'sizeBytes',
+  );
+  @override
+  late final GeneratedColumn<int> sizeBytes = GeneratedColumn<int>(
+    'size_bytes',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _remoteKeyMeta = const VerificationMeta(
+    'remoteKey',
+  );
+  @override
+  late final GeneratedColumn<String> remoteKey = GeneratedColumn<String>(
+    'remote_key',
     aliasedName,
     true,
     type: DriftSqlType.string,
@@ -2977,7 +4202,22 @@ class $AssetsTable extends Assets with TableInfo<$AssetsTable, Asset> {
     defaultValue: currentDateAndTime,
   );
   @override
-  List<GeneratedColumn> get $columns => [id, kind, path, mime, createdAt];
+  List<GeneratedColumn> get $columns => [
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
+    id,
+    kind,
+    path,
+    mime,
+    data,
+    localPath,
+    sha256,
+    sizeBytes,
+    remoteKey,
+    createdAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -2990,6 +4230,33 @@ class $AssetsTable extends Assets with TableInfo<$AssetsTable, Asset> {
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    if (data.containsKey('remote_updated_at')) {
+      context.handle(
+        _remoteUpdatedAtMeta,
+        remoteUpdatedAt.isAcceptableOrUnknown(
+          data['remote_updated_at']!,
+          _remoteUpdatedAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -3008,13 +4275,41 @@ class $AssetsTable extends Assets with TableInfo<$AssetsTable, Asset> {
         _pathMeta,
         path.isAcceptableOrUnknown(data['path']!, _pathMeta),
       );
-    } else if (isInserting) {
-      context.missing(_pathMeta);
     }
     if (data.containsKey('mime')) {
       context.handle(
         _mimeMeta,
         mime.isAcceptableOrUnknown(data['mime']!, _mimeMeta),
+      );
+    }
+    if (data.containsKey('data')) {
+      context.handle(
+        _dataMeta,
+        this.data.isAcceptableOrUnknown(data['data']!, _dataMeta),
+      );
+    }
+    if (data.containsKey('local_path')) {
+      context.handle(
+        _localPathMeta,
+        localPath.isAcceptableOrUnknown(data['local_path']!, _localPathMeta),
+      );
+    }
+    if (data.containsKey('sha256')) {
+      context.handle(
+        _sha256Meta,
+        sha256.isAcceptableOrUnknown(data['sha256']!, _sha256Meta),
+      );
+    }
+    if (data.containsKey('size_bytes')) {
+      context.handle(
+        _sizeBytesMeta,
+        sizeBytes.isAcceptableOrUnknown(data['size_bytes']!, _sizeBytesMeta),
+      );
+    }
+    if (data.containsKey('remote_key')) {
+      context.handle(
+        _remoteKeyMeta,
+        remoteKey.isAcceptableOrUnknown(data['remote_key']!, _remoteKeyMeta),
       );
     }
     if (data.containsKey('created_at')) {
@@ -3032,6 +4327,22 @@ class $AssetsTable extends Assets with TableInfo<$AssetsTable, Asset> {
   Asset map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Asset(
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+      remoteUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}remote_updated_at'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -3048,6 +4359,26 @@ class $AssetsTable extends Assets with TableInfo<$AssetsTable, Asset> {
         DriftSqlType.string,
         data['${effectivePrefix}mime'],
       ),
+      data: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}data'],
+      ),
+      localPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_path'],
+      ),
+      sha256: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sha256'],
+      ),
+      sizeBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}size_bytes'],
+      ),
+      remoteKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}remote_key'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -3062,26 +4393,77 @@ class $AssetsTable extends Assets with TableInfo<$AssetsTable, Asset> {
 }
 
 class Asset extends DataClass implements Insertable<Asset> {
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final bool dirty;
+  final DateTime? remoteUpdatedAt;
   final String id;
   final int kind;
+
+  /// Original filename, for display.
   final String path;
   final String? mime;
+
+  /// Web-only fallback: base64 bytes.
+  final String? data;
+
+  /// Native: absolute path to the file on disk.
+  final String? localPath;
+
+  /// Content hash — dedupes identical imports and keys the remote object.
+  final String? sha256;
+  final int? sizeBytes;
+
+  /// Object key once uploaded to R2 (null = not uploaded yet).
+  final String? remoteKey;
   final DateTime createdAt;
   const Asset({
+    required this.updatedAt,
+    this.deletedAt,
+    required this.dirty,
+    this.remoteUpdatedAt,
     required this.id,
     required this.kind,
     required this.path,
     this.mime,
+    this.data,
+    this.localPath,
+    this.sha256,
+    this.sizeBytes,
+    this.remoteKey,
     required this.createdAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['dirty'] = Variable<bool>(dirty);
+    if (!nullToAbsent || remoteUpdatedAt != null) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt);
+    }
     map['id'] = Variable<String>(id);
     map['kind'] = Variable<int>(kind);
     map['path'] = Variable<String>(path);
     if (!nullToAbsent || mime != null) {
       map['mime'] = Variable<String>(mime);
+    }
+    if (!nullToAbsent || data != null) {
+      map['data'] = Variable<String>(data);
+    }
+    if (!nullToAbsent || localPath != null) {
+      map['local_path'] = Variable<String>(localPath);
+    }
+    if (!nullToAbsent || sha256 != null) {
+      map['sha256'] = Variable<String>(sha256);
+    }
+    if (!nullToAbsent || sizeBytes != null) {
+      map['size_bytes'] = Variable<int>(sizeBytes);
+    }
+    if (!nullToAbsent || remoteKey != null) {
+      map['remote_key'] = Variable<String>(remoteKey);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
@@ -3089,10 +4471,31 @@ class Asset extends DataClass implements Insertable<Asset> {
 
   AssetsCompanion toCompanion(bool nullToAbsent) {
     return AssetsCompanion(
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      dirty: Value(dirty),
+      remoteUpdatedAt: remoteUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteUpdatedAt),
       id: Value(id),
       kind: Value(kind),
       path: Value(path),
       mime: mime == null && nullToAbsent ? const Value.absent() : Value(mime),
+      data: data == null && nullToAbsent ? const Value.absent() : Value(data),
+      localPath: localPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(localPath),
+      sha256: sha256 == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sha256),
+      sizeBytes: sizeBytes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sizeBytes),
+      remoteKey: remoteKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteKey),
       createdAt: Value(createdAt),
     );
   }
@@ -3103,10 +4506,19 @@ class Asset extends DataClass implements Insertable<Asset> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Asset(
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+      remoteUpdatedAt: serializer.fromJson<DateTime?>(json['remoteUpdatedAt']),
       id: serializer.fromJson<String>(json['id']),
       kind: serializer.fromJson<int>(json['kind']),
       path: serializer.fromJson<String>(json['path']),
       mime: serializer.fromJson<String?>(json['mime']),
+      data: serializer.fromJson<String?>(json['data']),
+      localPath: serializer.fromJson<String?>(json['localPath']),
+      sha256: serializer.fromJson<String?>(json['sha256']),
+      sizeBytes: serializer.fromJson<int?>(json['sizeBytes']),
+      remoteKey: serializer.fromJson<String?>(json['remoteKey']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -3114,33 +4526,73 @@ class Asset extends DataClass implements Insertable<Asset> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'dirty': serializer.toJson<bool>(dirty),
+      'remoteUpdatedAt': serializer.toJson<DateTime?>(remoteUpdatedAt),
       'id': serializer.toJson<String>(id),
       'kind': serializer.toJson<int>(kind),
       'path': serializer.toJson<String>(path),
       'mime': serializer.toJson<String?>(mime),
+      'data': serializer.toJson<String?>(data),
+      'localPath': serializer.toJson<String?>(localPath),
+      'sha256': serializer.toJson<String?>(sha256),
+      'sizeBytes': serializer.toJson<int?>(sizeBytes),
+      'remoteKey': serializer.toJson<String?>(remoteKey),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
 
   Asset copyWith({
+    DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    bool? dirty,
+    Value<DateTime?> remoteUpdatedAt = const Value.absent(),
     String? id,
     int? kind,
     String? path,
     Value<String?> mime = const Value.absent(),
+    Value<String?> data = const Value.absent(),
+    Value<String?> localPath = const Value.absent(),
+    Value<String?> sha256 = const Value.absent(),
+    Value<int?> sizeBytes = const Value.absent(),
+    Value<String?> remoteKey = const Value.absent(),
     DateTime? createdAt,
   }) => Asset(
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    dirty: dirty ?? this.dirty,
+    remoteUpdatedAt: remoteUpdatedAt.present
+        ? remoteUpdatedAt.value
+        : this.remoteUpdatedAt,
     id: id ?? this.id,
     kind: kind ?? this.kind,
     path: path ?? this.path,
     mime: mime.present ? mime.value : this.mime,
+    data: data.present ? data.value : this.data,
+    localPath: localPath.present ? localPath.value : this.localPath,
+    sha256: sha256.present ? sha256.value : this.sha256,
+    sizeBytes: sizeBytes.present ? sizeBytes.value : this.sizeBytes,
+    remoteKey: remoteKey.present ? remoteKey.value : this.remoteKey,
     createdAt: createdAt ?? this.createdAt,
   );
   Asset copyWithCompanion(AssetsCompanion data) {
     return Asset(
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+      remoteUpdatedAt: data.remoteUpdatedAt.present
+          ? data.remoteUpdatedAt.value
+          : this.remoteUpdatedAt,
       id: data.id.present ? data.id.value : this.id,
       kind: data.kind.present ? data.kind.value : this.kind,
       path: data.path.present ? data.path.value : this.path,
       mime: data.mime.present ? data.mime.value : this.mime,
+      data: data.data.present ? data.data.value : this.data,
+      localPath: data.localPath.present ? data.localPath.value : this.localPath,
+      sha256: data.sha256.present ? data.sha256.value : this.sha256,
+      sizeBytes: data.sizeBytes.present ? data.sizeBytes.value : this.sizeBytes,
+      remoteKey: data.remoteKey.present ? data.remoteKey.value : this.remoteKey,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -3148,84 +4600,179 @@ class Asset extends DataClass implements Insertable<Asset> {
   @override
   String toString() {
     return (StringBuffer('Asset(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('kind: $kind, ')
           ..write('path: $path, ')
           ..write('mime: $mime, ')
+          ..write('data: $data, ')
+          ..write('localPath: $localPath, ')
+          ..write('sha256: $sha256, ')
+          ..write('sizeBytes: $sizeBytes, ')
+          ..write('remoteKey: $remoteKey, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, kind, path, mime, createdAt);
+  int get hashCode => Object.hash(
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
+    id,
+    kind,
+    path,
+    mime,
+    data,
+    localPath,
+    sha256,
+    sizeBytes,
+    remoteKey,
+    createdAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Asset &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.dirty == this.dirty &&
+          other.remoteUpdatedAt == this.remoteUpdatedAt &&
           other.id == this.id &&
           other.kind == this.kind &&
           other.path == this.path &&
           other.mime == this.mime &&
+          other.data == this.data &&
+          other.localPath == this.localPath &&
+          other.sha256 == this.sha256 &&
+          other.sizeBytes == this.sizeBytes &&
+          other.remoteKey == this.remoteKey &&
           other.createdAt == this.createdAt);
 }
 
 class AssetsCompanion extends UpdateCompanion<Asset> {
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<bool> dirty;
+  final Value<DateTime?> remoteUpdatedAt;
   final Value<String> id;
   final Value<int> kind;
   final Value<String> path;
   final Value<String?> mime;
+  final Value<String?> data;
+  final Value<String?> localPath;
+  final Value<String?> sha256;
+  final Value<int?> sizeBytes;
+  final Value<String?> remoteKey;
   final Value<DateTime> createdAt;
   final Value<int> rowid;
   const AssetsCompanion({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     this.id = const Value.absent(),
     this.kind = const Value.absent(),
     this.path = const Value.absent(),
     this.mime = const Value.absent(),
+    this.data = const Value.absent(),
+    this.localPath = const Value.absent(),
+    this.sha256 = const Value.absent(),
+    this.sizeBytes = const Value.absent(),
+    this.remoteKey = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AssetsCompanion.insert({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     required String id,
     required int kind,
-    required String path,
+    this.path = const Value.absent(),
     this.mime = const Value.absent(),
+    this.data = const Value.absent(),
+    this.localPath = const Value.absent(),
+    this.sha256 = const Value.absent(),
+    this.sizeBytes = const Value.absent(),
+    this.remoteKey = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
-       kind = Value(kind),
-       path = Value(path);
+       kind = Value(kind);
   static Insertable<Asset> custom({
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<bool>? dirty,
+    Expression<DateTime>? remoteUpdatedAt,
     Expression<String>? id,
     Expression<int>? kind,
     Expression<String>? path,
     Expression<String>? mime,
+    Expression<String>? data,
+    Expression<String>? localPath,
+    Expression<String>? sha256,
+    Expression<int>? sizeBytes,
+    Expression<String>? remoteKey,
     Expression<DateTime>? createdAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (dirty != null) 'dirty': dirty,
+      if (remoteUpdatedAt != null) 'remote_updated_at': remoteUpdatedAt,
       if (id != null) 'id': id,
       if (kind != null) 'kind': kind,
       if (path != null) 'path': path,
       if (mime != null) 'mime': mime,
+      if (data != null) 'data': data,
+      if (localPath != null) 'local_path': localPath,
+      if (sha256 != null) 'sha256': sha256,
+      if (sizeBytes != null) 'size_bytes': sizeBytes,
+      if (remoteKey != null) 'remote_key': remoteKey,
       if (createdAt != null) 'created_at': createdAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
 
   AssetsCompanion copyWith({
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<bool>? dirty,
+    Value<DateTime?>? remoteUpdatedAt,
     Value<String>? id,
     Value<int>? kind,
     Value<String>? path,
     Value<String?>? mime,
+    Value<String?>? data,
+    Value<String?>? localPath,
+    Value<String?>? sha256,
+    Value<int?>? sizeBytes,
+    Value<String?>? remoteKey,
     Value<DateTime>? createdAt,
     Value<int>? rowid,
   }) {
     return AssetsCompanion(
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      dirty: dirty ?? this.dirty,
+      remoteUpdatedAt: remoteUpdatedAt ?? this.remoteUpdatedAt,
       id: id ?? this.id,
       kind: kind ?? this.kind,
       path: path ?? this.path,
       mime: mime ?? this.mime,
+      data: data ?? this.data,
+      localPath: localPath ?? this.localPath,
+      sha256: sha256 ?? this.sha256,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      remoteKey: remoteKey ?? this.remoteKey,
       createdAt: createdAt ?? this.createdAt,
       rowid: rowid ?? this.rowid,
     );
@@ -3234,6 +4781,18 @@ class AssetsCompanion extends UpdateCompanion<Asset> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (remoteUpdatedAt.present) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -3245,6 +4804,21 @@ class AssetsCompanion extends UpdateCompanion<Asset> {
     }
     if (mime.present) {
       map['mime'] = Variable<String>(mime.value);
+    }
+    if (data.present) {
+      map['data'] = Variable<String>(data.value);
+    }
+    if (localPath.present) {
+      map['local_path'] = Variable<String>(localPath.value);
+    }
+    if (sha256.present) {
+      map['sha256'] = Variable<String>(sha256.value);
+    }
+    if (sizeBytes.present) {
+      map['size_bytes'] = Variable<int>(sizeBytes.value);
+    }
+    if (remoteKey.present) {
+      map['remote_key'] = Variable<String>(remoteKey.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
@@ -3258,10 +4832,19 @@ class AssetsCompanion extends UpdateCompanion<Asset> {
   @override
   String toString() {
     return (StringBuffer('AssetsCompanion(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('kind: $kind, ')
           ..write('path: $path, ')
           ..write('mime: $mime, ')
+          ..write('data: $data, ')
+          ..write('localPath: $localPath, ')
+          ..write('sha256: $sha256, ')
+          ..write('sizeBytes: $sizeBytes, ')
+          ..write('remoteKey: $remoteKey, ')
           ..write('createdAt: $createdAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -3316,6 +4899,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
 
 typedef $$DocumentsTableCreateCompanionBuilder =
     DocumentsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       required String id,
       required DocumentType type,
       Value<String> title,
@@ -3324,15 +4911,20 @@ typedef $$DocumentsTableCreateCompanionBuilder =
       Value<PageOrientation> orientation,
       Value<PageSizePreset> pageSize,
       Value<bool> starred,
+      Value<String?> ownerUid,
+      Value<String?> coverThumb,
       Value<DateTime?> trashedAt,
       Value<int> sortIndex,
       Value<DateTime> createdAt,
-      Value<DateTime> updatedAt,
       Value<DateTime?> lastOpenedAt,
       Value<int> rowid,
     });
 typedef $$DocumentsTableUpdateCompanionBuilder =
     DocumentsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       Value<String> id,
       Value<DocumentType> type,
       Value<String> title,
@@ -3341,10 +4933,11 @@ typedef $$DocumentsTableUpdateCompanionBuilder =
       Value<PageOrientation> orientation,
       Value<PageSizePreset> pageSize,
       Value<bool> starred,
+      Value<String?> ownerUid,
+      Value<String?> coverThumb,
       Value<DateTime?> trashedAt,
       Value<int> sortIndex,
       Value<DateTime> createdAt,
-      Value<DateTime> updatedAt,
       Value<DateTime?> lastOpenedAt,
       Value<int> rowid,
     });
@@ -3381,6 +4974,26 @@ class $$DocumentsTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -3424,6 +5037,16 @@ class $$DocumentsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<String> get ownerUid => $composableBuilder(
+    column: $table.ownerUid,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get coverThumb => $composableBuilder(
+    column: $table.coverThumb,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<DateTime> get trashedAt => $composableBuilder(
     column: $table.trashedAt,
     builder: (column) => ColumnFilters(column),
@@ -3436,11 +5059,6 @@ class $$DocumentsTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
-    builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
-    column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3484,6 +5102,26 @@ class $$DocumentsTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -3524,6 +5162,16 @@ class $$DocumentsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get ownerUid => $composableBuilder(
+    column: $table.ownerUid,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get coverThumb => $composableBuilder(
+    column: $table.coverThumb,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get trashedAt => $composableBuilder(
     column: $table.trashedAt,
     builder: (column) => ColumnOrderings(column),
@@ -3536,11 +5184,6 @@ class $$DocumentsTableOrderingComposer
 
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
-    builder: (column) => ColumnOrderings(column),
-  );
-
-  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
-    column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -3559,6 +5202,20 @@ class $$DocumentsTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -3588,6 +5245,14 @@ class $$DocumentsTableAnnotationComposer
   GeneratedColumn<bool> get starred =>
       $composableBuilder(column: $table.starred, builder: (column) => column);
 
+  GeneratedColumn<String> get ownerUid =>
+      $composableBuilder(column: $table.ownerUid, builder: (column) => column);
+
+  GeneratedColumn<String> get coverThumb => $composableBuilder(
+    column: $table.coverThumb,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get trashedAt =>
       $composableBuilder(column: $table.trashedAt, builder: (column) => column);
 
@@ -3596,9 +5261,6 @@ class $$DocumentsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
-
-  GeneratedColumn<DateTime> get updatedAt =>
-      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   GeneratedColumn<DateTime> get lastOpenedAt => $composableBuilder(
     column: $table.lastOpenedAt,
@@ -3659,6 +5321,10 @@ class $$DocumentsTableTableManager
               $$DocumentsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<DocumentType> type = const Value.absent(),
                 Value<String> title = const Value.absent(),
@@ -3667,13 +5333,18 @@ class $$DocumentsTableTableManager
                 Value<PageOrientation> orientation = const Value.absent(),
                 Value<PageSizePreset> pageSize = const Value.absent(),
                 Value<bool> starred = const Value.absent(),
+                Value<String?> ownerUid = const Value.absent(),
+                Value<String?> coverThumb = const Value.absent(),
                 Value<DateTime?> trashedAt = const Value.absent(),
                 Value<int> sortIndex = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
-                Value<DateTime> updatedAt = const Value.absent(),
                 Value<DateTime?> lastOpenedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DocumentsCompanion(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 type: type,
                 title: title,
@@ -3682,15 +5353,20 @@ class $$DocumentsTableTableManager
                 orientation: orientation,
                 pageSize: pageSize,
                 starred: starred,
+                ownerUid: ownerUid,
+                coverThumb: coverThumb,
                 trashedAt: trashedAt,
                 sortIndex: sortIndex,
                 createdAt: createdAt,
-                updatedAt: updatedAt,
                 lastOpenedAt: lastOpenedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 required String id,
                 required DocumentType type,
                 Value<String> title = const Value.absent(),
@@ -3699,13 +5375,18 @@ class $$DocumentsTableTableManager
                 Value<PageOrientation> orientation = const Value.absent(),
                 Value<PageSizePreset> pageSize = const Value.absent(),
                 Value<bool> starred = const Value.absent(),
+                Value<String?> ownerUid = const Value.absent(),
+                Value<String?> coverThumb = const Value.absent(),
                 Value<DateTime?> trashedAt = const Value.absent(),
                 Value<int> sortIndex = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
-                Value<DateTime> updatedAt = const Value.absent(),
                 Value<DateTime?> lastOpenedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DocumentsCompanion.insert(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 type: type,
                 title: title,
@@ -3714,10 +5395,11 @@ class $$DocumentsTableTableManager
                 orientation: orientation,
                 pageSize: pageSize,
                 starred: starred,
+                ownerUid: ownerUid,
+                coverThumb: coverThumb,
                 trashedAt: trashedAt,
                 sortIndex: sortIndex,
                 createdAt: createdAt,
-                updatedAt: updatedAt,
                 lastOpenedAt: lastOpenedAt,
                 rowid: rowid,
               ),
@@ -3779,6 +5461,10 @@ typedef $$DocumentsTableProcessedTableManager =
     >;
 typedef $$NotePagesTableCreateCompanionBuilder =
     NotePagesCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       required String id,
       required String documentId,
       required int pageIndex,
@@ -3787,13 +5473,20 @@ typedef $$NotePagesTableCreateCompanionBuilder =
       Value<MarginSpec> marginSpec,
       Value<String?> pdfAssetId,
       Value<int?> pdfPageIndex,
+      Value<String?> bgAssetId,
+      Value<double?> pageW,
+      Value<double?> pageH,
       Value<String?> bookmarkTitle,
+      Value<String?> searchText,
       Value<DateTime> createdAt,
-      Value<DateTime> updatedAt,
       Value<int> rowid,
     });
 typedef $$NotePagesTableUpdateCompanionBuilder =
     NotePagesCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       Value<String> id,
       Value<String> documentId,
       Value<int> pageIndex,
@@ -3802,9 +5495,12 @@ typedef $$NotePagesTableUpdateCompanionBuilder =
       Value<MarginSpec> marginSpec,
       Value<String?> pdfAssetId,
       Value<int?> pdfPageIndex,
+      Value<String?> bgAssetId,
+      Value<double?> pageW,
+      Value<double?> pageH,
       Value<String?> bookmarkTitle,
+      Value<String?> searchText,
       Value<DateTime> createdAt,
-      Value<DateTime> updatedAt,
       Value<int> rowid,
     });
 
@@ -3876,6 +5572,26 @@ class $$NotePagesTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -3914,18 +5630,33 @@ class $$NotePagesTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<String> get bgAssetId => $composableBuilder(
+    column: $table.bgAssetId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get pageW => $composableBuilder(
+    column: $table.pageW,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get pageH => $composableBuilder(
+    column: $table.pageH,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get bookmarkTitle => $composableBuilder(
     column: $table.bookmarkTitle,
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<DateTime> get createdAt => $composableBuilder(
-    column: $table.createdAt,
+  ColumnFilters<String> get searchText => $composableBuilder(
+    column: $table.searchText,
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
-    column: $table.updatedAt,
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4012,6 +5743,26 @@ class $$NotePagesTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -4047,18 +5798,33 @@ class $$NotePagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get bgAssetId => $composableBuilder(
+    column: $table.bgAssetId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get pageW => $composableBuilder(
+    column: $table.pageW,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get pageH => $composableBuilder(
+    column: $table.pageH,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get bookmarkTitle => $composableBuilder(
     column: $table.bookmarkTitle,
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
-    column: $table.createdAt,
+  ColumnOrderings<String> get searchText => $composableBuilder(
+    column: $table.searchText,
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
-    column: $table.updatedAt,
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -4095,6 +5861,20 @@ class $$NotePagesTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -4126,16 +5906,27 @@ class $$NotePagesTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get bgAssetId =>
+      $composableBuilder(column: $table.bgAssetId, builder: (column) => column);
+
+  GeneratedColumn<double> get pageW =>
+      $composableBuilder(column: $table.pageW, builder: (column) => column);
+
+  GeneratedColumn<double> get pageH =>
+      $composableBuilder(column: $table.pageH, builder: (column) => column);
+
   GeneratedColumn<String> get bookmarkTitle => $composableBuilder(
     column: $table.bookmarkTitle,
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get searchText => $composableBuilder(
+    column: $table.searchText,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
-
-  GeneratedColumn<DateTime> get updatedAt =>
-      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   $$DocumentsTableAnnotationComposer get documentId {
     final $$DocumentsTableAnnotationComposer composer = $composerBuilder(
@@ -4243,6 +6034,10 @@ class $$NotePagesTableTableManager
               $$NotePagesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String> documentId = const Value.absent(),
                 Value<int> pageIndex = const Value.absent(),
@@ -4251,11 +6046,18 @@ class $$NotePagesTableTableManager
                 Value<MarginSpec> marginSpec = const Value.absent(),
                 Value<String?> pdfAssetId = const Value.absent(),
                 Value<int?> pdfPageIndex = const Value.absent(),
+                Value<String?> bgAssetId = const Value.absent(),
+                Value<double?> pageW = const Value.absent(),
+                Value<double?> pageH = const Value.absent(),
                 Value<String?> bookmarkTitle = const Value.absent(),
+                Value<String?> searchText = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
-                Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NotePagesCompanion(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 documentId: documentId,
                 pageIndex: pageIndex,
@@ -4264,13 +6066,20 @@ class $$NotePagesTableTableManager
                 marginSpec: marginSpec,
                 pdfAssetId: pdfAssetId,
                 pdfPageIndex: pdfPageIndex,
+                bgAssetId: bgAssetId,
+                pageW: pageW,
+                pageH: pageH,
                 bookmarkTitle: bookmarkTitle,
+                searchText: searchText,
                 createdAt: createdAt,
-                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 required String id,
                 required String documentId,
                 required int pageIndex,
@@ -4279,11 +6088,18 @@ class $$NotePagesTableTableManager
                 Value<MarginSpec> marginSpec = const Value.absent(),
                 Value<String?> pdfAssetId = const Value.absent(),
                 Value<int?> pdfPageIndex = const Value.absent(),
+                Value<String?> bgAssetId = const Value.absent(),
+                Value<double?> pageW = const Value.absent(),
+                Value<double?> pageH = const Value.absent(),
                 Value<String?> bookmarkTitle = const Value.absent(),
+                Value<String?> searchText = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
-                Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NotePagesCompanion.insert(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 documentId: documentId,
                 pageIndex: pageIndex,
@@ -4292,9 +6108,12 @@ class $$NotePagesTableTableManager
                 marginSpec: marginSpec,
                 pdfAssetId: pdfAssetId,
                 pdfPageIndex: pdfPageIndex,
+                bgAssetId: bgAssetId,
+                pageW: pageW,
+                pageH: pageH,
                 bookmarkTitle: bookmarkTitle,
+                searchText: searchText,
                 createdAt: createdAt,
-                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -4421,6 +6240,10 @@ typedef $$NotePagesTableProcessedTableManager =
     >;
 typedef $$StrokesTableCreateCompanionBuilder =
     StrokesCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       required String id,
       required String pageId,
       required ToolType tool,
@@ -4428,6 +6251,9 @@ typedef $$StrokesTableCreateCompanionBuilder =
       required double width,
       Value<double> opacity,
       required Uint8List points,
+      Value<StrokeStyle> style,
+      Value<bool> filled,
+      Value<StrokeTip> tip,
       required double bboxL,
       required double bboxT,
       required double bboxR,
@@ -4438,6 +6264,10 @@ typedef $$StrokesTableCreateCompanionBuilder =
     });
 typedef $$StrokesTableUpdateCompanionBuilder =
     StrokesCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       Value<String> id,
       Value<String> pageId,
       Value<ToolType> tool,
@@ -4445,6 +6275,9 @@ typedef $$StrokesTableUpdateCompanionBuilder =
       Value<double> width,
       Value<double> opacity,
       Value<Uint8List> points,
+      Value<StrokeStyle> style,
+      Value<bool> filled,
+      Value<StrokeTip> tip,
       Value<double> bboxL,
       Value<double> bboxT,
       Value<double> bboxR,
@@ -4485,6 +6318,26 @@ class $$StrokesTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -4515,6 +6368,23 @@ class $$StrokesTableFilterComposer
     column: $table.points,
     builder: (column) => ColumnFilters(column),
   );
+
+  ColumnWithTypeConverterFilters<StrokeStyle, StrokeStyle, int> get style =>
+      $composableBuilder(
+        column: $table.style,
+        builder: (column) => ColumnWithTypeConverterFilters(column),
+      );
+
+  ColumnFilters<bool> get filled => $composableBuilder(
+    column: $table.filled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<StrokeTip, StrokeTip, int> get tip =>
+      $composableBuilder(
+        column: $table.tip,
+        builder: (column) => ColumnWithTypeConverterFilters(column),
+      );
 
   ColumnFilters<double> get bboxL => $composableBuilder(
     column: $table.bboxL,
@@ -4579,6 +6449,26 @@ class $$StrokesTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -4606,6 +6496,21 @@ class $$StrokesTableOrderingComposer
 
   ColumnOrderings<Uint8List> get points => $composableBuilder(
     column: $table.points,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get style => $composableBuilder(
+    column: $table.style,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get filled => $composableBuilder(
+    column: $table.filled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get tip => $composableBuilder(
+    column: $table.tip,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -4672,6 +6577,20 @@ class $$StrokesTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -4689,6 +6608,15 @@ class $$StrokesTableAnnotationComposer
 
   GeneratedColumn<Uint8List> get points =>
       $composableBuilder(column: $table.points, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<StrokeStyle, int> get style =>
+      $composableBuilder(column: $table.style, builder: (column) => column);
+
+  GeneratedColumn<bool> get filled =>
+      $composableBuilder(column: $table.filled, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<StrokeTip, int> get tip =>
+      $composableBuilder(column: $table.tip, builder: (column) => column);
 
   GeneratedColumn<double> get bboxL =>
       $composableBuilder(column: $table.bboxL, builder: (column) => column);
@@ -4760,6 +6688,10 @@ class $$StrokesTableTableManager
               $$StrokesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String> pageId = const Value.absent(),
                 Value<ToolType> tool = const Value.absent(),
@@ -4767,6 +6699,9 @@ class $$StrokesTableTableManager
                 Value<double> width = const Value.absent(),
                 Value<double> opacity = const Value.absent(),
                 Value<Uint8List> points = const Value.absent(),
+                Value<StrokeStyle> style = const Value.absent(),
+                Value<bool> filled = const Value.absent(),
+                Value<StrokeTip> tip = const Value.absent(),
                 Value<double> bboxL = const Value.absent(),
                 Value<double> bboxT = const Value.absent(),
                 Value<double> bboxR = const Value.absent(),
@@ -4775,6 +6710,10 @@ class $$StrokesTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => StrokesCompanion(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 pageId: pageId,
                 tool: tool,
@@ -4782,6 +6721,9 @@ class $$StrokesTableTableManager
                 width: width,
                 opacity: opacity,
                 points: points,
+                style: style,
+                filled: filled,
+                tip: tip,
                 bboxL: bboxL,
                 bboxT: bboxT,
                 bboxR: bboxR,
@@ -4792,6 +6734,10 @@ class $$StrokesTableTableManager
               ),
           createCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 required String id,
                 required String pageId,
                 required ToolType tool,
@@ -4799,6 +6745,9 @@ class $$StrokesTableTableManager
                 required double width,
                 Value<double> opacity = const Value.absent(),
                 required Uint8List points,
+                Value<StrokeStyle> style = const Value.absent(),
+                Value<bool> filled = const Value.absent(),
+                Value<StrokeTip> tip = const Value.absent(),
                 required double bboxL,
                 required double bboxT,
                 required double bboxR,
@@ -4807,6 +6756,10 @@ class $$StrokesTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => StrokesCompanion.insert(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 pageId: pageId,
                 tool: tool,
@@ -4814,6 +6767,9 @@ class $$StrokesTableTableManager
                 width: width,
                 opacity: opacity,
                 points: points,
+                style: style,
+                filled: filled,
+                tip: tip,
                 bboxL: bboxL,
                 bboxT: bboxT,
                 bboxR: bboxR,
@@ -4891,6 +6847,10 @@ typedef $$StrokesTableProcessedTableManager =
     >;
 typedef $$CanvasElementsTableCreateCompanionBuilder =
     CanvasElementsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       required String id,
       required String pageId,
       required ElementType type,
@@ -4903,11 +6863,14 @@ typedef $$CanvasElementsTableCreateCompanionBuilder =
       Value<double> rotation,
       Value<int> z,
       Value<DateTime> createdAt,
-      Value<DateTime> updatedAt,
       Value<int> rowid,
     });
 typedef $$CanvasElementsTableUpdateCompanionBuilder =
     CanvasElementsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       Value<String> id,
       Value<String> pageId,
       Value<ElementType> type,
@@ -4920,7 +6883,6 @@ typedef $$CanvasElementsTableUpdateCompanionBuilder =
       Value<double> rotation,
       Value<int> z,
       Value<DateTime> createdAt,
-      Value<DateTime> updatedAt,
       Value<int> rowid,
     });
 
@@ -4959,6 +6921,26 @@ class $$CanvasElementsTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -5015,11 +6997,6 @@ class $$CanvasElementsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
-    column: $table.updatedAt,
-    builder: (column) => ColumnFilters(column),
-  );
-
   $$NotePagesTableFilterComposer get pageId {
     final $$NotePagesTableFilterComposer composer = $composerBuilder(
       composer: this,
@@ -5053,6 +7030,26 @@ class $$CanvasElementsTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -5108,11 +7105,6 @@ class $$CanvasElementsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
-    column: $table.updatedAt,
-    builder: (column) => ColumnOrderings(column),
-  );
-
   $$NotePagesTableOrderingComposer get pageId {
     final $$NotePagesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -5146,6 +7138,20 @@ class $$CanvasElementsTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -5178,9 +7184,6 @@ class $$CanvasElementsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
-
-  GeneratedColumn<DateTime> get updatedAt =>
-      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   $$NotePagesTableAnnotationComposer get pageId {
     final $$NotePagesTableAnnotationComposer composer = $composerBuilder(
@@ -5236,6 +7239,10 @@ class $$CanvasElementsTableTableManager
               $$CanvasElementsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String> pageId = const Value.absent(),
                 Value<ElementType> type = const Value.absent(),
@@ -5248,9 +7255,12 @@ class $$CanvasElementsTableTableManager
                 Value<double> rotation = const Value.absent(),
                 Value<int> z = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
-                Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CanvasElementsCompanion(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 pageId: pageId,
                 type: type,
@@ -5263,11 +7273,14 @@ class $$CanvasElementsTableTableManager
                 rotation: rotation,
                 z: z,
                 createdAt: createdAt,
-                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 required String id,
                 required String pageId,
                 required ElementType type,
@@ -5280,9 +7293,12 @@ class $$CanvasElementsTableTableManager
                 Value<double> rotation = const Value.absent(),
                 Value<int> z = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
-                Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CanvasElementsCompanion.insert(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 pageId: pageId,
                 type: type,
@@ -5295,7 +7311,6 @@ class $$CanvasElementsTableTableManager
                 rotation: rotation,
                 z: z,
                 createdAt: createdAt,
-                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5368,19 +7383,37 @@ typedef $$CanvasElementsTableProcessedTableManager =
     >;
 typedef $$AssetsTableCreateCompanionBuilder =
     AssetsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       required String id,
       required int kind,
-      required String path,
+      Value<String> path,
       Value<String?> mime,
+      Value<String?> data,
+      Value<String?> localPath,
+      Value<String?> sha256,
+      Value<int?> sizeBytes,
+      Value<String?> remoteKey,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
 typedef $$AssetsTableUpdateCompanionBuilder =
     AssetsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       Value<String> id,
       Value<int> kind,
       Value<String> path,
       Value<String?> mime,
+      Value<String?> data,
+      Value<String?> localPath,
+      Value<String?> sha256,
+      Value<int?> sizeBytes,
+      Value<String?> remoteKey,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -5394,6 +7427,26 @@ class $$AssetsTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -5414,6 +7467,31 @@ class $$AssetsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<String> get data => $composableBuilder(
+    column: $table.data,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sha256 => $composableBuilder(
+    column: $table.sha256,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sizeBytes => $composableBuilder(
+    column: $table.sizeBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get remoteKey => $composableBuilder(
+    column: $table.remoteKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnFilters(column),
@@ -5429,6 +7507,26 @@ class $$AssetsTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -5449,6 +7547,31 @@ class $$AssetsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get data => $composableBuilder(
+    column: $table.data,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sha256 => $composableBuilder(
+    column: $table.sha256,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sizeBytes => $composableBuilder(
+    column: $table.sizeBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get remoteKey => $composableBuilder(
+    column: $table.remoteKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -5464,6 +7587,20 @@ class $$AssetsTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -5475,6 +7612,21 @@ class $$AssetsTableAnnotationComposer
 
   GeneratedColumn<String> get mime =>
       $composableBuilder(column: $table.mime, builder: (column) => column);
+
+  GeneratedColumn<String> get data =>
+      $composableBuilder(column: $table.data, builder: (column) => column);
+
+  GeneratedColumn<String> get localPath =>
+      $composableBuilder(column: $table.localPath, builder: (column) => column);
+
+  GeneratedColumn<String> get sha256 =>
+      $composableBuilder(column: $table.sha256, builder: (column) => column);
+
+  GeneratedColumn<int> get sizeBytes =>
+      $composableBuilder(column: $table.sizeBytes, builder: (column) => column);
+
+  GeneratedColumn<String> get remoteKey =>
+      $composableBuilder(column: $table.remoteKey, builder: (column) => column);
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -5508,33 +7660,69 @@ class $$AssetsTableTableManager
               $$AssetsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<int> kind = const Value.absent(),
                 Value<String> path = const Value.absent(),
                 Value<String?> mime = const Value.absent(),
+                Value<String?> data = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
+                Value<String?> sha256 = const Value.absent(),
+                Value<int?> sizeBytes = const Value.absent(),
+                Value<String?> remoteKey = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AssetsCompanion(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 kind: kind,
                 path: path,
                 mime: mime,
+                data: data,
+                localPath: localPath,
+                sha256: sha256,
+                sizeBytes: sizeBytes,
+                remoteKey: remoteKey,
                 createdAt: createdAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 required String id,
                 required int kind,
-                required String path,
+                Value<String> path = const Value.absent(),
                 Value<String?> mime = const Value.absent(),
+                Value<String?> data = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
+                Value<String?> sha256 = const Value.absent(),
+                Value<int?> sizeBytes = const Value.absent(),
+                Value<String?> remoteKey = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AssetsCompanion.insert(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 kind: kind,
                 path: path,
                 mime: mime,
+                data: data,
+                localPath: localPath,
+                sha256: sha256,
+                sizeBytes: sizeBytes,
+                remoteKey: remoteKey,
                 createdAt: createdAt,
                 rowid: rowid,
               ),

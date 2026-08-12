@@ -11,7 +11,7 @@ Cross-platform (Android/iOS/web) note-taking app built with **Flutter**, replica
 ## Commands
 - Run: `flutter run -d <device>` (Android device/emulator recommended for stylus).
 - Analyze: `flutter analyze`
-- Tests: `flutter test test/core_logic_test.dart test/widget_test.dart`
+- Tests: `flutter test test/core_logic_test.dart test/widget_test.dart test/editor_top_bar_test.dart`
   - Note: DB-backed widget tests are NOT run under `flutter test` — `sqlite3_flutter_libs` (native) isn't available there and unsettled spinners hang `pumpAndSettle`. Keep tests either pure-Dart or DB-injected.
 - Web build works, but running on web needs `sqlite3.wasm` + `drift_worker.js` in `web/` (see drift web docs).
 
@@ -33,6 +33,20 @@ lib/
       widgets/ toolbar, page settings + margins sheet, thumbnails drawer
     settings/  theme mode
 ```
+
+## Design system
+All colour, type and radius decisions live in `lib/app/design.dart` — **never hard-code a colour in a widget.**
+- `AppTokens` is a `ThemeExtension` with semantic slots (`canvas`, `surface`, `surfaceAlt`, `fill`, `line`, `lineStrong`, `text`/`Secondary`/`Muted`/`Faint`, `accent`, `accentText`, `accentSoft`). Read it as `context.tokens`.
+- `accent` is the fill accent; `accentText` is the same hue lifted for legibility on dark. Use `accentText` for text/icons, `accent` for fills.
+- Type: **Figtree** for UI (set on the text theme), **Space Mono** for anything numeric or caption-like — page counts, file sizes, dates, section headers. Use `AppTokens.mono(...)` and `AppTokens.sectionLabel(...)`. Both come from `google_fonts` (fetched at runtime, same as the previous Inter).
+- Radii come from `Radii` (`card` 16, `control` 12, `inner` 9, `sheet` 26).
+- Recurring shape: a **recessed track** (`fill`) holding a **raised active pill** (`surface` + soft shadow) — used by the view toggle, the sidebar tabs, and the editor tool group. Reuse it rather than inventing a new selected state.
+- `AppTheme` writes the `ColorScheme` out explicitly. Do **not** switch it back to `ColorScheme.fromSeed`: seeding harmonises every slot towards the accent hue and turns these near-neutral greys indigo.
+
+### Responsive layout
+- Library: `kSidebarBreakpoint` (900) — above it a persistent `LibrarySidebar`, below it filter chips + FAB.
+- Editor: `EditorBarLayout.forWidth` — `phone` (<760, tools move to the bottom `EditorToolDock`), `stacked` (<1240, title row + tool row), `single` (≥1240, one row with a centred tool group).
+- `EditorTopBar.preferredSize` must stay **exactly** the sum of its painted row heights, or the toolbar overflows. Row separators are therefore borders *inside* rows, never `Divider` widgets. `test/editor_top_bar_test.dart` locks this down.
 
 ## Key conventions / gotchas
 - Drift row classes are renamed to avoid Flutter clashes: table `NotePages` -> row `NotePage` (vs Flutter's `Page`); table `CanvasElements` -> row `CanvasElement` (vs Flutter's `Element`).

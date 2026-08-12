@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      // Web storage (IndexedDB, where the local database lives) is scoped to
+      // the origin *including the port*. Without a fixed port every run gets a
+      // new empty database, which looks exactly like "my notebooks vanished".
+      "name": "web",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": [
+        "run",
+        "-d",
+        "web-server",
+        "--web-port=5123",
+        "--web-hostname=127.0.0.1",
+        "--dart-define=NOTABLY_FILE_ENDPOINT=https://notably-files.notably.workers.dev"
+      ],
+      "port": 5123
+    }
+  ]
+}

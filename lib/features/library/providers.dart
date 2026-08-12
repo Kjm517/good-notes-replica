@@ -1,16 +1,68 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../auth/providers.dart';
 import '../../core/db/database.dart';
+import 'data/asset_repository.dart';
+import 'data/import_service.dart';
 import 'data/library_repository.dart';
 
+/// Scoped to the signed-in account, so the library rebuilds (and re-filters)
+/// the moment someone signs in or out.
 final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {
-  return LibraryRepository(ref.watch(databaseProvider), ref.watch(uuidProvider));
+  final user = ref.watch(authStateProvider).asData?.value;
+  return LibraryRepository(
+    ref.watch(databaseProvider),
+    ref.watch(uuidProvider),
+    ownerUid: user?.uid,
+  );
+});
+
+final assetRepositoryProvider = Provider<AssetRepository>((ref) {
+  return AssetRepository(ref.watch(databaseProvider));
+});
+
+final importServiceProvider = Provider<ImportService>((ref) {
+  final user = ref.watch(authStateProvider).asData?.value;
+  return ImportService(
+    ref.watch(databaseProvider),
+    ref.watch(uuidProvider),
+    ref.watch(assetRepositoryProvider),
+    ownerUid: user?.uid,
+  );
 });
 
 /// Current sort order for library grids.
 final librarySortProvider =
     StateProvider<LibrarySort>((ref) => LibrarySort.modifiedDesc);
+
+/// Which shelf the library grid is showing.
+///
+/// Trash is deliberately absent: it needs restore and empty actions that the
+/// normal grid doesn't offer, so it stays its own screen at `/trash`.
+enum LibrarySection { all, recent, starred }
+
+extension LibrarySectionInfo on LibrarySection {
+  String get label => switch (this) {
+        LibrarySection.all => 'All documents',
+        LibrarySection.recent => 'Recent',
+        LibrarySection.starred => 'Starred',
+      };
+
+  /// Shorter form for the mobile filter chips, where space is tight.
+  String get shortLabel => this == LibrarySection.all ? 'All' : label;
+}
+
+final librarySectionProvider =
+    StateProvider<LibrarySection>((ref) => LibrarySection.all);
+
+/// Total bytes held by imported files, for the sidebar storage readout.
+///
+/// Only assets carry real weight — ink is a few KB per page — so summing the
+/// asset sizes is an honest measure of what the library costs on disk.
+final libraryStorageProvider = StreamProvider<int>((ref) {
+  return ref.watch(assetRepositoryProvider).watchTotalBytes();
+});
 
 /// Grid vs list layout for the library.
 final libraryGridModeProvider = StateProvider<bool>((ref) => true);
@@ -48,4 +100,10 @@ final librarySearchResultsProvider = StreamProvider<List<Document>>((ref) {
 final documentProvider =
     FutureProvider.family<Document?, String>((ref, id) async {
   return ref.watch(libraryRepositoryProvider).findById(id);
+});
+
+/// Live single-document stream (updates on rename etc.).
+final documentStreamProvider =
+    StreamProvider.family<Document?, String>((ref, id) {
+  return ref.watch(libraryRepositoryProvider).watchById(id);
 });

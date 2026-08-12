@@ -24,10 +24,22 @@ class InkStroke {
     required this.points,
     this.opacity = 1.0,
     this.seq = 0,
+    this.style = StrokeStyle.solid,
+    this.filled = false,
+    this.tip = StrokeTip.round,
   });
 
   final String id;
   final ToolType tool;
+
+  /// Solid / dashed / dotted.
+  final StrokeStyle style;
+
+  /// Shapes only: fill the closed outline.
+  final bool filled;
+
+  /// Nib shape (round or square/chisel) for broad tools.
+  final StrokeTip tip;
 
   /// ARGB colour value.
   final int color;
@@ -80,6 +92,9 @@ class InkStroke {
     double? width,
     double? opacity,
     int? seq,
+    StrokeStyle? style,
+    bool? filled,
+    StrokeTip? tip,
   }) {
     return InkStroke(
       id: id ?? this.id,
@@ -89,6 +104,9 @@ class InkStroke {
       opacity: opacity ?? this.opacity,
       seq: seq ?? this.seq,
       points: points ?? this.points,
+      style: style ?? this.style,
+      filled: filled ?? this.filled,
+      tip: tip ?? this.tip,
     );
   }
 }

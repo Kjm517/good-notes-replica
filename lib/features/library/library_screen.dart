@@ -1,162 +1,593 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
+import '../../app/design.dart';
 import '../../core/db/database.dart';
 import '../../core/models/enums.dart';
+import '../sync/sync_indicator.dart';
+import 'data/import_service.dart';
 import 'data/library_repository.dart';
 import 'providers.dart';
+import 'widgets/convert_to_pdf_dialog.dart';
+import 'widgets/create_sheet.dart';
 import 'widgets/document_card.dart';
+import 'widgets/library_sidebar.dart';
 import 'widgets/new_notebook_sheet.dart';
 
 /// The library shelf. [parentId] null = root; otherwise a folder's contents.
+///
+/// Two layouts share one body: above [kSidebarBreakpoint] a persistent sidebar
+/// plus a toolbar header, below it a phone layout with a large title, filter
+/// chips and a FAB. Both render the same grid, so document presentation only
+/// exists once.
 class LibraryScreen extends ConsumerWidget {
   const LibraryScreen({super.key, required this.parentId});
   final String? parentId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final childrenAsync = ref.watch(folderChildrenProvider(parentId));
-    final gridMode = ref.watch(libraryGridModeProvider);
-    final isRoot = parentId == null;
+    final wide = MediaQuery.of(context).size.width >= kSidebarBreakpoint;
+    // Sections are a root-level idea; inside a folder we always show its
+    // children, so the chips/sidebar selection is ignored there.
+    final inFolder = parentId != null;
 
     return Scaffold(
-      appBar: AppBar(
-        leading: isRoot
-            ? null
-            : IconButton(
+      backgroundColor: context.tokens.canvas,
+      body: wide
+          ? Row(
+              children: [
+                if (!inFolder) const LibrarySidebar(),
+                Expanded(child: _Pane(parentId: parentId, wide: true)),
+              ],
+            )
+          : _Pane(parentId: parentId, wide: false),
+      floatingActionButton: wide
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => runCreateFlow(context, ref, parentId: parentId),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('New'),
+            ),
+    );
+  }
+}
+
+/// Header + grid, shared by both layouts.
+class _Pane extends ConsumerWidget {
+  const _Pane({required this.parentId, required this.wide});
+
+  final String? parentId;
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final inFolder = parentId != null;
+    final section =
+        inFolder ? LibrarySection.all : ref.watch(librarySectionProvider);
+    final docsAsync = inFolder
+        ? ref.watch(folderChildrenProvider(parentId))
+        : switch (section) {
+            LibrarySection.all => ref.watch(folderChildrenProvider(null)),
+            LibrarySection.recent => ref.watch(recentsProvider),
+            LibrarySection.starred => ref.watch(starredProvider),
+          };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (wide)
+          _DesktopHeader(parentId: parentId)
+        else
+          _MobileHeader(parentId: parentId),
+        Expanded(
+          child: docsAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Center(child: Text('Error: $e')),
+            data: (docs) {
+              if (docs.isEmpty) {
+                return _EmptyState(section: section, inFolder: inFolder);
+              }
+              return _Body(
+                docs: docs,
+                parentId: parentId,
+                section: section,
+                wide: wide,
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------- headers --
+
+/// Desktop toolbar: search field, view toggle, sort, and the New button.
+class _DesktopHeader extends ConsumerWidget {
+  const _DesktopHeader({required this.parentId});
+  final String? parentId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
+    final gridMode = ref.watch(libraryGridModeProvider);
+
+    return Container(
+      height: 72,
+      decoration: BoxDecoration(
+        color: t.surfaceAlt,
+        border: Border(bottom: BorderSide(color: t.line)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            if (parentId != null) ...[
+              IconButton(
                 icon: const Icon(Icons.arrow_back_rounded),
+                tooltip: 'Back',
                 onPressed: () => context.pop(),
               ),
-        title: _Title(parentId: parentId),
-        actions: [
-          IconButton(
-            tooltip: 'Search',
-            icon: const Icon(Icons.search_rounded),
-            onPressed: () => showSearch(
-              context: context,
-              delegate: _LibrarySearchDelegate(ref),
+              const SizedBox(width: 4),
+            ],
+            Expanded(child: _SearchField(ref: ref)),
+            const SizedBox(width: 16),
+            _Segmented(
+              options: const [
+                (Icons.grid_view_rounded, 'Grid'),
+                (Icons.view_list_rounded, 'List'),
+              ],
+              selected: gridMode ? 0 : 1,
+              onSelect: (i) =>
+                  ref.read(libraryGridModeProvider.notifier).state = i == 0,
             ),
-          ),
-          IconButton(
-            tooltip: gridMode ? 'List view' : 'Grid view',
-            icon: Icon(gridMode
-                ? Icons.view_list_rounded
-                : Icons.grid_view_rounded),
-            onPressed: () => ref
-                .read(libraryGridModeProvider.notifier)
-                .update((v) => !v),
-          ),
-          _SortButton(ref: ref),
-          if (isRoot)
-            IconButton(
-              tooltip: 'Trash',
-              icon: const Icon(Icons.delete_outline_rounded),
-              onPressed: () => context.push('/trash'),
-            ),
-          if (isRoot)
+            const SizedBox(width: 10),
+            _SortButton(ref: ref),
+            const SizedBox(width: 10),
+            const SyncIndicator(),
             IconButton(
               tooltip: 'Settings',
               icon: const Icon(Icons.settings_outlined),
               onPressed: () => context.push('/settings'),
             ),
+            const SizedBox(width: 10),
+            FilledButton.icon(
+              onPressed: () => runCreateFlow(context, ref, parentId: parentId),
+              icon: const Icon(Icons.add_rounded, size: 19),
+              label: const Text('New'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                minimumSize: const Size(0, 40),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Phone header: big title, icon actions, and the section chips.
+class _MobileHeader extends ConsumerWidget {
+  const _MobileHeader({required this.parentId});
+  final String? parentId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
+    final inFolder = parentId != null;
+    final section = ref.watch(librarySectionProvider);
+    final title = inFolder
+        ? (ref.watch(documentProvider(parentId!)).asData?.value?.title ??
+            'Folder')
+        : 'Library';
+
+    return Container(
+      color: t.canvas,
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 6, 8, 12),
+              child: Row(
+                children: [
+                  if (inFolder)
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_rounded),
+                      onPressed: () => context.pop(),
+                    ),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 27,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.6,
+                        color: t.text,
+                      ),
+                    ),
+                  ),
+                  const SyncIndicator(),
+                  IconButton(
+                    tooltip: 'Search',
+                    icon: const Icon(Icons.search_rounded),
+                    onPressed: () => showSearch(
+                      context: context,
+                      delegate: _LibrarySearchDelegate(ref),
+                    ),
+                  ),
+                  _SortButton(ref: ref),
+                  IconButton(
+                    tooltip: 'Settings',
+                    icon: const Icon(Icons.settings_outlined),
+                    onPressed: () => context.push('/settings'),
+                  ),
+                ],
+              ),
+            ),
+            if (!inFolder)
+              SizedBox(
+                height: 42,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  children: [
+                    for (final s in LibrarySection.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: _Chip(
+                          label: s.shortLabel,
+                          selected: section == s,
+                          onTap: () => ref
+                              .read(librarySectionProvider.notifier)
+                              .state = s,
+                        ),
+                      ),
+                    // Not a filter — Trash has its own screen, with the
+                    // restore and empty actions the grid doesn't offer.
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _Chip(
+                        label: 'Trash',
+                        selected: false,
+                        onTap: () => context.push('/trash'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  const _Chip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Material(
+      color: selected ? t.accent : t.surface,
+      borderRadius: BorderRadius.circular(11),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(11),
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: selected ? t.accent : t.line),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: selected ? Colors.white : t.textMuted,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchField extends StatelessWidget {
+  const _SearchField({required this.ref});
+  final WidgetRef ref;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return InkWell(
+      borderRadius: BorderRadius.circular(Radii.control),
+      onTap: () => showSearch(
+        context: context,
+        delegate: _LibrarySearchDelegate(ref),
+      ),
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: t.fill,
+          borderRadius: BorderRadius.circular(Radii.control),
+          border: Border.all(color: t.line),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.search_rounded, size: 19, color: t.textMuted),
+            const SizedBox(width: 10),
+            Text('Search documents…',
+                style: TextStyle(fontSize: 14, color: t.textMuted)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// iOS-style segmented control: a recessed track with a raised active pill.
+class _Segmented extends StatelessWidget {
+  const _Segmented({
+    required this.options,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final List<(IconData, String)> options;
+  final int selected;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: t.fill,
+        borderRadius: BorderRadius.circular(Radii.control),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < options.length; i++)
+            Tooltip(
+              message: options[i].$2,
+              child: GestureDetector(
+                onTap: () => onSelect(i),
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: i == selected ? t.surface : Colors.transparent,
+                    borderRadius: BorderRadius.circular(Radii.inner),
+                    boxShadow: i == selected
+                        ? [
+                            BoxShadow(
+                              color: t.shadow.withValues(alpha: 0.10),
+                              blurRadius: 3,
+                              offset: const Offset(0, 1),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Icon(
+                    options[i].$1,
+                    size: 19,
+                    color: i == selected ? t.text : t.textMuted,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
-      floatingActionButton: _NewButton(parentId: parentId),
-      body: childrenAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (docs) {
-          if (docs.isEmpty) return _EmptyState(parentId: parentId);
-          return gridMode
-              ? _Grid(docs: docs, parentId: parentId)
-              : _List(docs: docs, parentId: parentId);
-        },
-      ),
     );
   }
 }
 
-class _Title extends ConsumerWidget {
-  const _Title({required this.parentId});
-  final String? parentId;
+// ------------------------------------------------------------------- body --
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (parentId == null) return const Text('Library');
-    final docAsync = ref.watch(documentProvider(parentId!));
-    return Text(docAsync.asData?.value?.title ?? 'Folder');
-  }
-}
+class _Body extends StatelessWidget {
+  const _Body({
+    required this.docs,
+    required this.parentId,
+    required this.section,
+    required this.wide,
+  });
 
-class _Grid extends StatelessWidget {
-  const _Grid({required this.docs, required this.parentId});
   final List<Document> docs;
   final String? parentId;
+  final LibrarySection section;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 170,
-        childAspectRatio: 0.72,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-      ),
-      itemCount: docs.length,
-      itemBuilder: (context, i) => _CardItem(doc: docs[i], parentId: parentId),
-    );
-  }
-}
+    final t = context.tokens;
+    final gridMode = ProviderScope.containerOf(context)
+        .read(libraryGridModeProvider);
+    final pad = wide ? 28.0 : 20.0;
 
-class _List extends StatelessWidget {
-  const _List({required this.docs, required this.parentId});
-  final List<Document> docs;
-  final String? parentId;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 96),
-      itemCount: docs.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (context, i) {
-        final d = docs[i];
-        return ListTile(
-          leading: Icon(switch (d.type) {
-            DocumentType.folder => Icons.folder_rounded,
-            DocumentType.notebook => Icons.menu_book_rounded,
-            DocumentType.pdf => Icons.picture_as_pdf_rounded,
-          }),
-          title: Text(d.title),
-          trailing: IconButton(
-            icon: Icon(d.starred
-                ? Icons.star_rounded
-                : Icons.star_border_rounded),
-            color: d.starred ? Colors.amber : null,
-            onPressed: () => _toggleStar(context, d),
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(pad, wide ? 24 : 10, pad, 12),
+          sliver: SliverToBoxAdapter(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(children: [
+                      TextSpan(
+                        text: parentId == null ? section.label : 'Contents',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: t.text,
+                        ),
+                      ),
+                      TextSpan(
+                        text: '  · ${docs.length}',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: t.textFaint,
+                        ),
+                      ),
+                    ]),
+                  ),
+                ),
+                if (wide)
+                  Text(_sortCaption(context),
+                      style: AppTokens.mono(size: 12, color: t.textFaint)),
+              ],
+            ),
           ),
-          onTap: () => _open(context, d),
-          onLongPress: () => showDocumentActions(context, d),
-        );
-      },
+        ),
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(pad, 0, pad, 110),
+          sliver: gridMode || !wide
+              ? SliverGrid(
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                    // Wider tiles on desktop (4 across a 1160px pane), two
+                    // columns on a phone.
+                    maxCrossAxisExtent: wide ? 230 : 190,
+                    childAspectRatio: 0.68,
+                    crossAxisSpacing: wide ? 22 : 16,
+                    mainAxisSpacing: wide ? 22 : 18,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) => DocumentCard(
+                      document: docs[i],
+                      onTap: () => _open(context, docs[i]),
+                      onLongPress: () => showDocumentActions(context, docs[i]),
+                      onStarTap: () => _toggleStar(context, docs[i]),
+                      onMore: () => showDocumentActions(context, docs[i]),
+                    ),
+                    childCount: docs.length,
+                  ),
+                )
+              : SliverList.separated(
+                  itemCount: docs.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 6),
+                  itemBuilder: (context, i) => _ListRow(doc: docs[i]),
+                ),
+        ),
+      ],
     );
+  }
+
+  static String _sortCaption(BuildContext context) {
+    final sort =
+        ProviderScope.containerOf(context).read(librarySortProvider);
+    return switch (sort) {
+      LibrarySort.modifiedDesc => 'Sorted by last modified',
+      LibrarySort.createdDesc => 'Sorted by date created',
+      LibrarySort.nameAsc => 'Sorted by name (A–Z)',
+      LibrarySort.nameDesc => 'Sorted by name (Z–A)',
+    };
   }
 }
 
-class _CardItem extends ConsumerWidget {
-  const _CardItem({required this.doc, required this.parentId});
+class _ListRow extends StatelessWidget {
+  const _ListRow({required this.doc});
   final Document doc;
-  final String? parentId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return DocumentCard(
-      document: doc,
-      onTap: () => _open(context, doc),
-      onLongPress: () => showDocumentActions(context, doc),
-      onStarTap: () => _toggleStar(context, doc),
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(Radii.control),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Radii.control),
+        onTap: () => _open(context, doc),
+        onLongPress: () => showDocumentActions(context, doc),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(Radii.control),
+            border: Border.all(color: t.line),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: t.fill,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  switch (doc.type) {
+                    DocumentType.folder => Icons.folder_rounded,
+                    DocumentType.notebook => Icons.menu_book_rounded,
+                    DocumentType.pdf => Icons.picture_as_pdf_rounded,
+                  },
+                  size: 19,
+                  color: doc.type == DocumentType.pdf
+                      ? t.pdfBadge
+                      : t.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  doc.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: t.text,
+                  ),
+                ),
+              ),
+              Text(
+                DateFormat.MMMd().format(doc.updatedAt),
+                style: AppTokens.mono(size: 11, color: t.textFaint),
+              ),
+              IconButton(
+                icon: Icon(
+                  doc.starred
+                      ? Icons.star_rounded
+                      : Icons.star_border_rounded,
+                  size: 19,
+                ),
+                color: doc.starred ? t.star : t.textFaint,
+                onPressed: () => _toggleStar(context, doc),
+              ),
+              IconButton(
+                icon: const Icon(Icons.more_horiz_rounded, size: 20),
+                color: t.textMuted,
+                onPressed: () => showDocumentActions(context, doc),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -177,23 +608,39 @@ void _toggleStar(BuildContext context, Document d) {
       .setStarred(d.id, !d.starred);
 }
 
+// ---------------------------------------------------------------- actions --
+
 /// Long-press action sheet for a document.
 Future<void> showDocumentActions(BuildContext context, Document d) async {
   final container = ProviderScope.containerOf(context);
   final repo = container.read(libraryRepositoryProvider);
   await showModalBottomSheet<void>(
     context: context,
-    showDragHandle: true,
     builder: (sheetContext) => SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                d.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(sheetContext)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontSize: 16),
+              ),
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.drive_file_rename_outline_rounded),
             title: const Text('Rename'),
             onTap: () async {
               Navigator.pop(sheetContext);
-              final name = await _promptText(context, 'Rename', d.title);
+              final name = await promptText(context, 'Rename', d.title);
               if (name != null) repo.rename(d.id, name);
             },
           ),
@@ -208,8 +655,20 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
             },
           ),
           ListTile(
-            leading: const Icon(Icons.delete_outline_rounded),
-            title: const Text('Move to Trash'),
+            leading: const Icon(Icons.info_outline_rounded),
+            title: const Text('Details'),
+            onTap: () async {
+              Navigator.pop(sheetContext);
+              await _showDetails(context, repo, d);
+            },
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: Icon(Icons.delete_outline_rounded,
+                color: Theme.of(sheetContext).colorScheme.error),
+            title: Text('Move to Trash',
+                style: TextStyle(
+                    color: Theme.of(sheetContext).colorScheme.error)),
             onTap: () {
               Navigator.pop(sheetContext);
               repo.moveToTrash(d.id);
@@ -224,13 +683,68 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
               );
             },
           ),
+          const SizedBox(height: 8),
         ],
       ),
     ),
   );
 }
 
-Future<String?> _promptText(
+Future<void> _showDetails(
+    BuildContext context, LibraryRepository repo, Document d) async {
+  final pages = d.type == DocumentType.folder ? 0 : await repo.pageCount(d.id);
+  final fmt = DateFormat.yMMMd().add_jm();
+  if (!context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(d.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _detailRow(context, 'Type', switch (d.type) {
+            DocumentType.folder => 'Folder',
+            DocumentType.notebook => 'Notebook',
+            DocumentType.pdf => 'PDF',
+          }),
+          if (d.type != DocumentType.folder)
+            _detailRow(context, 'Pages', '$pages'),
+          _detailRow(context, 'Created', fmt.format(d.createdAt)),
+          _detailRow(context, 'Modified', fmt.format(d.updatedAt)),
+          if (d.starred) _detailRow(context, 'Starred', 'Yes'),
+        ],
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close')),
+      ],
+    ),
+  );
+}
+
+Widget _detailRow(BuildContext context, String label, String value) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 84,
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 13, color: context.tokens.textMuted)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: AppTokens.mono(
+                    size: 12.5, color: context.tokens.text)),
+          ),
+        ],
+      ),
+    );
+
+Future<String?> promptText(
     BuildContext context, String title, String initial) {
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
@@ -244,7 +758,8 @@ Future<String?> _promptText(
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel')),
         FilledButton(
           onPressed: () => Navigator.pop(context, controller.text.trim()),
           child: const Text('Save'),
@@ -254,51 +769,135 @@ Future<String?> _promptText(
   );
 }
 
-class _NewButton extends ConsumerWidget {
-  const _NewButton({required this.parentId});
-  final String? parentId;
+// ----------------------------------------------------------------- create --
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return FloatingActionButton.extended(
-      onPressed: () => _showNewMenu(context, ref),
-      icon: const Icon(Icons.add_rounded),
-      label: const Text('New'),
+/// Opens the create sheet and carries out whatever the user picked.
+Future<void> runCreateFlow(
+  BuildContext context,
+  WidgetRef ref, {
+  required String? parentId,
+}) async {
+  final action = await CreateSheet.show(context);
+  if (action == null || !context.mounted) return;
+
+  switch (action) {
+    case CreateAction.notebook:
+      await NewNotebookSheet.show(context, parentId: parentId);
+    case CreateAction.folder:
+      final name = await promptText(context, 'New folder', 'New Folder');
+      if (name != null && name.isNotEmpty) {
+        await ref
+            .read(libraryRepositoryProvider)
+            .createFolder(parentId: parentId, title: name);
+      }
+    case CreateAction.importPdf:
+      await _import(context, ref, isPdf: true, parentId: parentId);
+    case CreateAction.importImages:
+      await _import(context, ref, isPdf: false, parentId: parentId);
+  }
+}
+
+Future<void> _import(
+  BuildContext context,
+  WidgetRef ref, {
+  required bool isPdf,
+  required String? parentId,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final router = GoRouter.of(context);
+  final service = ref.read(importServiceProvider);
+  final progress = ValueNotifier<(double, String)>((0, 'Choose a file…'));
+  var dialogOpen = false;
+
+  void showProgressDialog() {
+    dialogOpen = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ImportProgressDialog(
+        title: isPdf ? 'Importing PDF' : 'Importing images',
+        progress: progress,
+      ),
     );
   }
 
-  void _showNewMenu(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.menu_book_rounded),
-              title: const Text('Notebook'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                NewNotebookSheet.show(context, parentId: parentId).then((_) {});
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.create_new_folder_rounded),
-              title: const Text('Folder'),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                final name =
-                    await _promptText(context, 'New Folder', 'New Folder');
-                if (name != null && name.isNotEmpty) {
-                  ref
-                      .read(libraryRepositoryProvider)
-                      .createFolder(parentId: parentId, title: name);
-                }
-              },
-            ),
-          ],
-        ),
+  try {
+    final id = isPdf
+        ? await service.importPdf(
+            parentId: parentId,
+            onProgress: (f, label) {
+              if (!dialogOpen) showProgressDialog();
+              progress.value = (f, label);
+            },
+          )
+        : await service.importImages(
+            parentId: parentId,
+            onProgress: (f, label) {
+              if (!dialogOpen) showProgressDialog();
+              progress.value = (f, label);
+            },
+          );
+    if (dialogOpen && context.mounted) Navigator.of(context).pop();
+    dialogOpen = false;
+    if (id != null) {
+      ref.read(libraryRepositoryProvider).touchOpened(id);
+      router.push('/doc/$id');
+    }
+  } on UnsupportedImportFormat catch (failure) {
+    // Not really an error — the user picked a PowerPoint/Word file, so
+    // explain the one step needed rather than showing a failure.
+    if (dialogOpen && context.mounted) Navigator.of(context).pop();
+    dialogOpen = false;
+    if (context.mounted) await ConvertToPdfDialog.show(context, failure);
+  } catch (e) {
+    if (dialogOpen && context.mounted) Navigator.of(context).pop();
+    messenger.showSnackBar(SnackBar(content: Text('Import failed: $e')));
+  } finally {
+    progress.dispose();
+  }
+}
+
+/// Modal progress dialog shown while a PDF/image import runs.
+class _ImportProgressDialog extends StatelessWidget {
+  const _ImportProgressDialog({required this.title, required this.progress});
+
+  final String title;
+  final ValueNotifier<(double, String)> progress;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(title),
+      content: ValueListenableBuilder<(double, String)>(
+        valueListenable: progress,
+        builder: (context, value, _) {
+          final (fraction, label) = value;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              LinearProgressIndicator(
+                value: fraction <= 0 ? null : fraction.clamp(0.0, 1.0),
+                minHeight: 8,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(label,
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('${(fraction * 100).round()}%',
+                      style: AppTokens.mono(
+                          size: 13, weight: FontWeight.w700)),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -315,8 +914,10 @@ class _SortButton extends StatelessWidget {
       tooltip: 'Sort',
       onSelected: (s) => ref.read(librarySortProvider.notifier).state = s,
       itemBuilder: (context) => const [
-        PopupMenuItem(value: LibrarySort.modifiedDesc, child: Text('Last modified')),
-        PopupMenuItem(value: LibrarySort.createdDesc, child: Text('Date created')),
+        PopupMenuItem(
+            value: LibrarySort.modifiedDesc, child: Text('Last modified')),
+        PopupMenuItem(
+            value: LibrarySort.createdDesc, child: Text('Date created')),
         PopupMenuItem(value: LibrarySort.nameAsc, child: Text('Name (A–Z)')),
         PopupMenuItem(value: LibrarySort.nameDesc, child: Text('Name (Z–A)')),
       ],
@@ -325,26 +926,59 @@ class _SortButton extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.parentId});
-  final String? parentId;
+  const _EmptyState({required this.section, required this.inFolder});
+
+  final LibrarySection section;
+  final bool inFolder;
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
+    final (icon, title, hint) = switch (section) {
+      _ when inFolder => (
+          Icons.folder_open_rounded,
+          'This folder is empty',
+          'Add a notebook or import a PDF into it',
+        ),
+      LibrarySection.starred => (
+          Icons.star_outline_rounded,
+          'Nothing starred yet',
+          'Star a document to keep it within reach',
+        ),
+      LibrarySection.recent => (
+          Icons.schedule_rounded,
+          'No recent documents',
+          'Documents you open will show up here',
+        ),
+      LibrarySection.all => (
+          Icons.auto_stories_rounded,
+          'Nothing here yet',
+          'Tap New to create a notebook or import a PDF',
+        ),
+    };
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.auto_stories_rounded,
-              size: 72, color: Theme.of(context).hintColor),
-          const SizedBox(height: 12),
-          Text('Nothing here yet',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text('Tap New to create a notebook or folder',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: Theme.of(context).hintColor)),
+          Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(
+              color: t.fill,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Icon(icon, size: 34, color: t.textFaint),
+          ),
+          const SizedBox(height: 18),
+          Text(title,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: t.text,
+              )),
+          const SizedBox(height: 6),
+          Text(hint, style: TextStyle(fontSize: 13.5, color: t.textMuted)),
         ],
       ),
     );
@@ -354,6 +988,9 @@ class _EmptyState extends StatelessWidget {
 class _LibrarySearchDelegate extends SearchDelegate<void> {
   _LibrarySearchDelegate(this.ref);
   final WidgetRef ref;
+
+  @override
+  String get searchFieldLabel => 'Search documents…';
 
   @override
   List<Widget> buildActions(BuildContext context) => [
@@ -377,16 +1014,26 @@ class _LibrarySearchDelegate extends SearchDelegate<void> {
   Widget buildSuggestions(BuildContext context) => _results(context);
 
   Widget _results(BuildContext context) {
+    final t = context.tokens;
     final repo = ref.read(libraryRepositoryProvider);
     if (query.trim().isEmpty) {
-      return const Center(child: Text('Type to search your notes'));
+      return Center(
+        child: Text('Type to search your notes',
+            style: TextStyle(color: t.textMuted)),
+      );
     }
     return StreamBuilder<List<Document>>(
       stream: repo.watchSearch(query),
       builder: (context, snap) {
         final docs = snap.data ?? const [];
-        if (docs.isEmpty) return const Center(child: Text('No matches'));
+        if (docs.isEmpty) {
+          return Center(
+            child:
+                Text('No matches', style: TextStyle(color: t.textMuted)),
+          );
+        }
         return ListView(
+          padding: const EdgeInsets.all(12),
           children: [
             for (final d in docs)
               ListTile(
@@ -396,6 +1043,10 @@ class _LibrarySearchDelegate extends SearchDelegate<void> {
                   DocumentType.pdf => Icons.picture_as_pdf_rounded,
                 }),
                 title: Text(d.title),
+                subtitle: Text(
+                  DateFormat.yMMMd().format(d.updatedAt),
+                  style: AppTokens.mono(size: 11, color: t.textFaint),
+                ),
                 onTap: () {
                   close(context, null);
                   _open(context, d);

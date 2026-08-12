@@ -27,9 +27,15 @@ void main() {
       expect(spec.left, 60);
     });
 
-    test('contentRect insets by all edges when enabled', () {
-      const spec =
-          MarginSpec(enabled: true, left: 10, top: 20, right: 30, bottom: 40);
+    test('guide-only margins inset the content within the page', () {
+      const spec = MarginSpec(
+        enabled: true,
+        left: 10,
+        top: 20,
+        right: 30,
+        bottom: 40,
+        extend: false,
+      );
       final rect = spec.contentRect(const Size(200, 300));
       expect(rect.left, 10);
       expect(rect.top, 20);
@@ -41,6 +47,49 @@ void main() {
       final rect = MarginSpec.none.contentRect(const Size(200, 300));
       expect(rect.left, 0);
       expect(rect.right, 200);
+    });
+
+    group('extendable margins', () {
+      const base = Size(200, 300);
+      const spec = MarginSpec(
+        enabled: true,
+        left: 10,
+        top: 20,
+        right: 30,
+        bottom: 40,
+      );
+
+      test('grow the sheet by the margin amounts', () {
+        final outer = spec.outerSize(base);
+        expect(outer.width, 240); // 200 + 10 + 30
+        expect(outer.height, 360); // 300 + 20 + 40
+      });
+
+      test('offset the content by left/top', () {
+        expect(spec.contentOffset, const Offset(10, 20));
+        final content = spec.contentRectIn(base);
+        expect(content.left, 10);
+        expect(content.top, 20);
+        expect(content.width, base.width);
+        expect(content.height, base.height);
+      });
+
+      test('guide-only mode leaves the sheet size unchanged', () {
+        final guideOnly = spec.copyWith(extend: false);
+        expect(guideOnly.outerSize(base), base);
+        expect(guideOnly.contentOffset, Offset.zero);
+      });
+
+      test('disabled margins never grow the sheet', () {
+        final off = spec.copyWith(enabled: false);
+        expect(off.outerSize(base), base);
+      });
+
+      test('extend flag survives a JSON round-trip', () {
+        final restored = MarginSpec.fromJson(spec.toJson());
+        expect(restored.extend, isTrue);
+        expect(restored.outerSize(base), const Size(240, 360));
+      });
     });
   });
 

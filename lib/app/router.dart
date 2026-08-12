@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/editor/editor_screen.dart';
 import '../features/library/library_screen.dart';
+import '../features/auth/sign_in_screen.dart';
 import '../features/library/trash_screen.dart';
 import '../features/settings/settings_screen.dart';
 
@@ -27,6 +28,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/trash',
       builder: (context, state) => const TrashScreen(),
+    ),
+    GoRoute(
+      path: '/sign-in',
+      builder: (context, state) => const SignInScreen(),
     ),
     GoRoute(
       path: '/settings',

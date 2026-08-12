@@ -12,7 +12,9 @@ class StrokeRenderer {
 
   static pf.StrokeOptions optionsFor(
       ToolType tool, double width, List<StrokePoint> points,
-      {bool isComplete = true}) {
+      {bool isComplete = true, StrokeTip tip = StrokeTip.round}) {
+    // Round nib = capped (soft) ends; square/chisel nib = flat, blocky ends.
+    final capped = tip == StrokeTip.round;
     // If the pointer gave no pressure variation (mouse/touch), let the library
     // simulate pressure from velocity for a natural look.
     final simulate = _isPressureless(points);
@@ -24,6 +26,31 @@ class StrokeRenderer {
           smoothing: 0.5,
           streamline: 0.5,
           simulatePressure: simulate,
+          isComplete: isComplete,
+        );
+      case ToolType.fountainPen:
+        // Strong pressure/velocity response with tapered ends for calligraphic
+        // thick-to-thin strokes.
+        return pf.StrokeOptions(
+          size: width,
+          thinning: 0.85,
+          smoothing: 0.42,
+          streamline: 0.38,
+          simulatePressure: simulate,
+          start: pf.StrokeEndOptions.start(taperEnabled: true, cap: true),
+          end: pf.StrokeEndOptions.end(taperEnabled: true, cap: true),
+          isComplete: isComplete,
+        );
+      case ToolType.tape:
+        // Washi tape: a constant-width opaque strip with flat ends.
+        return pf.StrokeOptions(
+          size: width,
+          thinning: 0,
+          smoothing: 0.2,
+          streamline: 0.75,
+          simulatePressure: false,
+          start: pf.StrokeEndOptions.start(cap: capped, taperEnabled: false),
+          end: pf.StrokeEndOptions.end(cap: capped, taperEnabled: false),
           isComplete: isComplete,
         );
       case ToolType.pencil:
@@ -42,8 +69,9 @@ class StrokeRenderer {
           smoothing: 0.4,
           streamline: 0.6,
           simulatePressure: false,
-          start: pf.StrokeEndOptions.start(cap: false, taperEnabled: false),
-          end: pf.StrokeEndOptions.end(cap: false, taperEnabled: false),
+          // Round tip = softly capped ends; square (chisel) tip = flat ends.
+          start: pf.StrokeEndOptions.start(cap: capped, taperEnabled: false),
+          end: pf.StrokeEndOptions.end(cap: capped, taperEnabled: false),
           isComplete: isComplete,
         );
       default:
@@ -57,6 +85,7 @@ class StrokeRenderer {
         stroke.width,
         stroke.points,
         isComplete: true,
+        tip: stroke.tip,
       );
 
   /// Builds a fill path from raw points (used for the live in-progress stroke).
@@ -65,6 +94,7 @@ class StrokeRenderer {
     double width,
     List<StrokePoint> points, {
     bool isComplete = true,
+    StrokeTip tip = StrokeTip.round,
   }) {
     if (points.isEmpty) return Path();
     final input = [
@@ -72,7 +102,8 @@ class StrokeRenderer {
     ];
     final outline = pf.getStroke(
       input,
-      options: optionsFor(tool, width, points, isComplete: isComplete),
+      options:
+          optionsFor(tool, width, points, isComplete: isComplete, tip: tip),
     );
     return _outlineToPath(outline);
   }
@@ -90,6 +121,37 @@ class StrokeRenderer {
     }
     path.close();
     return path;
+  }
+
+  /// Centre-line polyline through the stroke's points, used for dashed and
+  /// dotted styles (which are stroked rather than filled).
+  static Path centerlineFor(List<StrokePoint> points) {
+    final path = Path();
+    if (points.isEmpty) return path;
+    path.moveTo(points.first.x, points.first.y);
+    for (var i = 1; i < points.length; i++) {
+      path.lineTo(points[i].x, points[i].y);
+    }
+    return path;
+  }
+
+  /// Splits [source] into dashes. [on]/[off] are lengths in page points.
+  static Path dashPath(Path source, double on, double off) {
+    final out = Path();
+    for (final metric in source.computeMetrics()) {
+      var distance = 0.0;
+      var draw = true;
+      while (distance < metric.length) {
+        final len = draw ? on : off;
+        final next = (distance + len).clamp(0.0, metric.length);
+        if (draw) {
+          out.addPath(metric.extractPath(distance, next), Offset.zero);
+        }
+        distance = next;
+        draw = !draw;
+      }
+    }
+    return out;
   }
 
   static bool _isPressureless(List<StrokePoint> points) {

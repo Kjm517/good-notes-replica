@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/models/enums.dart';
 import '../../../core/models/margin_spec.dart';
 import '../../../core/models/page_geometry.dart';
+import 'margin_guides.dart';
 
 /// Paints the static page background: paper colour, template ruling, and the
 /// adjustable margin guides. This layer is cheap and is cached by a
@@ -13,26 +14,41 @@ class PaperPainter extends CustomPainter {
     required this.template,
     required this.paperColor,
     required this.margins,
+    this.baseSize,
     this.lineSpacing = 34,
   });
 
   final PaperTemplate template;
   final PaperColor paperColor;
   final MarginSpec margins;
+
+  /// Original page size. When extendable margins add space, [size] is larger
+  /// and the ruling is drawn within this inner area.
+  final Size? baseSize;
   final double lineSpacing;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
+    final content = baseSize ?? size;
 
-    // Background.
-    canvas.drawRect(rect, Paint()..color = paperColor.color);
+    // Paper covers the whole sheet, including any extended margin area.
+    canvas.drawRect(Offset.zero & size, Paint()..color = paperColor.color);
 
     final linePaint = Paint()
       ..color = paperColor.lineColor
       ..strokeWidth = 1
       ..style = PaintingStyle.stroke;
 
+    // Ruling is drawn in the content area only.
+    canvas.save();
+    canvas.translate(margins.contentOffset.dx, margins.contentOffset.dy);
+    _paintTemplate(canvas, content, linePaint);
+    canvas.restore();
+
+    paintMarginGuides(canvas, margins, content);
+  }
+
+  void _paintTemplate(Canvas canvas, Size size, Paint linePaint) {
     switch (template) {
       case PaperTemplate.blank:
       case PaperTemplate.custom:
@@ -52,8 +68,6 @@ class PaperPainter extends CustomPainter {
       case PaperTemplate.planner:
         _planner(canvas, size, linePaint);
     }
-
-    _marginGuides(canvas, size);
   }
 
   void _horizontalLines(Canvas canvas, Size size, double gap, Paint p,
@@ -117,34 +131,14 @@ class PaperPainter extends CustomPainter {
     _horizontalLines(canvas, size, 34, p, top: headerY + 34);
   }
 
-  void _marginGuides(Canvas canvas, Size size) {
-    if (!margins.enabled || !margins.showGuides) return;
-    final p = Paint()
-      ..color = margins.guideColor
-      ..strokeWidth = 1.4
-      ..style = PaintingStyle.stroke;
-    if (margins.left > 0) {
-      canvas.drawLine(
-          Offset(margins.left, 0), Offset(margins.left, size.height), p);
-    }
-    if (margins.right > 0) {
-      final x = size.width - margins.right;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), p);
-    }
-    if (margins.top > 0) {
-      canvas.drawLine(
-          Offset(0, margins.top), Offset(size.width, margins.top), p);
-    }
-    if (margins.bottom > 0) {
-      final y = size.height - margins.bottom;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), p);
-    }
-  }
+  @override
+  bool? hitTest(Offset position) => false;
 
   @override
   bool shouldRepaint(covariant PaperPainter old) =>
       old.template != template ||
       old.paperColor != paperColor ||
       old.margins != margins ||
+      old.baseSize != baseSize ||
       old.lineSpacing != lineSpacing;
 }

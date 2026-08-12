@@ -1,0 +1,53 @@
+import 'dart:typed_data';
+
+/// One replicated record, as it travels to and from the cloud.
+///
+/// Deliberately plain maps: the sync engine is then testable against an
+/// in-memory store, with no Firestore involved.
+class RemoteRecord {
+  const RemoteRecord({
+    required this.id,
+    required this.data,
+    required this.updatedAt,
+    this.deletedAt,
+  });
+
+  final String id;
+  final Map<String, Object?> data;
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+
+  bool get isDeleted => deletedAt != null;
+}
+
+/// Which collection a record belongs to. Kept small and explicit so the
+/// Firestore paths stay in one place.
+enum RemoteCollection { documents, pages, elements, assets }
+
+/// The cloud side of sync. Implemented by Firestore in production and by a
+/// fake in tests.
+abstract class RemoteStore {
+  /// Records in [collection] changed since [since] (null = everything).
+  ///
+  /// [parentId] scopes nested collections: pages of a document, elements of a
+  /// page. Ignored for top-level collections.
+  Future<List<RemoteRecord>> fetchChanged(
+    RemoteCollection collection, {
+    DateTime? since,
+    String? parentId,
+  });
+
+  /// Creates or replaces [records] in one batch.
+  Future<void> upsert(
+    RemoteCollection collection,
+    List<RemoteRecord> records, {
+    String? parentId,
+  });
+
+  /// Per-page ink, stored as the packed stroke blob rather than one cloud
+  /// document per stroke — a page can hold hundreds of strokes and Firestore
+  /// bills per write.
+  Future<Uint8List?> fetchInk(String pageId);
+
+  Future<void> putInk(String pageId, Uint8List bytes, DateTime updatedAt);
+}

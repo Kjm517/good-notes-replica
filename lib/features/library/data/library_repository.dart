@@ -9,11 +9,25 @@ import '../../../core/models/margin_spec.dart';
 enum LibrarySort { nameAsc, nameDesc, modifiedDesc, createdDesc }
 
 /// Data access for the library: folders, notebooks and PDFs.
+///
+/// Everything is scoped to [ownerUid] — the signed-in account, or null when
+/// signed out. Documents belonging to an account are invisible to anyone
+/// else, so signing out doesn't leave one person's notes on screen for the
+/// next user of the device.
 class LibraryRepository {
-  LibraryRepository(this._db, this._uuid);
+  LibraryRepository(this._db, this._uuid, {this.ownerUid});
 
   final AppDatabase _db;
   final Uuid _uuid;
+
+  /// Firebase uid of the signed-in account, or null when signed out.
+  final String? ownerUid;
+
+  /// Rows this session is allowed to see: the current account's documents,
+  /// plus anything created locally while signed out.
+  Expression<bool> _owned($DocumentsTable d) => ownerUid == null
+      ? d.ownerUid.isNull()
+      : d.ownerUid.isNull() | d.ownerUid.equals(ownerUid!);
 
   // ---- Queries -------------------------------------------------------------
 
@@ -21,7 +35,7 @@ class LibraryRepository {
   Stream<List<Document>> watchChildren(String? parentId,
       {LibrarySort sort = LibrarySort.modifiedDesc}) {
     final query = _db.select(_db.documents)
-      ..where((d) => d.trashedAt.isNull())
+      ..where((d) => d.trashedAt.isNull() & d.deletedAt.isNull() & _owned(d))
       ..where((d) => parentId == null
           ? d.parentId.isNull()
           : d.parentId.equals(parentId));
@@ -31,7 +45,11 @@ class LibraryRepository {
 
   Stream<List<Document>> watchStarred() {
     final query = _db.select(_db.documents)
-      ..where((d) => d.trashedAt.isNull() & d.starred.equals(true))
+      ..where((d) =>
+          d.trashedAt.isNull() &
+          d.deletedAt.isNull() &
+          d.starred.equals(true) &
+          _owned(d))
       ..orderBy([(d) => OrderingTerm.desc(d.updatedAt)]);
     return query.watch();
   }
@@ -40,8 +58,10 @@ class LibraryRepository {
     final query = _db.select(_db.documents)
       ..where((d) =>
           d.trashedAt.isNull() &
+          d.deletedAt.isNull() &
           d.type.equals(DocumentType.folder.index).not() &
-          d.lastOpenedAt.isNotNull())
+          d.lastOpenedAt.isNotNull() &
+          _owned(d))
       ..orderBy([(d) => OrderingTerm.desc(d.lastOpenedAt)])
       ..limit(limit);
     return query.watch();
@@ -49,7 +69,8 @@ class LibraryRepository {
 
   Stream<List<Document>> watchTrash() {
     final query = _db.select(_db.documents)
-      ..where((d) => d.trashedAt.isNotNull())
+      ..where((d) =>
+          d.trashedAt.isNotNull() & d.deletedAt.isNull() & _owned(d))
       ..orderBy([(d) => OrderingTerm.desc(d.trashedAt)]);
     return query.watch();
   }
@@ -57,7 +78,11 @@ class LibraryRepository {
   Stream<List<Document>> watchSearch(String term) {
     final like = '%${term.trim()}%';
     final query = _db.select(_db.documents)
-      ..where((d) => d.trashedAt.isNull() & d.title.like(like))
+      ..where((d) =>
+          d.trashedAt.isNull() &
+          d.deletedAt.isNull() &
+          d.title.like(like) &
+          _owned(d))
       ..orderBy([(d) => OrderingTerm.desc(d.updatedAt)]);
     return query.watch();
   }
@@ -65,6 +90,17 @@ class LibraryRepository {
   Future<Document?> findById(String id) =>
       (_db.select(_db.documents)..where((d) => d.id.equals(id)))
           .getSingleOrNull();
+
+  Stream<Document?> watchById(String id) =>
+      (_db.select(_db.documents)..where((d) => d.id.equals(id)))
+          .watchSingleOrNull();
+
+  Future<int> pageCount(String documentId) async {
+    final rows = await (_db.select(_db.notePages)
+          ..where((p) => p.documentId.equals(documentId)))
+        .get();
+    return rows.length;
+  }
 
   void _applySort(SimpleSelectStatement<$DocumentsTable, Document> q,
       LibrarySort sort) {
@@ -89,6 +125,7 @@ class LibraryRepository {
       type: DocumentType.folder,
       title: Value(title),
       parentId: Value(parentId),
+      ownerUid: Value(ownerUid),
     );
     await _db.into(_db.documents).insert(companion);
     return (await findById(id))!;
@@ -115,6 +152,7 @@ class LibraryRepository {
             coverStyle: Value(coverStyle),
             orientation: Value(orientation),
             pageSize: Value(pageSize),
+            ownerUid: Value(ownerUid),
           ));
       await _db.into(_db.notePages).insert(NotePagesCompanion.insert(
             id: _uuid.v4(),
@@ -130,7 +168,11 @@ class LibraryRepository {
 
   Future<void> rename(String id, String title) async {
     await (_db.update(_db.documents)..where((d) => d.id.equals(id))).write(
-      DocumentsCompanion(title: Value(title), updatedAt: Value(DateTime.now())),
+      DocumentsCompanion(
+        title: Value(title),
+        updatedAt: Value(DateTime.now()),
+        dirty: const Value(true),
+      ),
     );
   }
 
@@ -139,6 +181,7 @@ class LibraryRepository {
       DocumentsCompanion(
         parentId: Value(newParentId),
         updatedAt: Value(DateTime.now()),
+        dirty: const Value(true),
       ),
     );
   }
@@ -148,6 +191,7 @@ class LibraryRepository {
       DocumentsCompanion(
         starred: Value(starred),
         updatedAt: Value(DateTime.now()),
+        dirty: const Value(true),
       ),
     );
   }
@@ -160,23 +204,61 @@ class LibraryRepository {
 
   Future<void> moveToTrash(String id) async {
     await (_db.update(_db.documents)..where((d) => d.id.equals(id))).write(
-      DocumentsCompanion(trashedAt: Value(DateTime.now())),
+      DocumentsCompanion(
+        trashedAt: Value(DateTime.now()),
+        updatedAt: Value(DateTime.now()),
+        dirty: const Value(true),
+      ),
     );
   }
 
   Future<void> restore(String id) async {
     await (_db.update(_db.documents)..where((d) => d.id.equals(id))).write(
-      const DocumentsCompanion(trashedAt: Value(null)),
+      DocumentsCompanion(
+        trashedAt: const Value(null),
+        updatedAt: Value(DateTime.now()),
+        dirty: const Value(true),
+      ),
     );
   }
 
-  /// Permanently deletes a document. Pages/strokes/elements cascade.
+  /// Marks a document deleted. It is kept as a tombstone rather than removed
+  /// so the deletion propagates to other devices instead of being resurrected
+  /// by the next sync; the UI filters tombstones out.
   Future<void> deleteForever(String id) async {
-    await (_db.delete(_db.documents)..where((d) => d.id.equals(id))).go();
+    final now = DateTime.now();
+    await (_db.update(_db.documents)..where((d) => d.id.equals(id))).write(
+      DocumentsCompanion(
+        deletedAt: Value(now),
+        updatedAt: Value(now),
+        dirty: const Value(true),
+      ),
+    );
+  }
+
+  /// Assigns any unowned local documents to [uid].
+  ///
+  /// Called when someone signs in: work they did before creating an account
+  /// becomes theirs rather than being orphaned or shown to the next user.
+  Future<int> claimLocalDocuments(String uid) async {
+    return (_db.update(_db.documents)..where((d) => d.ownerUid.isNull()))
+        .write(DocumentsCompanion(
+      ownerUid: Value(uid),
+      // Newly claimed work still needs uploading.
+      dirty: const Value(true),
+      updatedAt: Value(DateTime.now()),
+    ));
   }
 
   Future<void> emptyTrash() async {
-    await (_db.delete(_db.documents)..where((d) => d.trashedAt.isNotNull()))
-        .go();
+    final now = DateTime.now();
+    await (_db.update(_db.documents)
+          ..where((d) =>
+          d.trashedAt.isNotNull() & d.deletedAt.isNull() & _owned(d)))
+        .write(DocumentsCompanion(
+          deletedAt: Value(now),
+          updatedAt: Value(now),
+          dirty: const Value(true),
+        ));
   }
 }

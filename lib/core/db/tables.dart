@@ -3,9 +3,25 @@ import 'package:drift/drift.dart';
 import '../models/enums.dart';
 import 'converters.dart';
 
+/// Columns every synced table carries.
+///
+/// * [updatedAt]  — last local change; the clock used for last-write-wins.
+/// * [deletedAt]  — tombstone. Rows are never hard-deleted once sync is on,
+///                  otherwise a delete on one device is silently resurrected
+///                  by the next pull from another.
+/// * [dirty]      — has local changes not yet pushed to the cloud.
+/// * [remoteUpdatedAt] — the server timestamp we last reconciled with.
+mixin SyncedTable on Table {
+  DateTimeColumn get updatedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+  BoolColumn get dirty => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get remoteUpdatedAt => dateTime().nullable()();
+}
+
 /// Library items: folders, notebooks and imported PDFs. Folders nest via
 /// [parentId]; notebooks/pdfs own [Pages].
-class Documents extends Table {
+class Documents extends Table with SyncedTable {
   TextColumn get id => text()();
   IntColumn get type => intEnum<DocumentType>()();
   TextColumn get title => text().withDefault(const Constant('Untitled'))();
@@ -20,6 +36,21 @@ class Documents extends Table {
 
   BoolColumn get starred => boolean().withDefault(const Constant(false))();
 
+  /// Firebase uid of the account this belongs to.
+  ///
+  /// Null means "created on this device while signed out" — those stay
+  /// visible to everyone and are claimed by the first account that signs in.
+  /// Anything owned by an account is hidden unless that account is signed in;
+  /// otherwise signing out would leave one user's notes on screen for the
+  /// next person to open the app.
+  TextColumn get ownerUid => text().nullable()();
+
+  /// Small base64 PNG of the first page, rendered once at import.
+  ///
+  /// Without this the library has to open the whole source PDF just to draw a
+  /// card-sized preview — a 150 MB textbook took over 20 seconds.
+  TextColumn get coverThumb => text().nullable()();
+
   /// Null unless soft-deleted (in trash).
   DateTimeColumn get trashedAt => dateTime().nullable()();
 
@@ -27,8 +58,6 @@ class Documents extends Table {
   IntColumn get sortIndex => integer().withDefault(const Constant(0))();
 
   DateTimeColumn get createdAt =>
-      dateTime().withDefault(currentDateAndTime)();
-  DateTimeColumn get updatedAt =>
       dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get lastOpenedAt => dateTime().nullable()();
 
@@ -39,7 +68,7 @@ class Documents extends Table {
 /// A single page inside a notebook/pdf document.
 /// Named [NotePages] (not `Pages`) so the generated row class is `NotePage`,
 /// avoiding a clash with Flutter's `Page` widget class.
-class NotePages extends Table {
+class NotePages extends Table with SyncedTable {
   TextColumn get id => text()();
   TextColumn get documentId =>
       text().references(Documents, #id, onDelete: KeyAction.cascade)();
@@ -58,11 +87,24 @@ class NotePages extends Table {
   TextColumn get pdfAssetId => text().nullable()();
   IntColumn get pdfPageIndex => integer().nullable()();
 
+  /// For image-backed pages: the source image asset.
+  TextColumn get bgAssetId => text().nullable()();
+
+  /// Per-page size override (points) for PDF/image pages whose dimensions
+  /// differ from the document preset. Null = use the document preset size.
+  RealColumn get pageW => real().nullable()();
+  RealColumn get pageH => real().nullable()();
+
   TextColumn get bookmarkTitle => text().nullable()();
 
+  /// Text extracted from the source PDF page, lower-cased for searching.
+  ///
+  /// Extracted once (in the background after import) so "find in document"
+  /// never has to re-parse the file. Null means not extracted yet; empty
+  /// means the page genuinely has no text (a scan, or a picture page).
+  TextColumn get searchText => text().nullable()();
+
   DateTimeColumn get createdAt =>
-      dateTime().withDefault(currentDateAndTime)();
-  DateTimeColumn get updatedAt =>
       dateTime().withDefault(currentDateAndTime)();
 
   @override
@@ -71,7 +113,7 @@ class NotePages extends Table {
 
 /// A committed ink stroke. Points are packed as little-endian Float32 triples
 /// (x, y, pressure) in the [points] blob for compact storage.
-class Strokes extends Table {
+class Strokes extends Table with SyncedTable {
   TextColumn get id => text()();
   TextColumn get pageId =>
       text().references(NotePages, #id, onDelete: KeyAction.cascade)();
@@ -83,6 +125,16 @@ class Strokes extends Table {
   RealColumn get opacity => real().withDefault(const Constant(1.0))();
 
   BlobColumn get points => blob()();
+
+  /// Solid / dashed / dotted line style.
+  IntColumn get style =>
+      intEnum<StrokeStyle>().withDefault(const Constant(0))();
+
+  /// Shapes only: fill the closed outline with the stroke colour.
+  BoolColumn get filled => boolean().withDefault(const Constant(false))();
+
+  /// Nib shape: round or square (chisel). Mainly for highlighter and tape.
+  IntColumn get tip => intEnum<StrokeTip>().withDefault(const Constant(0))();
 
   RealColumn get bboxL => real()();
   RealColumn get bboxT => real()();
@@ -102,7 +154,7 @@ class Strokes extends Table {
 /// Non-ink canvas objects: text boxes, images, recognised shapes.
 /// Named [CanvasElements] so the generated row class is `CanvasElement`,
 /// avoiding a clash with Flutter's `Element` class.
-class CanvasElements extends Table {
+class CanvasElements extends Table with SyncedTable {
   TextColumn get id => text()();
   TextColumn get pageId =>
       text().references(NotePages, #id, onDelete: KeyAction.cascade)();
@@ -121,19 +173,38 @@ class CanvasElements extends Table {
 
   DateTimeColumn get createdAt =>
       dateTime().withDefault(currentDateAndTime)();
-  DateTimeColumn get updatedAt =>
-      dateTime().withDefault(currentDateAndTime)();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-/// Binary assets on disk (imported images, PDFs). [kind]: 0=image, 1=pdf.
-class Assets extends Table {
+/// Binary assets (imported images, PDFs). [kind]: 0=image, 1=pdf.
+///
+/// On native platforms the bytes live in a file at [localPath] — a 150 MB PDF
+/// base64-encoded into SQLite became ~200 MB of text and made page loads
+/// crawl. On web there is no filesystem, so [data] keeps the base64 fallback.
+/// (Base64 rather than a BLOB because drift's web worker *transfers* typed
+/// data, detaching the buffer and corrupting large binary writes.)
+class Assets extends Table with SyncedTable {
   TextColumn get id => text()();
   IntColumn get kind => integer()();
-  TextColumn get path => text()();
+
+  /// Original filename, for display.
+  TextColumn get path => text().withDefault(const Constant(''))();
   TextColumn get mime => text().nullable()();
+
+  /// Web-only fallback: base64 bytes.
+  TextColumn get data => text().nullable()();
+
+  /// Native: absolute path to the file on disk.
+  TextColumn get localPath => text().nullable()();
+
+  /// Content hash — dedupes identical imports and keys the remote object.
+  TextColumn get sha256 => text().nullable()();
+  IntColumn get sizeBytes => integer().nullable()();
+
+  /// Object key once uploaded to R2 (null = not uploaded yet).
+  TextColumn get remoteKey => text().nullable()();
   DateTimeColumn get createdAt =>
       dateTime().withDefault(currentDateAndTime)();
 

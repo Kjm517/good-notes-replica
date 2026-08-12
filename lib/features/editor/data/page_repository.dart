@@ -14,14 +14,22 @@ class PageRepository {
 
   Stream<List<NotePage>> watchPages(String documentId) {
     final q = _db.select(_db.notePages)
-      ..where((p) => p.documentId.equals(documentId))
+      ..where((p) => p.documentId.equals(documentId) & p.deletedAt.isNull())
       ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)]);
     return q.watch();
   }
 
+  Future<NotePage?> firstPage(String documentId) {
+    return (_db.select(_db.notePages)
+          ..where((p) => p.documentId.equals(documentId) & p.deletedAt.isNull())
+          ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)])
+          ..limit(1))
+        .getSingleOrNull();
+  }
+
   Future<List<NotePage>> getPages(String documentId) {
     final q = _db.select(_db.notePages)
-      ..where((p) => p.documentId.equals(documentId))
+      ..where((p) => p.documentId.equals(documentId) & p.deletedAt.isNull())
       ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)]);
     return q.get();
   }
@@ -39,7 +47,11 @@ class PageRepository {
       // Shift subsequent pages down.
       for (final p in pages.where((p) => p.pageIndex >= insertAt)) {
         await (_db.update(_db.notePages)..where((t) => t.id.equals(p.id)))
-            .write(NotePagesCompanion(pageIndex: Value(p.pageIndex + 1)));
+            .write(NotePagesCompanion(
+              pageIndex: Value(p.pageIndex + 1),
+              updatedAt: Value(DateTime.now()),
+              dirty: const Value(true),
+            ));
       }
       final id = _uuid.v4();
       await _db.into(_db.notePages).insert(NotePagesCompanion.insert(
@@ -73,7 +85,11 @@ class PageRepository {
       final all = await getPages(page.documentId);
       for (final p in all.where((p) => p.pageIndex > page.pageIndex)) {
         await (_db.update(_db.notePages)..where((t) => t.id.equals(p.id)))
-            .write(NotePagesCompanion(pageIndex: Value(p.pageIndex + 1)));
+            .write(NotePagesCompanion(
+              pageIndex: Value(p.pageIndex + 1),
+              updatedAt: Value(DateTime.now()),
+              dirty: const Value(true),
+            ));
       }
       final newId = _uuid.v4();
       await _db.into(_db.notePages).insert(NotePagesCompanion.insert(
@@ -127,13 +143,24 @@ class PageRepository {
         .getSingleOrNull();
     if (page == null) return;
     await _db.transaction(() async {
-      await (_db.delete(_db.notePages)..where((p) => p.id.equals(pageId))).go();
+      // Tombstone rather than hard delete so the removal replicates.
+      final now = DateTime.now();
+      await (_db.update(_db.notePages)..where((p) => p.id.equals(pageId)))
+          .write(NotePagesCompanion(
+        deletedAt: Value(now),
+        updatedAt: Value(now),
+        dirty: const Value(true),
+      ));
       final rest = await getPages(page.documentId);
       // Re-pack indices.
       for (var i = 0; i < rest.length; i++) {
         if (rest[i].pageIndex != i) {
           await (_db.update(_db.notePages)..where((t) => t.id.equals(rest[i].id)))
-              .write(NotePagesCompanion(pageIndex: Value(i)));
+              .write(NotePagesCompanion(
+                pageIndex: Value(i),
+                updatedAt: Value(DateTime.now()),
+                dirty: const Value(true),
+              ));
         }
       }
       await _touchDocument(page.documentId);
@@ -148,7 +175,11 @@ class PageRepository {
     await _db.transaction(() async {
       for (var i = 0; i < pages.length; i++) {
         await (_db.update(_db.notePages)..where((t) => t.id.equals(pages[i].id)))
-            .write(NotePagesCompanion(pageIndex: Value(i)));
+            .write(NotePagesCompanion(
+          pageIndex: Value(i),
+          updatedAt: Value(DateTime.now()),
+          dirty: const Value(true),
+        ));
       }
       await _touchDocument(documentId);
     });
@@ -168,12 +199,19 @@ class PageRepository {
       _update(pageId, NotePagesCompanion(bookmarkTitle: Value(title)));
 
   Future<void> _update(String pageId, NotePagesCompanion companion) async {
-    await (_db.update(_db.notePages)..where((p) => p.id.equals(pageId)))
-        .write(companion.copyWith(updatedAt: Value(DateTime.now())));
+    await (_db.update(_db.notePages)..where((p) => p.id.equals(pageId))).write(
+      companion.copyWith(
+        updatedAt: Value(DateTime.now()),
+        dirty: const Value(true),
+      ),
+    );
   }
 
   Future<void> _touchDocument(String documentId) async {
     await (_db.update(_db.documents)..where((d) => d.id.equals(documentId)))
-        .write(DocumentsCompanion(updatedAt: Value(DateTime.now())));
+        .write(DocumentsCompanion(
+      updatedAt: Value(DateTime.now()),
+      dirty: const Value(true),
+    ));
   }
 }

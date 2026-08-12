@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/design.dart';
 import '../../../core/models/enums.dart';
-import '../../../core/models/margin_spec.dart';
 import '../../../core/models/page_geometry.dart';
 import '../providers.dart';
+import 'margins_sheet.dart';
 
 /// Bottom sheet to change the current page's template, paper colour and the
 /// adjustable margins. The margins editor is the UI seam for the custom
@@ -27,7 +28,6 @@ class PageSettingsSheet extends ConsumerWidget {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
       builder: (_) =>
           PageSettingsSheet(documentId: documentId, pageSize: pageSize),
     );
@@ -35,170 +35,240 @@ class PageSettingsSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
     final state = ref.watch(editorControllerProvider(documentId));
     final controller = ref.read(editorControllerProvider(documentId).notifier);
     final page = state.currentPage;
     if (page == null) return const SizedBox.shrink();
     final margins = page.marginSpec;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('Page', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 16),
-          _label(context, 'Template'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final t in const [
-                PaperTemplate.blank,
-                PaperTemplate.lined,
-                PaperTemplate.gridSmall,
-                PaperTemplate.gridLarge,
-                PaperTemplate.dotted,
-                PaperTemplate.cornell,
-                PaperTemplate.music,
-                PaperTemplate.planner,
-              ])
-                ChoiceChip(
-                  label: Text(t.label),
-                  selected: page.template == t,
-                  onSelected: (_) => controller.setTemplate(t),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _label(context, 'Paper colour'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final c in PaperColor.values)
-                ChoiceChip(
-                  label: Text(c.label),
-                  selected: page.paperColor == c,
-                  onSelected: (_) => controller.setPaperColor(c),
-                ),
-            ],
-          ),
-          const Divider(height: 32),
-          Row(
-            children: [
-              Text('Margins',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              Switch(
-                value: margins.enabled,
-                onChanged: (v) =>
-                    controller.setMargins(margins.copyWith(enabled: v)),
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.82,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 16, 14),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Page settings',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontSize: 18)),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Page ${state.currentIndex + 1}',
+                          style:
+                              AppTokens.mono(size: 11, color: t.textFaint),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    color: t.textFaint,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 8,
-            children: [
-              ActionChip(
-                label: const Text('Left rule'),
-                onPressed: () =>
-                    controller.setMargins(MarginSpec.leftRule()),
+            ),
+            Divider(height: 1, color: t.line),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
+                children: [
+                  _Caption(label: 'Page setup'),
+                  _Row(
+                    label: 'Template',
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final template in const [
+                          PaperTemplate.blank,
+                          PaperTemplate.lined,
+                          PaperTemplate.gridSmall,
+                          PaperTemplate.gridLarge,
+                          PaperTemplate.dotted,
+                          PaperTemplate.cornell,
+                          PaperTemplate.music,
+                          PaperTemplate.planner,
+                        ])
+                          _Pill(
+                            label: template.label,
+                            selected: page.template == template,
+                            onTap: () => controller.setTemplate(template),
+                          ),
+                      ],
+                    ),
+                  ),
+                  _Row(
+                    label: 'Paper colour',
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final c in PaperColor.values)
+                          _Pill(
+                            label: c.label,
+                            selected: page.paperColor == c,
+                            onTap: () => controller.setPaperColor(c),
+                          ),
+                      ],
+                    ),
+                  ),
+                  _Caption(label: 'Layout'),
+                  // Margins live in their own panel — see the Margins toolbar
+                  // button.
+                  InkWell(
+                    borderRadius: BorderRadius.circular(Radii.control),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      MarginsSheet.show(context,
+                          documentId: documentId, pageSize: pageSize);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.straighten_rounded,
+                              size: 20, color: t.textSecondary),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Margins',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: t.text,
+                                    )),
+                                const SizedBox(height: 2),
+                                Text(
+                                  margins.enabled
+                                      ? 'On — extends the page around your notes'
+                                      : 'Off',
+                                  style: TextStyle(
+                                      fontSize: 12, color: t.textMuted),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.chevron_right_rounded,
+                              size: 20, color: t.textFaint),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              ActionChip(
-                label: const Text('Uniform'),
-                onPressed: () => controller.setMargins(MarginSpec.uniform(48)),
-              ),
-              ActionChip(
-                label: const Text('None'),
-                onPressed: () => controller.setMargins(MarginSpec.none),
-              ),
-            ],
-          ),
-          if (margins.enabled) ...[
-            _MarginSlider(
-              label: 'Left',
-              value: margins.left,
-              max: pageSize.width / 2,
-              onChanged: (v) =>
-                  controller.setMargins(margins.copyWith(left: v)),
-            ),
-            _MarginSlider(
-              label: 'Right',
-              value: margins.right,
-              max: pageSize.width / 2,
-              onChanged: (v) =>
-                  controller.setMargins(margins.copyWith(right: v)),
-            ),
-            _MarginSlider(
-              label: 'Top',
-              value: margins.top,
-              max: pageSize.height / 2,
-              onChanged: (v) => controller.setMargins(margins.copyWith(top: v)),
-            ),
-            _MarginSlider(
-              label: 'Bottom',
-              value: margins.bottom,
-              max: pageSize.height / 2,
-              onChanged: (v) =>
-                  controller.setMargins(margins.copyWith(bottom: v)),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: margins.showGuides,
-              onChanged: (v) =>
-                  controller.setMargins(margins.copyWith(showGuides: v)),
-              title: const Text('Show guide lines'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The Space Mono uppercase caption that heads each group of settings.
+class _Caption extends StatelessWidget {
+  const _Caption({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 10),
+      child: Text(label.toUpperCase(),
+          style: AppTokens.sectionLabel(t.textFaint)),
+    );
+  }
+}
+
+/// Label on the left, control on the right — the settings row shape used
+/// throughout the design.
+class _Row extends StatelessWidget {
+  const _Row({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 11),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: t.text,
+                )),
+          ),
+          const SizedBox(width: 16),
+          Expanded(child: Align(alignment: Alignment.centerRight, child: child)),
         ],
       ),
     );
   }
-
-  Widget _label(BuildContext context, String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(text,
-            style: Theme.of(context)
-                .textTheme
-                .labelLarge
-                ?.copyWith(color: Theme.of(context).hintColor)),
-      );
 }
 
-class _MarginSlider extends StatelessWidget {
-  const _MarginSlider({
+/// Compact selectable pill, replacing Material's chunkier ChoiceChip.
+class _Pill extends StatelessWidget {
+  const _Pill({
     required this.label,
-    required this.value,
-    required this.max,
-    required this.onChanged,
+    required this.selected,
+    required this.onTap,
   });
 
   final String label;
-  final double value;
-  final double max;
-  final ValueChanged<double> onChanged;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        SizedBox(width: 64, child: Text(label)),
-        Expanded(
-          child: Slider(
-            value: value.clamp(0, max),
-            max: max,
-            onChanged: onChanged,
+    final t = context.tokens;
+    return Material(
+      color: selected ? t.accentSoft : t.fill,
+      borderRadius: BorderRadius.circular(9),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: selected ? t.accent : t.line),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: selected ? t.accentText : t.textSecondary,
+            ),
           ),
         ),
-        SizedBox(
-          width: 42,
-          child: Text('${value.round()}',
-              textAlign: TextAlign.end),
-        ),
-      ],
+      ),
     );
   }
 }

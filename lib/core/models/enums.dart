@@ -28,6 +28,9 @@ enum PageOrientation { portrait, landscape }
 enum PageSizePreset { a4, a5, letter, square, reMarkable }
 
 /// Drawing / editing tools available in the editor.
+///
+/// IMPORTANT: values are persisted by index (drift `intEnum`), so new tools
+/// must be appended at the end — never inserted or reordered.
 enum ToolType {
   pen,
   pencil,
@@ -38,10 +41,33 @@ enum ToolType {
   text,
   image,
   hand, // pan/zoom only
+  fountainPen,
+  tape,
 }
+
+/// Tools that lay down ink (as opposed to selecting/erasing/navigating).
+const Set<ToolType> kInkTools = {
+  ToolType.pen,
+  ToolType.fountainPen,
+  ToolType.pencil,
+  ToolType.highlighter,
+  ToolType.tape,
+  ToolType.shape,
+};
 
 /// Eraser behaviour.
 enum EraserMode { stroke, area, highlighterOnly }
+
+/// Line style for a stroke. Persisted by index — append only.
+enum StrokeStyle { solid, dashed, dotted }
+
+/// Nib shape for broad tools (highlighter, tape). A round tip gives soft,
+/// rounded stroke ends; a square (chisel) tip gives flat, blocky ends.
+/// Persisted by index — append only.
+enum StrokeTip { round, square }
+
+/// How the lasso captures content.
+enum LassoMode { freehand, rectangular }
 
 /// Canvas element kinds (non-ink objects).
 enum ElementType { text, image, shape }

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "406661161387",
+    "project_id": "notably-f76a0",
+    "storage_bucket": "notably-f76a0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:406661161387:android:0e1462533b6ed8c3f1b2ee",
+        "android_client_info": {
+          "package_name": "com.notably.notably"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAk5pJErr55tJT0nqT_f0jvobBK_vn5AeE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

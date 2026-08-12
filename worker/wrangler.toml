@@ -1,0 +1,13 @@
+name = "notably-files"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+# The R2 bucket holding users' source PDFs and images.
+# Create it once with:  wrangler r2 bucket create notably-files
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "notably-files"
+
+[vars]
+# Tokens are only accepted if they were issued for this Firebase project.
+FIREBASE_PROJECT_ID = "notably-f76a0"
