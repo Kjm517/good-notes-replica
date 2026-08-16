@@ -149,3 +149,51 @@ class EditorState {
     );
   }
 }
+
+/// Merges a Drift [watch] emission with in-memory pages.
+///
+/// Apply-to-all used to write every page one-by-one, flooding the watch. A
+/// late snapshot with the previously applied spec would replace [local] after
+/// the user had already started a new drag, and [EditorController.setMargins]
+/// clearing the preview then snapped the sliders back. Prefer the local
+/// [NotePage.marginSpec] when it is at least as new as the incoming row, and
+/// keep any live preview on top.
+List<NotePage> mergeWatchedPages({
+  required List<NotePage> local,
+  required List<NotePage> incoming,
+  MarginSpec? previewMargins,
+  String? previewPageId,
+}) {
+  if (local.isEmpty) return incoming;
+  final localById = {for (final page in local) page.id: page};
+  return [
+    for (final page in incoming)
+      _mergeWatchedPage(
+        local: localById[page.id],
+        incoming: page,
+        previewMargins: previewMargins,
+        previewPageId: previewPageId,
+      ),
+  ];
+}
+
+NotePage _mergeWatchedPage({
+  required NotePage? local,
+  required NotePage incoming,
+  required MarginSpec? previewMargins,
+  required String? previewPageId,
+}) {
+  var result = incoming;
+  if (local != null &&
+      !incoming.updatedAt.isAfter(local.updatedAt) &&
+      local.marginSpec != incoming.marginSpec) {
+    result = incoming.copyWith(
+      marginSpec: local.marginSpec,
+      updatedAt: local.updatedAt,
+    );
+  }
+  if (previewMargins != null && previewPageId == result.id) {
+    result = result.copyWith(marginSpec: previewMargins);
+  }
+  return result;
+}

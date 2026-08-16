@@ -13,7 +13,7 @@ const double kSidebarWidth = 236;
 
 /// Below this the library switches to the phone layout: chips instead of a
 /// sidebar, two columns instead of four.
-const double kSidebarBreakpoint = 900;
+const double kSidebarBreakpoint = AppBreakpoints.librarySidebar;
 
 /// Persistent navigation rail for the desktop library.
 ///
@@ -87,10 +87,10 @@ class LibrarySidebar extends ConsumerWidget {
   }
 
   static IconData _iconFor(LibrarySection s) => switch (s) {
-        LibrarySection.all => Icons.description_outlined,
-        LibrarySection.recent => Icons.schedule_rounded,
-        LibrarySection.starred => Icons.star_outline_rounded,
-      };
+    LibrarySection.all => Icons.description_outlined,
+    LibrarySection.recent => Icons.schedule_rounded,
+    LibrarySection.starred => Icons.star_outline_rounded,
+  };
 
   /// Stable per-folder colour derived from its id, so a collection keeps the
   /// same dot across sessions and devices without storing anything.
@@ -123,7 +123,11 @@ class _Brand extends StatelessWidget {
               color: t.accent,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.draw_rounded, size: 16, color: Colors.white),
+            child: const Icon(
+              Icons.draw_rounded,
+              size: 16,
+              color: Colors.white,
+            ),
           ),
           const SizedBox(width: 10),
           Text(
@@ -150,8 +154,10 @@ class _SectionCaption extends StatelessWidget {
     final t = context.tokens;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 22, 12, 10),
-      child: Text(label.toUpperCase(),
-          style: AppTokens.sectionLabel(t.textFaint)),
+      child: Text(
+        label.toUpperCase(),
+        style: AppTokens.sectionLabel(t.textFaint),
+      ),
     );
   }
 }
@@ -207,8 +213,7 @@ class _NavRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                       color: fg,
                     ),
                   ),
@@ -222,10 +227,14 @@ class _NavRow extends StatelessWidget {
   }
 }
 
-/// How much disk the imported files take.
+/// Nominal storage allowance the meter fills against.
 ///
-/// There is no server-side quota to report against, so this shows the real
-/// figure rather than a made-up "x of 15 GB" allowance.
+/// There is no server-side quota yet, so this is a display allowance rather
+/// than an enforced limit — the bar gives a sense of scale, and the real
+/// used figure beside it stays honest.
+const int _kStorageQuotaBytes = 15 * 1024 * 1024 * 1024; // 15 GB
+
+/// How much disk the imported files take, shown against [_kStorageQuotaBytes].
 class _StorageMeter extends ConsumerWidget {
   const _StorageMeter();
 
@@ -233,6 +242,10 @@ class _StorageMeter extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final bytes = ref.watch(libraryStorageProvider).asData?.value ?? 0;
+    final fraction = (bytes / _kStorageQuotaBytes).clamp(0.0, 1.0);
+    // Match the quota's unit (GB) even when tiny, so it reads "0.1 / 15 GB"
+    // rather than jumping between MB and GB as files are added.
+    final usedGb = bytes / (1024 * 1024 * 1024);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(28, 16, 28, 22),
@@ -245,17 +258,26 @@ class _StorageMeter extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Files on this device',
-                  style: TextStyle(fontSize: 12, color: t.textMuted)),
+              Text(
+                'Storage',
+                style: TextStyle(fontSize: 12, color: t.textMuted),
+              ),
+              Text(
+                '${usedGb.toStringAsFixed(1)} / 15 GB',
+                style: AppTokens.mono(size: 12, color: t.textSecondary),
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(formatBytes(bytes),
-              style: AppTokens.mono(
-                size: 13,
-                weight: FontWeight.w700,
-                color: t.textSecondary,
-              )),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: fraction,
+              minHeight: 6,
+              backgroundColor: t.fill,
+              valueColor: AlwaysStoppedAnimation<Color>(t.accent),
+            ),
+          ),
         ],
       ),
     );

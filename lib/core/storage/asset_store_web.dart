@@ -7,18 +7,27 @@ import 'asset_store.dart';
 /// database as base64 (see the Assets table doc comment).
 const bool supportsFileStorage = false;
 
-Future<StoredAsset> writeAsset(String id, Uint8List bytes,
-        {String extension = 'bin'}) async =>
-    StoredAsset(base64: base64Encode(bytes));
+Future<StoredAsset> writeAsset(
+  String id,
+  Uint8List bytes, {
+  String extension = 'bin',
+}) async => StoredAsset(base64: base64Encode(bytes));
 
 /// Unreachable on web: there is no file path to copy from, so imports there
 /// go through the in-memory route instead.
-Future<CopiedAsset> copyAssetFromFile(String id, String sourcePath,
-        {String extension = 'bin'}) =>
-    throw UnsupportedError('Asset files are not available on web');
+Future<CopiedAsset> copyAssetFromFile(
+  String id,
+  String sourcePath, {
+  String extension = 'bin',
+}) => throw UnsupportedError('Asset files are not available on web');
 
 Future<CopiedAsset> probeFile(String sourcePath) =>
     throw UnsupportedError('Asset files are not available on web');
+
+Future<bool> assetExists({
+  String? localPath,
+  bool hasInlineData = false,
+}) async => hasInlineData;
 
 Future<Uint8List?> readAsset({String? localPath, String? base64}) async =>
     base64 == null ? null : base64Decode(base64);

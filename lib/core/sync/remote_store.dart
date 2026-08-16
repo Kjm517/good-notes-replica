@@ -50,4 +50,13 @@ abstract class RemoteStore {
   Future<Uint8List?> fetchInk(String pageId);
 
   Future<void> putInk(String pageId, Uint8List bytes, DateTime updatedAt);
+
+  /// A single record by id, or null if it doesn't exist. Used to hydrate asset
+  /// metadata when a pulled page points at a PDF that this device has never
+  /// seen.
+  Future<RemoteRecord?> fetchById(
+    RemoteCollection collection,
+    String id, {
+    String? parentId,
+  });
 }

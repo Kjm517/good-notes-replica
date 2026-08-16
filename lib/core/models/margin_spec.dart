@@ -17,7 +17,7 @@ class MarginSpec {
     this.top = 0,
     this.right = 0,
     this.bottom = 0,
-    this.showGuides = true,
+    this.showGuides = false,
     this.guideColorValue = 0x33FF3B30, // faint red, GoodNotes-style margin line
     this.clipInk = false,
     this.extend = true,
@@ -33,6 +33,11 @@ class MarginSpec {
   final double bottom;
 
   /// Whether to paint the margin guide lines.
+  ///
+  /// Off by default: the margin already reads as a margin from the blank band
+  /// and the template ruling stopping short, so the extra rules only add
+  /// clutter. [MarginSpec.leftRule] opts back in, since there the line *is*
+  /// the feature.
   final bool showGuides;
 
   /// ARGB colour used for the guide lines.
@@ -133,7 +138,7 @@ class MarginSpec {
         top: (map['top'] as num?)?.toDouble() ?? 0,
         right: (map['right'] as num?)?.toDouble() ?? 0,
         bottom: (map['bottom'] as num?)?.toDouble() ?? 0,
-        showGuides: map['showGuides'] as bool? ?? true,
+        showGuides: map['showGuides'] as bool? ?? false,
         guideColorValue: (map['guideColor'] as num?)?.toInt() ?? 0x33FF3B30,
         clipInk: map['clipInk'] as bool? ?? false,
         extend: map['extend'] as bool? ?? true,

@@ -165,6 +165,17 @@ class $DocumentsTable extends Documents
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _outlineMeta = const VerificationMeta(
+    'outline',
+  );
+  @override
+  late final GeneratedColumn<String> outline = GeneratedColumn<String>(
+    'outline',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _trashedAtMeta = const VerificationMeta(
     'trashedAt',
   );
@@ -227,6 +238,7 @@ class $DocumentsTable extends Documents
     starred,
     ownerUid,
     coverThumb,
+    outline,
     trashedAt,
     sortIndex,
     createdAt,
@@ -310,6 +322,12 @@ class $DocumentsTable extends Documents
       context.handle(
         _coverThumbMeta,
         coverThumb.isAcceptableOrUnknown(data['cover_thumb']!, _coverThumbMeta),
+      );
+    }
+    if (data.containsKey('outline')) {
+      context.handle(
+        _outlineMeta,
+        outline.isAcceptableOrUnknown(data['outline']!, _outlineMeta),
       );
     }
     if (data.containsKey('trashed_at')) {
@@ -410,6 +428,10 @@ class $DocumentsTable extends Documents
         DriftSqlType.string,
         data['${effectivePrefix}cover_thumb'],
       ),
+      outline: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}outline'],
+      ),
       trashedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}trashed_at'],
@@ -473,6 +495,14 @@ class Document extends DataClass implements Insertable<Document> {
   /// card-sized preview — a 150 MB textbook took over 20 seconds.
   final String? coverThumb;
 
+  /// The PDF's embedded table of contents as a JSON list of [OutlineEntry].
+  ///
+  /// Extracted once in the background (alongside search-text indexing) so the
+  /// outline sidebar can jump to sections like a browser PDF viewer. Null means
+  /// "not extracted yet"; an empty list means the PDF genuinely has no outline.
+  /// Derived data, so it isn't synced — each device regenerates it locally.
+  final String? outline;
+
   /// Null unless soft-deleted (in trash).
   final DateTime? trashedAt;
 
@@ -495,6 +525,7 @@ class Document extends DataClass implements Insertable<Document> {
     required this.starred,
     this.ownerUid,
     this.coverThumb,
+    this.outline,
     this.trashedAt,
     required this.sortIndex,
     required this.createdAt,
@@ -537,6 +568,9 @@ class Document extends DataClass implements Insertable<Document> {
     if (!nullToAbsent || coverThumb != null) {
       map['cover_thumb'] = Variable<String>(coverThumb);
     }
+    if (!nullToAbsent || outline != null) {
+      map['outline'] = Variable<String>(outline);
+    }
     if (!nullToAbsent || trashedAt != null) {
       map['trashed_at'] = Variable<DateTime>(trashedAt);
     }
@@ -574,6 +608,9 @@ class Document extends DataClass implements Insertable<Document> {
       coverThumb: coverThumb == null && nullToAbsent
           ? const Value.absent()
           : Value(coverThumb),
+      outline: outline == null && nullToAbsent
+          ? const Value.absent()
+          : Value(outline),
       trashedAt: trashedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(trashedAt),
@@ -611,6 +648,7 @@ class Document extends DataClass implements Insertable<Document> {
       starred: serializer.fromJson<bool>(json['starred']),
       ownerUid: serializer.fromJson<String?>(json['ownerUid']),
       coverThumb: serializer.fromJson<String?>(json['coverThumb']),
+      outline: serializer.fromJson<String?>(json['outline']),
       trashedAt: serializer.fromJson<DateTime?>(json['trashedAt']),
       sortIndex: serializer.fromJson<int>(json['sortIndex']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
@@ -641,6 +679,7 @@ class Document extends DataClass implements Insertable<Document> {
       'starred': serializer.toJson<bool>(starred),
       'ownerUid': serializer.toJson<String?>(ownerUid),
       'coverThumb': serializer.toJson<String?>(coverThumb),
+      'outline': serializer.toJson<String?>(outline),
       'trashedAt': serializer.toJson<DateTime?>(trashedAt),
       'sortIndex': serializer.toJson<int>(sortIndex),
       'createdAt': serializer.toJson<DateTime>(createdAt),
@@ -663,6 +702,7 @@ class Document extends DataClass implements Insertable<Document> {
     bool? starred,
     Value<String?> ownerUid = const Value.absent(),
     Value<String?> coverThumb = const Value.absent(),
+    Value<String?> outline = const Value.absent(),
     Value<DateTime?> trashedAt = const Value.absent(),
     int? sortIndex,
     DateTime? createdAt,
@@ -684,6 +724,7 @@ class Document extends DataClass implements Insertable<Document> {
     starred: starred ?? this.starred,
     ownerUid: ownerUid.present ? ownerUid.value : this.ownerUid,
     coverThumb: coverThumb.present ? coverThumb.value : this.coverThumb,
+    outline: outline.present ? outline.value : this.outline,
     trashedAt: trashedAt.present ? trashedAt.value : this.trashedAt,
     sortIndex: sortIndex ?? this.sortIndex,
     createdAt: createdAt ?? this.createdAt,
@@ -713,6 +754,7 @@ class Document extends DataClass implements Insertable<Document> {
       coverThumb: data.coverThumb.present
           ? data.coverThumb.value
           : this.coverThumb,
+      outline: data.outline.present ? data.outline.value : this.outline,
       trashedAt: data.trashedAt.present ? data.trashedAt.value : this.trashedAt,
       sortIndex: data.sortIndex.present ? data.sortIndex.value : this.sortIndex,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
@@ -739,6 +781,7 @@ class Document extends DataClass implements Insertable<Document> {
           ..write('starred: $starred, ')
           ..write('ownerUid: $ownerUid, ')
           ..write('coverThumb: $coverThumb, ')
+          ..write('outline: $outline, ')
           ..write('trashedAt: $trashedAt, ')
           ..write('sortIndex: $sortIndex, ')
           ..write('createdAt: $createdAt, ')
@@ -763,6 +806,7 @@ class Document extends DataClass implements Insertable<Document> {
     starred,
     ownerUid,
     coverThumb,
+    outline,
     trashedAt,
     sortIndex,
     createdAt,
@@ -786,6 +830,7 @@ class Document extends DataClass implements Insertable<Document> {
           other.starred == this.starred &&
           other.ownerUid == this.ownerUid &&
           other.coverThumb == this.coverThumb &&
+          other.outline == this.outline &&
           other.trashedAt == this.trashedAt &&
           other.sortIndex == this.sortIndex &&
           other.createdAt == this.createdAt &&
@@ -807,6 +852,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
   final Value<bool> starred;
   final Value<String?> ownerUid;
   final Value<String?> coverThumb;
+  final Value<String?> outline;
   final Value<DateTime?> trashedAt;
   final Value<int> sortIndex;
   final Value<DateTime> createdAt;
@@ -827,6 +873,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     this.starred = const Value.absent(),
     this.ownerUid = const Value.absent(),
     this.coverThumb = const Value.absent(),
+    this.outline = const Value.absent(),
     this.trashedAt = const Value.absent(),
     this.sortIndex = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -848,6 +895,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     this.starred = const Value.absent(),
     this.ownerUid = const Value.absent(),
     this.coverThumb = const Value.absent(),
+    this.outline = const Value.absent(),
     this.trashedAt = const Value.absent(),
     this.sortIndex = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -870,6 +918,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     Expression<bool>? starred,
     Expression<String>? ownerUid,
     Expression<String>? coverThumb,
+    Expression<String>? outline,
     Expression<DateTime>? trashedAt,
     Expression<int>? sortIndex,
     Expression<DateTime>? createdAt,
@@ -891,6 +940,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
       if (starred != null) 'starred': starred,
       if (ownerUid != null) 'owner_uid': ownerUid,
       if (coverThumb != null) 'cover_thumb': coverThumb,
+      if (outline != null) 'outline': outline,
       if (trashedAt != null) 'trashed_at': trashedAt,
       if (sortIndex != null) 'sort_index': sortIndex,
       if (createdAt != null) 'created_at': createdAt,
@@ -914,6 +964,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     Value<bool>? starred,
     Value<String?>? ownerUid,
     Value<String?>? coverThumb,
+    Value<String?>? outline,
     Value<DateTime?>? trashedAt,
     Value<int>? sortIndex,
     Value<DateTime>? createdAt,
@@ -935,6 +986,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
       starred: starred ?? this.starred,
       ownerUid: ownerUid ?? this.ownerUid,
       coverThumb: coverThumb ?? this.coverThumb,
+      outline: outline ?? this.outline,
       trashedAt: trashedAt ?? this.trashedAt,
       sortIndex: sortIndex ?? this.sortIndex,
       createdAt: createdAt ?? this.createdAt,
@@ -994,6 +1046,9 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     if (coverThumb.present) {
       map['cover_thumb'] = Variable<String>(coverThumb.value);
     }
+    if (outline.present) {
+      map['outline'] = Variable<String>(outline.value);
+    }
     if (trashedAt.present) {
       map['trashed_at'] = Variable<DateTime>(trashedAt.value);
     }
@@ -1029,6 +1084,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
           ..write('starred: $starred, ')
           ..write('ownerUid: $ownerUid, ')
           ..write('coverThumb: $coverThumb, ')
+          ..write('outline: $outline, ')
           ..write('trashedAt: $trashedAt, ')
           ..write('sortIndex: $sortIndex, ')
           ..write('createdAt: $createdAt, ')
@@ -4913,6 +4969,7 @@ typedef $$DocumentsTableCreateCompanionBuilder =
       Value<bool> starred,
       Value<String?> ownerUid,
       Value<String?> coverThumb,
+      Value<String?> outline,
       Value<DateTime?> trashedAt,
       Value<int> sortIndex,
       Value<DateTime> createdAt,
@@ -4935,6 +4992,7 @@ typedef $$DocumentsTableUpdateCompanionBuilder =
       Value<bool> starred,
       Value<String?> ownerUid,
       Value<String?> coverThumb,
+      Value<String?> outline,
       Value<DateTime?> trashedAt,
       Value<int> sortIndex,
       Value<DateTime> createdAt,
@@ -5044,6 +5102,11 @@ class $$DocumentsTableFilterComposer
 
   ColumnFilters<String> get coverThumb => $composableBuilder(
     column: $table.coverThumb,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get outline => $composableBuilder(
+    column: $table.outline,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5172,6 +5235,11 @@ class $$DocumentsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get outline => $composableBuilder(
+    column: $table.outline,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get trashedAt => $composableBuilder(
     column: $table.trashedAt,
     builder: (column) => ColumnOrderings(column),
@@ -5252,6 +5320,9 @@ class $$DocumentsTableAnnotationComposer
     column: $table.coverThumb,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get outline =>
+      $composableBuilder(column: $table.outline, builder: (column) => column);
 
   GeneratedColumn<DateTime> get trashedAt =>
       $composableBuilder(column: $table.trashedAt, builder: (column) => column);
@@ -5335,6 +5406,7 @@ class $$DocumentsTableTableManager
                 Value<bool> starred = const Value.absent(),
                 Value<String?> ownerUid = const Value.absent(),
                 Value<String?> coverThumb = const Value.absent(),
+                Value<String?> outline = const Value.absent(),
                 Value<DateTime?> trashedAt = const Value.absent(),
                 Value<int> sortIndex = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -5355,6 +5427,7 @@ class $$DocumentsTableTableManager
                 starred: starred,
                 ownerUid: ownerUid,
                 coverThumb: coverThumb,
+                outline: outline,
                 trashedAt: trashedAt,
                 sortIndex: sortIndex,
                 createdAt: createdAt,
@@ -5377,6 +5450,7 @@ class $$DocumentsTableTableManager
                 Value<bool> starred = const Value.absent(),
                 Value<String?> ownerUid = const Value.absent(),
                 Value<String?> coverThumb = const Value.absent(),
+                Value<String?> outline = const Value.absent(),
                 Value<DateTime?> trashedAt = const Value.absent(),
                 Value<int> sortIndex = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -5397,6 +5471,7 @@ class $$DocumentsTableTableManager
                 starred: starred,
                 ownerUid: ownerUid,
                 coverThumb: coverThumb,
+                outline: outline,
                 trashedAt: trashedAt,
                 sortIndex: sortIndex,
                 createdAt: createdAt,

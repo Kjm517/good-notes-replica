@@ -5,10 +5,9 @@ import '../canvas/continuous_canvas.dart';
 
 /// Floating zoom control that sits over the bottom-right of the page canvas.
 ///
-/// The toolbar already has zoom buttons, but on a large screen the pointer is
-/// usually down in the page, not up in the chrome — this puts the control
-/// where the reading happens. Phones don't get it: pinch is better there, and
-/// the dock already owns the bottom of the screen.
+/// It remains available on touch devices as an accessible alternative to
+/// pinch-to-zoom. The slider supports fine adjustment while +/- provide quick
+/// steps and the percentage readout resets to fit-page.
 class ZoomCluster extends StatelessWidget {
   const ZoomCluster({super.key, required this.controller});
 
@@ -21,7 +20,7 @@ class ZoomCluster extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         return Container(
-          height: 38,
+          height: 42,
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
             color: t.surface,
@@ -43,6 +42,30 @@ class ZoomCluster extends StatelessWidget {
                 icon: Icons.remove_rounded,
                 tooltip: 'Zoom out',
                 onTap: controller.zoomOut,
+              ),
+              SizedBox(
+                width: 104,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 6,
+                    ),
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 14,
+                    ),
+                    activeTrackColor: t.accent,
+                    inactiveTrackColor: t.lineStrong,
+                    thumbColor: t.accent,
+                    overlayColor: t.accent.withValues(alpha: 0.12),
+                  ),
+                  child: Slider(
+                    value: controller.zoom.clamp(0.25, 8.0),
+                    min: 0.25,
+                    max: 8,
+                    onChanged: controller.setZoom,
+                  ),
+                ),
               ),
               // Tapping the readout snaps back to a page-width fit — the same
               // affordance a browser's zoom indicator offers.
@@ -75,11 +98,7 @@ class ZoomCluster extends StatelessWidget {
 }
 
 class _Btn extends StatelessWidget {
-  const _Btn({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
+  const _Btn({required this.icon, required this.tooltip, required this.onTap});
 
   final IconData icon;
   final String tooltip;

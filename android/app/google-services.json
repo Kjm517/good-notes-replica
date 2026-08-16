@@ -12,7 +12,20 @@
           "package_name": "com.notably.notably"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "406661161387-dofbuu3kp917f6qee8t76sjr89i9mcuo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.notably.notably",
+            "certificate_hash": "9775910ce26a091873f2f2a202d241d1ee22e9c1"
+          }
+        },
+        {
+          "client_id": "406661161387-1hao1asvtfstb345s86k2bjs6rr37d9d.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAk5pJErr55tJT0nqT_f0jvobBK_vn5AeE"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "406661161387-1hao1asvtfstb345s86k2bjs6rr37d9d.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "406661161387-55h2ifqqvctmgjmiehoeih641rc3o449.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.notably.notably"
+              }
+            }
+          ]
         }
       }
     }

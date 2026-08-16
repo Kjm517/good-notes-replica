@@ -45,6 +45,10 @@ void main() {
       expect(_bar(EditorBarLayout.single).preferredSize.height, 60);
     });
 
+    test('tablet rail keeps a compact title row', () {
+      expect(_bar(EditorBarLayout.tabletRail).preferredSize.height, 56);
+    });
+
     test('the tool row is exactly what stacked adds over phone', () {
       final stacked = _bar(EditorBarLayout.stacked).preferredSize.height;
       final phone = _bar(EditorBarLayout.phone).preferredSize.height;
@@ -68,6 +72,25 @@ void main() {
     test('wide desktops collapse to a single row', () {
       expect(EditorBarLayout.forWidth(1240), EditorBarLayout.single);
       expect(EditorBarLayout.forWidth(1920), EditorBarLayout.single);
+    });
+
+    test('size-aware layout handles phone, tablet, and desktop', () {
+      expect(
+        EditorBarLayout.forSize(const Size(390, 844)),
+        EditorBarLayout.phone,
+      );
+      expect(
+        EditorBarLayout.forSize(const Size(1024, 1366)),
+        EditorBarLayout.stacked,
+      );
+      expect(
+        EditorBarLayout.forSize(const Size(1194, 834)),
+        EditorBarLayout.tabletRail,
+      );
+      expect(
+        EditorBarLayout.forSize(const Size(1366, 1024)),
+        EditorBarLayout.single,
+      );
     });
 
     test('every layout above phone shows the tools inline', () {

@@ -119,4 +119,22 @@ class FirestoreStore implements RemoteStore {
       'updatedAt': Timestamp.fromDate(updatedAt),
     });
   }
+
+  @override
+  Future<RemoteRecord?> fetchById(
+    RemoteCollection collection,
+    String id, {
+    String? parentId,
+  }) async {
+    final snap = await _collectionRef(collection, parentId).doc(id).get();
+    if (!snap.exists || snap.data() == null) return null;
+    final data = Map<String, Object?>.from(snap.data()!);
+    return RemoteRecord(
+      id: snap.id,
+      data: data,
+      updatedAt:
+          _readTime(data['updatedAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+      deletedAt: _readTime(data['deletedAt']),
+    );
+  }
 }

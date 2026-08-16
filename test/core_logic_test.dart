@@ -1,10 +1,12 @@
-import 'package:flutter/widgets.dart' show Size;
+import 'package:flutter/widgets.dart' show Offset, Size;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:notably/core/db/database.dart';
 import 'package:notably/core/ink/ink_stroke.dart';
 import 'package:notably/core/models/enums.dart';
 import 'package:notably/core/models/margin_spec.dart';
 import 'package:notably/core/models/page_geometry.dart';
 import 'package:notably/features/editor/ink/stroke_renderer.dart';
+import 'package:notably/features/editor/state/editor_state.dart';
 
 void main() {
   group('MarginSpec', () {
@@ -154,6 +156,54 @@ void main() {
       final l = PageSizePreset.a4.size(PageOrientation.landscape);
       expect(l.width, p.height);
       expect(l.height, p.width);
+    });
+  });
+
+  group('mergeWatchedPages', () {
+    NotePage page({
+      required DateTime updatedAt,
+      required MarginSpec marginSpec,
+    }) {
+      return NotePage(
+        updatedAt: updatedAt,
+        dirty: true,
+        id: 'page-1',
+        documentId: 'doc',
+        pageIndex: 0,
+        template: PaperTemplate.lined,
+        paperColor: PaperColor.white,
+        marginSpec: marginSpec,
+        createdAt: updatedAt,
+      );
+    }
+
+    test('keeps a newer local margin over a stale apply-to-all snapshot', () {
+      final applied = DateTime.utc(2026, 8, 16, 12);
+      final edited = applied.add(const Duration(seconds: 1));
+      const appliedSpec = MarginSpec(enabled: true, left: 40, extend: true);
+      const editedSpec = MarginSpec(enabled: true, left: 80, extend: true);
+
+      final merged = mergeWatchedPages(
+        local: [page(updatedAt: edited, marginSpec: editedSpec)],
+        incoming: [page(updatedAt: applied, marginSpec: appliedSpec)],
+      );
+
+      expect(merged.single.marginSpec, editedSpec);
+    });
+
+    test('keeps a live preview on the page being dragged', () {
+      final t = DateTime.utc(2026, 8, 16, 12);
+      const appliedSpec = MarginSpec(enabled: true, left: 40, extend: true);
+      const previewSpec = MarginSpec(enabled: true, left: 90, extend: true);
+
+      final merged = mergeWatchedPages(
+        local: [page(updatedAt: t, marginSpec: appliedSpec)],
+        incoming: [page(updatedAt: t, marginSpec: appliedSpec)],
+        previewMargins: previewSpec,
+        previewPageId: 'page-1',
+      );
+
+      expect(merged.single.marginSpec, previewSpec);
     });
   });
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/db/database.dart';
 import '../../../core/models/image_element.dart';
+import 'hit_overflow.dart';
 
 /// Which corner is being dragged.
 enum _Corner { topLeft, topRight, bottomLeft, bottomRight }
@@ -22,7 +23,8 @@ class ImageLayer extends StatelessWidget {
     required this.onSelect,
     required this.onTransform,
     required this.onTransformEnd,
-    required this.onRotate,
+    this.previewRect,
+    this.previewRotation,
   });
 
   final List<CanvasElement> elements;
@@ -46,30 +48,27 @@ class ImageLayer extends StatelessWidget {
   final void Function(String id, Rect rect) onTransform;
   final void Function(String id, Rect rect) onTransformEnd;
 
-  /// Rotation in radians, committed on release.
-  final void Function(String id, double rotation, bool committed) onRotate;
+  /// Live two-finger transform driven by the canvas (content coordinates).
+  final Rect? previewRect;
+  final double? previewRotation;
 
   @override
   Widget build(BuildContext context) {
     if (elements.isEmpty) return const SizedBox.shrink();
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        for (final element in elements)
-          _ImageItem(
-            key: ValueKey(element.id),
-            element: element,
-            bytesFor: bytesFor,
-            dragScale: dragScale,
-            offset: offset,
-            interactive: interactive,
-            selected: element.id == selectedId,
-            onSelect: () => onSelect(element.id),
-            onTransform: (r) => onTransform(element.id, r),
-            onTransformEnd: (r) => onTransformEnd(element.id, r),
-            onRotate: (a, c) => onRotate(element.id, a, c),
-          ),
-      ],
+    final element = elements.first;
+    return _ImageItem(
+      key: ValueKey(element.id),
+      element: element,
+      bytesFor: bytesFor,
+      dragScale: dragScale,
+      offset: offset,
+      interactive: interactive,
+      selected: element.id == selectedId,
+      onSelect: () => onSelect(element.id),
+      onTransform: (r) => onTransform(element.id, r),
+      onTransformEnd: (r) => onTransformEnd(element.id, r),
+      previewRect: element.id == selectedId ? previewRect : null,
+      previewRotation: element.id == selectedId ? previewRotation : null,
     );
   }
 }
@@ -86,7 +85,8 @@ class _ImageItem extends StatefulWidget {
     required this.onSelect,
     required this.onTransform,
     required this.onTransformEnd,
-    required this.onRotate,
+    this.previewRect,
+    this.previewRotation,
   });
 
   final CanvasElement element;
@@ -98,7 +98,8 @@ class _ImageItem extends StatefulWidget {
   final VoidCallback onSelect;
   final ValueChanged<Rect> onTransform;
   final ValueChanged<Rect> onTransformEnd;
-  final void Function(double rotation, bool committed) onRotate;
+  final Rect? previewRect;
+  final double? previewRotation;
 
   @override
   State<_ImageItem> createState() => _ImageItemState();
@@ -107,18 +108,33 @@ class _ImageItem extends StatefulWidget {
 class _ImageItemState extends State<_ImageItem> {
   Uint8List? _bytes;
   Rect? _live; // in-progress drag/resize, content coordinates
-  double? _liveRotation;
+  Rect? _gestureStart;
+  bool _canvasOwnsPinch = false;
 
-  double get _rotation => _liveRotation ?? widget.element.rotation;
+  double get _rotation => widget.previewRotation ?? widget.element.rotation;
 
   static const double _minSize = 24;
 
-  ImageElementData get _data => ImageElementData.fromJson(widget.element.data);
+  ImageElementData? _parsedData;
+  String? _parsedJson;
 
-  Rect get _stored => Rect.fromLTWH(widget.element.x, widget.element.y,
-      widget.element.width, widget.element.height);
+  ImageElementData get _data {
+    final json = widget.element.data;
+    if (json != _parsedJson) {
+      _parsedJson = json;
+      _parsedData = ImageElementData.fromJson(json);
+    }
+    return _parsedData!;
+  }
 
-  Rect get _rect => _live ?? _stored;
+  Rect get _stored => Rect.fromLTWH(
+    widget.element.x,
+    widget.element.y,
+    widget.element.width,
+    widget.element.height,
+  );
+
+  Rect get _rect => widget.previewRect ?? _live ?? _stored;
 
   @override
   void initState() {
@@ -165,12 +181,24 @@ class _ImageItemState extends State<_ImageItem> {
 
     final next = switch (corner) {
       _Corner.bottomRight => Rect.fromLTWH(r.left, r.top, width, height),
-      _Corner.bottomLeft =>
-        Rect.fromLTWH(r.right - width, r.top, width, height),
-      _Corner.topRight =>
-        Rect.fromLTWH(r.left, r.bottom - height, width, height),
-      _Corner.topLeft =>
-        Rect.fromLTWH(r.right - width, r.bottom - height, width, height),
+      _Corner.bottomLeft => Rect.fromLTWH(
+        r.right - width,
+        r.top,
+        width,
+        height,
+      ),
+      _Corner.topRight => Rect.fromLTWH(
+        r.left,
+        r.bottom - height,
+        width,
+        height,
+      ),
+      _Corner.topLeft => Rect.fromLTWH(
+        r.right - width,
+        r.bottom - height,
+        width,
+        height,
+      ),
     };
     setState(() => _live = next);
     widget.onTransform(next);
@@ -178,136 +206,138 @@ class _ImageItemState extends State<_ImageItem> {
 
   void _commit() {
     final r = _rect;
-    setState(() => _live = null);
+    setState(() {
+      _live = null;
+      _gestureStart = null;
+    });
     widget.onTransformEnd(r);
+  }
+
+  void _onScaleStart(ScaleStartDetails d) {
+    widget.onSelect();
+    _canvasOwnsPinch = d.pointerCount >= 2;
+    if (_canvasOwnsPinch) return;
+    _gestureStart = _rect;
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails d) {
+    // Two-finger resize/rotate is handled by the canvas so it still works
+    // when one finger sits on a grip or slightly off the picture.
+    if (d.pointerCount >= 2) {
+      _canvasOwnsPinch = true;
+      return;
+    }
+    _move(d.focalPointDelta);
+  }
+
+  void _onScaleEnd(ScaleEndDetails _) {
+    if (_canvasOwnsPinch) {
+      _canvasOwnsPinch = false;
+      setState(() {
+        _live = null;
+        _gestureStart = null;
+      });
+      return;
+    }
+    if (_live == null && _gestureStart == null) return;
+    _commit();
   }
 
   @override
   Widget build(BuildContext context) {
     final rect = _rect;
-    return Positioned(
-      left: rect.left + widget.offset.dx,
-      top: rect.top + widget.offset.dy,
-      width: rect.width,
-      height: rect.height,
-      child: IgnorePointer(
-        ignoring: !widget.interactive,
-        child: Transform.rotate(
-          angle: _rotation,
-          child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            // The picture itself: tap to select, drag to move.
-            Positioned.fill(
-              child: MouseRegion(
-                cursor: SystemMouseCursors.move,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: widget.onSelect,
-                  onPanStart: (_) => widget.onSelect(),
-                  onPanUpdate: (d) => _move(d.delta),
-                  onPanEnd: (_) => _commit(),
-                  child: _bytes == null
-                      ? const ColoredBox(color: Color(0x11000000))
-                      : ClipRect(
-                          child: _CroppedImage(bytes: _bytes!, data: _data),
+    final s = widget.dragScale <= 0 ? 1.0 : widget.dragScale;
+    // Corner grips sit half-outside the image; pad just enough that they
+    // still receive taps.
+    final chrome = widget.selected ? 12 / s : 0.0;
+    final rotation = _rotation;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final cacheW = (rect.width * s * dpr).round().clamp(32, 2048);
+    final cacheH = (rect.height * s * dpr).round().clamp(32, 2048);
+
+    Widget painted = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned(
+          left: chrome,
+          top: chrome,
+          right: chrome,
+          bottom: chrome,
+          child: widget.interactive || widget.selected
+              ? MouseRegion(
+                  cursor: SystemMouseCursors.move,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: widget.onSelect,
+                    onScaleStart: _onScaleStart,
+                    onScaleUpdate: _onScaleUpdate,
+                    onScaleEnd: _onScaleEnd,
+                    child: _bytes == null
+                        ? const ColoredBox(color: Color(0x11000000))
+                        : ClipRect(
+                            child: _CroppedImage(
+                              bytes: _bytes!,
+                              data: _data,
+                              cacheWidth: cacheW,
+                              cacheHeight: cacheH,
+                            ),
+                          ),
+                  ),
+                )
+              : (_bytes == null
+                    ? const ColoredBox(color: Color(0x11000000))
+                    : ClipRect(
+                        child: _CroppedImage(
+                          bytes: _bytes!,
+                          data: _data,
+                          cacheWidth: cacheW,
+                          cacheHeight: cacheH,
                         ),
-                ),
-              ),
-            ),
-            if (widget.selected) ...[
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: Theme.of(context).colorScheme.primary,
-                        width: 2 / (widget.dragScale <= 0 ? 1 : widget.dragScale),
-                      ),
-                    ),
+                      )),
+        ),
+        if (widget.selected) ...[
+          Positioned(
+            left: chrome,
+            top: chrome,
+            right: chrome,
+            bottom: chrome,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.primary,
+                    width: 2 / s,
                   ),
                 ),
               ),
-              for (final corner in _Corner.values)
-                _Handle(
-                  corner: corner,
-                  scale: widget.dragScale,
-                  onDrag: (delta) => _resize(corner, delta),
-                  onEnd: _commit,
-                ),
-              // Rotation grip, below the bottom edge.
-              _RotateHandle(
-                scale: widget.dragScale,
-                onRotate: (delta) {
-                  // Horizontal drag maps to rotation around the centre.
-                  final next = _rotation + delta.dx / 120;
-                  setState(() => _liveRotation = next);
-                  widget.onRotate(next, false);
-                },
-                onEnd: () {
-                  final a = _rotation;
-                  setState(() => _liveRotation = null);
-                  widget.onRotate(a, true);
-                },
-                onReset: () {
-                  setState(() => _liveRotation = 0);
-                  widget.onRotate(0, true);
-                },
-              ),
-            ],
-          ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Grip below the image that rotates it; double-tap resets to 0°.
-class _RotateHandle extends StatelessWidget {
-  const _RotateHandle({
-    required this.scale,
-    required this.onRotate,
-    required this.onEnd,
-    required this.onReset,
-  });
-
-  final double scale;
-  final ValueChanged<Offset> onRotate;
-  final VoidCallback onEnd;
-  final VoidCallback onReset;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = scale <= 0 ? 1.0 : scale;
-    final size = 22 / s;
-    return Positioned(
-      bottom: -size * 1.8,
-      left: 0,
-      right: 0,
-      height: size,
-      child: Center(
-        child: MouseRegion(
-          cursor: SystemMouseCursors.grab,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onPanUpdate: (d) => onRotate(d.delta),
-            onPanEnd: (_) => onEnd(),
-            onDoubleTap: onReset,
-            child: Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2 / s),
-              ),
-              child: Icon(Icons.rotate_right_rounded,
-                  size: size * 0.6, color: Colors.white),
             ),
           ),
-        ),
-      ),
+          for (final corner in _Corner.values)
+            _Handle(
+              corner: corner,
+              scale: s,
+              chrome: chrome,
+              onDrag: (delta) => _resize(corner, delta),
+              onEnd: _commit,
+            ),
+        ],
+      ],
+    );
+    if (rotation.abs() > 0.0001) {
+      painted = Transform.rotate(angle: rotation, child: painted);
+    }
+    if (widget.selected) painted = HitOverflow(child: painted);
+    painted = IgnorePointer(
+      ignoring: !widget.interactive && !widget.selected,
+      child: painted,
+    );
+
+    return Positioned(
+      left: rect.left + widget.offset.dx - chrome,
+      top: rect.top + widget.offset.dy - chrome,
+      width: rect.width + chrome * 2,
+      height: rect.height + chrome * 2,
+      child: RepaintBoundary(child: painted),
     );
   }
 }
@@ -318,12 +348,14 @@ class _Handle extends StatelessWidget {
   const _Handle({
     required this.corner,
     required this.scale,
+    required this.chrome,
     required this.onDrag,
     required this.onEnd,
   });
 
   final _Corner corner;
   final double scale;
+  final double chrome;
   final ValueChanged<Offset> onDrag;
   final VoidCallback onEnd;
 
@@ -331,7 +363,7 @@ class _Handle extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = scale <= 0 ? 1.0 : scale;
     final size = 18 / s; // ~18 screen px
-    final inset = -size / 2;
+    final inset = chrome - size / 2;
     final isLeft = corner == _Corner.topLeft || corner == _Corner.bottomLeft;
     final isTop = corner == _Corner.topLeft || corner == _Corner.topRight;
 
@@ -365,13 +397,21 @@ class _Handle extends StatelessWidget {
 
 /// Draws the visible (cropped) portion of the source image.
 class _CroppedImage extends StatelessWidget {
-  const _CroppedImage({required this.bytes, required this.data});
+  const _CroppedImage({
+    required this.bytes,
+    required this.data,
+    this.cacheWidth,
+    this.cacheHeight,
+  });
   final Uint8List bytes;
   final ImageElementData data;
+  final int? cacheWidth;
+  final int? cacheHeight;
 
   @override
   Widget build(BuildContext context) {
-    final full = data.cropLeft == 0 &&
+    final full =
+        data.cropLeft == 0 &&
         data.cropTop == 0 &&
         data.cropRight == 1 &&
         data.cropBottom == 1;
@@ -379,7 +419,14 @@ class _CroppedImage extends StatelessWidget {
     if (full) {
       return Opacity(
         opacity: data.opacity,
-        child: Image.memory(bytes, fit: BoxFit.fill, gaplessPlayback: true),
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.fill,
+          gaplessPlayback: true,
+          cacheWidth: cacheWidth,
+          cacheHeight: cacheHeight,
+          filterQuality: FilterQuality.medium,
+        ),
       );
     }
 
@@ -401,8 +448,14 @@ class _CroppedImage extends StatelessWidget {
                 top: -data.cropTop * h,
                 width: w,
                 height: h,
-                child: Image.memory(bytes,
-                    fit: BoxFit.fill, gaplessPlayback: true),
+                child: Image.memory(
+                  bytes,
+                  fit: BoxFit.fill,
+                  gaplessPlayback: true,
+                  cacheWidth: cacheWidth,
+                  cacheHeight: cacheHeight,
+                  filterQuality: FilterQuality.medium,
+                ),
               ),
             ],
           );

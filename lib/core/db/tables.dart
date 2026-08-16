@@ -51,6 +51,14 @@ class Documents extends Table with SyncedTable {
   /// card-sized preview — a 150 MB textbook took over 20 seconds.
   TextColumn get coverThumb => text().nullable()();
 
+  /// The PDF's embedded table of contents as a JSON list of [OutlineEntry].
+  ///
+  /// Extracted once in the background (alongside search-text indexing) so the
+  /// outline sidebar can jump to sections like a browser PDF viewer. Null means
+  /// "not extracted yet"; an empty list means the PDF genuinely has no outline.
+  /// Derived data, so it isn't synced — each device regenerates it locally.
+  TextColumn get outline => text().nullable()();
+
   /// Null unless soft-deleted (in trash).
   DateTimeColumn get trashedAt => dateTime().nullable()();
 

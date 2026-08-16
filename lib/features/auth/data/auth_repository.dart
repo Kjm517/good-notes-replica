@@ -68,13 +68,24 @@ class AuthRepository {
     }
   }
 
-  Future<AppUser> signUpWithEmail(String email, String password) async {
+  Future<AppUser> signUpWithEmail(
+    String email,
+    String password, {
+    String? displayName,
+  }) async {
     try {
       final result = await _auth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
-      return _toAppUser(result.user)!;
+      final name = displayName?.trim();
+      if (name != null && name.isNotEmpty) {
+        await result.user?.updateDisplayName(name);
+        // Reload so the profile the app reads back carries the new name
+        // rather than the empty one the account was created with.
+        await result.user?.reload();
+      }
+      return _toAppUser(_auth.currentUser ?? result.user)!;
     } on FirebaseAuthException catch (e) {
       throw AuthFailure(_messageFor(e));
     }
@@ -117,6 +128,24 @@ class AuthRepository {
   }
 
   // ---- Session -------------------------------------------------------------
+
+  /// Applies a "keep me signed in" choice, which has to be set *before* the
+  /// sign-in call it should govern.
+  ///
+  /// Only web can express this: [Persistence.session] drops the session when
+  /// the tab closes. The mobile SDKs always persist, so there the choice is
+  /// enforced by signing out on the next cold start (see [main]).
+  Future<void> applyPersistence({required bool keepSignedIn}) async {
+    if (!kIsWeb) return;
+    try {
+      await _auth.setPersistence(
+        keepSignedIn ? Persistence.LOCAL : Persistence.SESSION,
+      );
+    } catch (_) {
+      // Private-mode or partitioned storage can refuse; the default stands and
+      // sign-in should still go ahead.
+    }
+  }
 
   Future<void> signOut() async {
     await _auth.signOut();

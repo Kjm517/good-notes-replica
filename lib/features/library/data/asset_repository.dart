@@ -16,14 +16,46 @@ class AssetRepository {
   final AppDatabase _db;
 
   Future<Uint8List?> getBytes(String id) async {
-    final row = await (_db.select(_db.assets)..where((a) => a.id.equals(id)))
-        .getSingleOrNull();
+    final row = await (_db.select(
+      _db.assets,
+    )..where((a) => a.id.equals(id))).getSingleOrNull();
     if (row == null) return null;
     return readAsset(localPath: row.localPath, base64: row.data);
   }
 
   Future<Asset?> get(String id) =>
       (_db.select(_db.assets)..where((a) => a.id.equals(id))).getSingleOrNull();
+
+  /// Whether [id]'s bytes are on this device, without reading them.
+  ///
+  /// Answering this with [getBytes] allocates the entire file, which for an
+  /// imported textbook is hundreds of megabytes spent to compare against null.
+  /// Only the path and the inline flag are selected, so the legacy base64 blob
+  /// never leaves SQLite either.
+  Future<bool> hasBytes(String id) async {
+    final hasInline = _db.assets.data.isNotNull();
+    final row =
+        await (_db.selectOnly(_db.assets)
+              ..addColumns([_db.assets.localPath, hasInline])
+              ..where(_db.assets.id.equals(id)))
+            .getSingleOrNull();
+    if (row == null) return false;
+    return assetExists(
+      localPath: row.read(_db.assets.localPath),
+      hasInlineData: row.read(hasInline) ?? false,
+    );
+  }
+
+  /// Stored size of [id] in bytes, for deciding whether it can be held in
+  /// memory at all. Null when the asset is unknown.
+  Future<int?> sizeOf(String id) async {
+    final row =
+        await (_db.selectOnly(_db.assets)
+              ..addColumns([_db.assets.sizeBytes])
+              ..where(_db.assets.id.equals(id)))
+            .getSingleOrNull();
+    return row?.read(_db.assets.sizeBytes);
+  }
 
   /// Live total of stored asset bytes, for the library's storage readout.
   ///
@@ -42,8 +74,9 @@ class AssetRepository {
   /// Lets consumers stream a large file instead of pulling every byte into
   /// memory — a 150 MB PDF should not become a 150 MB allocation.
   Future<String?> localPathOf(String id) async {
-    final row = await (_db.select(_db.assets)..where((a) => a.id.equals(id)))
-        .getSingleOrNull();
+    final row = await (_db.select(
+      _db.assets,
+    )..where((a) => a.id.equals(id))).getSingleOrNull();
     return row?.localPath;
   }
 
@@ -61,23 +94,32 @@ class AssetRepository {
     final digest = sha256.convert(bytes).toString();
 
     // Dedupe: the same file imported twice keeps one copy.
-    final existing = await (_db.select(_db.assets)
-          ..where((a) => a.sha256.equals(digest) & a.deletedAt.isNull())
-          ..limit(1))
-        .getSingleOrNull();
+    final existing =
+        await (_db.select(_db.assets)
+              ..where((a) => a.sha256.equals(digest) & a.deletedAt.isNull())
+              ..limit(1))
+            .getSingleOrNull();
     if (existing != null) return existing.id;
 
-    final stored = await writeAsset(id, bytes, extension: kind == 1 ? 'pdf' : 'img');
-    await _db.into(_db.assets).insert(AssetsCompanion.insert(
-          id: id,
-          kind: kind,
-          path: Value(filename),
-          mime: Value(mime),
-          data: Value(stored.base64),
-          localPath: Value(stored.localPath),
-          sha256: Value(digest),
-          sizeBytes: Value(bytes.length),
-        ));
+    final stored = await writeAsset(
+      id,
+      bytes,
+      extension: kind == 1 ? 'pdf' : 'img',
+    );
+    await _db
+        .into(_db.assets)
+        .insert(
+          AssetsCompanion.insert(
+            id: id,
+            kind: kind,
+            path: Value(filename),
+            mime: Value(mime),
+            data: Value(stored.base64),
+            localPath: Value(stored.localPath),
+            sha256: Value(digest),
+            sizeBytes: Value(bytes.length),
+          ),
+        );
     return id;
   }
 
@@ -96,23 +138,33 @@ class AssetRepository {
     // Hash first so a re-import of the same file costs a read, not a copy.
     final probe = await probeFile(sourcePath);
 
-    final existing = await (_db.select(_db.assets)
-          ..where((a) => a.sha256.equals(probe.sha256) & a.deletedAt.isNull())
-          ..limit(1))
-        .getSingleOrNull();
+    final existing =
+        await (_db.select(_db.assets)
+              ..where(
+                (a) => a.sha256.equals(probe.sha256) & a.deletedAt.isNull(),
+              )
+              ..limit(1))
+            .getSingleOrNull();
     if (existing != null) return existing.id;
 
-    final copied = await copyAssetFromFile(id, sourcePath,
-        extension: kind == 1 ? 'pdf' : 'img');
-    await _db.into(_db.assets).insert(AssetsCompanion.insert(
-          id: id,
-          kind: kind,
-          path: Value(filename),
-          mime: Value(mime),
-          localPath: Value(copied.localPath),
-          sha256: Value(copied.sha256),
-          sizeBytes: Value(copied.sizeBytes),
-        ));
+    final copied = await copyAssetFromFile(
+      id,
+      sourcePath,
+      extension: kind == 1 ? 'pdf' : 'img',
+    );
+    await _db
+        .into(_db.assets)
+        .insert(
+          AssetsCompanion.insert(
+            id: id,
+            kind: kind,
+            path: Value(filename),
+            mime: Value(mime),
+            localPath: Value(copied.localPath),
+            sha256: Value(copied.sha256),
+            sizeBytes: Value(copied.sizeBytes),
+          ),
+        );
     return id;
   }
 
@@ -120,16 +172,30 @@ class AssetRepository {
   /// files so large PDFs stop bloating (and slowing down) SQLite.
   Future<int> migrateInlineAssetsToDisk() async {
     if (!supportsFileStorage) return 0;
-    final rows = await (_db.select(_db.assets)
-          ..where((a) => a.localPath.isNull() & a.data.isNotNull()))
-        .get();
+    // Decoding needs the base64 text and the bytes it expands to resident at
+    // once, and base64 inflates by 4/3 — so a legacy row holding a textbook
+    // cannot be migrated in one piece on a phone. This runs during startup,
+    // where that allocation ends the process before the first frame, so
+    // oversized rows are filtered out in SQL and left inline.
+    const maxEncodedLength = kMaxInMemoryAssetBytes * 4 ~/ 3;
+    final rows =
+        await (_db.select(_db.assets)..where(
+              (a) =>
+                  a.localPath.isNull() &
+                  a.data.isNotNull() &
+                  a.data.length.isSmallerOrEqualValue(maxEncodedLength),
+            ))
+            .get();
     var moved = 0;
     for (final row in rows) {
       final data = row.data;
       if (data == null) continue;
       final bytes = base64Decode(data);
-      final stored =
-          await writeAsset(row.id, bytes, extension: row.kind == 1 ? 'pdf' : 'img');
+      final stored = await writeAsset(
+        row.id,
+        bytes,
+        extension: row.kind == 1 ? 'pdf' : 'img',
+      );
       await (_db.update(_db.assets)..where((a) => a.id.equals(row.id))).write(
         AssetsCompanion(
           localPath: Value(stored.localPath),

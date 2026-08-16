@@ -98,7 +98,7 @@ class MarginsSheet extends ConsumerWidget {
               title: const Text('Extend the page'),
               subtitle: Text(margins.extend
                   ? 'Adds blank space around the content to write in'
-                  : 'Draws guide lines inside the existing page'),
+                  : 'Insets the content within the existing page'),
             ),
             _MarginRow(
               label: 'Left',
@@ -206,6 +206,11 @@ class _MarginRowState extends State<_MarginRow> {
   @override
   void didUpdateWidget(covariant _MarginRow old) {
     super.didUpdateWidget(old);
+    // Hold the gesture's value until the controller catches up, so a stale
+    // watch snapshot cannot snap the slider back on release.
+    if (_dragValue != null && (widget.value - _dragValue!).abs() < 0.51) {
+      _dragValue = null;
+    }
     if (!_focus.hasFocus && widget.value != old.value) {
       _field.text = widget.value.round().toString();
     }
@@ -244,7 +249,7 @@ class _MarginRowState extends State<_MarginRow> {
               widget.onPreview(v);
             },
             onChangeEnd: (v) {
-              setState(() => _dragValue = null);
+              setState(() => _dragValue = v);
               widget.onCommit(v);
             },
           ),

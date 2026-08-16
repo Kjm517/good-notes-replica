@@ -102,6 +102,18 @@ class LibraryRepository {
     return rows.length;
   }
 
+  /// Live count of a document's live (non-tombstoned) pages, for the library
+  /// card meta line. A count query rather than fetching rows so a 348-page PDF
+  /// doesn't load 348 rows just to print a number.
+  Stream<int> watchPageCount(String documentId) {
+    final count = _db.notePages.id.count();
+    final query = _db.selectOnly(_db.notePages)
+      ..addColumns([count])
+      ..where(_db.notePages.documentId.equals(documentId) &
+          _db.notePages.deletedAt.isNull());
+    return query.watchSingle().map((row) => row.read(count) ?? 0);
+  }
+
   void _applySort(SimpleSelectStatement<$DocumentsTable, Document> q,
       LibrarySort sort) {
     // Folders always float to the top, then the chosen sort.
@@ -180,6 +192,26 @@ class LibraryRepository {
     await (_db.update(_db.documents)..where((d) => d.id.equals(id))).write(
       DocumentsCompanion(
         parentId: Value(newParentId),
+        updatedAt: Value(DateTime.now()),
+        dirty: const Value(true),
+      ),
+    );
+  }
+
+  /// Updates a document's default paper size / orientation. Blank pages that
+  /// don't carry their own size follow this; imported PDF/image pages keep
+  /// their captured dimensions.
+  Future<void> setPageSetup(
+    String id, {
+    PageSizePreset? pageSize,
+    PageOrientation? orientation,
+  }) async {
+    await (_db.update(_db.documents)..where((d) => d.id.equals(id))).write(
+      DocumentsCompanion(
+        pageSize:
+            pageSize == null ? const Value.absent() : Value(pageSize),
+        orientation:
+            orientation == null ? const Value.absent() : Value(orientation),
         updatedAt: Value(DateTime.now()),
         dirty: const Value(true),
       ),

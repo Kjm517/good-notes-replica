@@ -119,33 +119,37 @@ class AppTokens extends ThemeExtension<AppTokens> {
     FontWeight weight = FontWeight.w400,
     Color? color,
     double letterSpacing = 0,
-  }) =>
-      GoogleFonts.spaceMono(
-        fontSize: size,
-        fontWeight: weight,
-        color: color,
-        letterSpacing: letterSpacing,
-        height: 1.2,
-      );
+  }) => GoogleFonts.spaceMono(
+    fontSize: size,
+    fontWeight: weight,
+    color: color,
+    letterSpacing: letterSpacing,
+    height: 1.2,
+  );
 
   /// The small uppercase caption that heads a settings section.
   static TextStyle sectionLabel(Color color) => GoogleFonts.spaceMono(
-        fontSize: 11,
-        fontWeight: FontWeight.w400,
-        color: color,
-        letterSpacing: 1.3,
-        height: 1.2,
-      );
+    fontSize: 11,
+    fontWeight: FontWeight.w400,
+    color: color,
+    letterSpacing: 1.3,
+    height: 1.2,
+  );
 
   /// Soft, wide drop shadow used on cards, sheets and floating clusters.
-  static List<BoxShadow> elevation(Color shadow, {double y = 18, double blur = 40, double opacity = 0.18}) => [
-        BoxShadow(
-          color: shadow.withValues(alpha: opacity),
-          blurRadius: blur,
-          offset: Offset(0, y),
-          spreadRadius: -blur / 3,
-        ),
-      ];
+  static List<BoxShadow> elevation(
+    Color shadow, {
+    double y = 18,
+    double blur = 40,
+    double opacity = 0.18,
+  }) => [
+    BoxShadow(
+      color: shadow.withValues(alpha: opacity),
+      blurRadius: blur,
+      offset: Offset(0, y),
+      spreadRadius: -blur / 3,
+    ),
+  ];
 
   @override
   AppTokens copyWith({
@@ -226,6 +230,55 @@ abstract final class Radii {
   static const double sheet = 26;
 }
 
+/// Shared width thresholds so library, editor, and sheets pick the same form
+/// factor. Matches the Annotate redesign: phone dock, tablet tool rail,
+/// desktop single chrome.
+abstract final class AppBreakpoints {
+  /// Bottom tool dock + compact library chrome (phones, narrow windows).
+  static const double phone = 760;
+
+  /// Persistent library sidebar beside the document grid.
+  static const double librarySidebar = 900;
+
+  /// Editor pages/outline sidebar default-open threshold.
+  static const double editorSidebar = 820;
+
+  /// Single-row desktop editor toolbar (and end of tablet stacked/rail).
+  static const double desktop = 1240;
+
+  /// Shortest side at/above this is treated as tablet-class (iPad / Android
+  /// tablets), even in a phone-width split view.
+  static const double tabletShortest = 600;
+}
+
 extension AppTokensContext on BuildContext {
   AppTokens get tokens => AppTokens.of(this);
+}
+
+/// The app's brand mark — a rounded accent tile with the draw glyph — shared
+/// by the launch splash and the sign-in hero so they always match.
+class AppMark extends StatelessWidget {
+  const AppMark({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return Container(
+      width: 66,
+      height: 66,
+      decoration: BoxDecoration(
+        color: t.accent,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: t.accent.withValues(alpha: 0.35),
+            blurRadius: 30,
+            offset: const Offset(0, 14),
+            spreadRadius: -10,
+          ),
+        ],
+      ),
+      child: const Icon(Icons.draw_rounded, size: 34, color: Colors.white),
+    );
+  }
 }

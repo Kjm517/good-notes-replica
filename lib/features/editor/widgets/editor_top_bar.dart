@@ -12,6 +12,7 @@ import '../../sync/sync_indicator.dart';
 import 'color_picker_sheet.dart';
 import 'export_sheet.dart';
 import 'margins_sheet.dart';
+import 'sticker_picker_sheet.dart';
 import 'tool_options_sheet.dart';
 
 /// How the toolbar arranges itself for the available width.
@@ -20,20 +21,45 @@ enum EditorBarLayout {
   /// within thumb reach.
   phone,
 
-  /// Tablet / small window: title row above a full-width tool row.
+  /// Landscape tablet: compact title bar plus a permanent tool rail.
+  tabletRail,
+
+  /// Tablet portrait / small window: title row above a full-width tool row.
   stacked,
 
   /// Desktop: everything on one row with the tool group centred.
   single;
 
-  /// Picks a layout from the window width.
+  /// Picks a layout from the window width (tests + callers that only have
+  /// width). Prefer [forSize] when orientation is known.
   static EditorBarLayout forWidth(double width) {
-    if (width < 760) return EditorBarLayout.phone;
-    if (width < 1240) return EditorBarLayout.stacked;
+    if (width < AppBreakpoints.phone) return EditorBarLayout.phone;
+    if (width < AppBreakpoints.desktop) return EditorBarLayout.stacked;
     return EditorBarLayout.single;
   }
 
-  bool get showsTools => this != EditorBarLayout.phone;
+  /// Width + orientation aware — landscape tablets get the left tool rail from
+  /// the redesign; portrait tablets keep the stacked top tool row.
+  static EditorBarLayout forSize(Size size) {
+    if (size.width < AppBreakpoints.phone) return EditorBarLayout.phone;
+    if (size.shortestSide >= AppBreakpoints.tabletShortest &&
+        size.width > size.height &&
+        size.width < AppBreakpoints.desktop) {
+      return EditorBarLayout.tabletRail;
+    }
+    if (size.width < AppBreakpoints.desktop) return EditorBarLayout.stacked;
+    return EditorBarLayout.single;
+  }
+
+  /// Tools rendered in the top bar (stacked / single).
+  bool get showsTools =>
+      this == EditorBarLayout.stacked || this == EditorBarLayout.single;
+
+  /// Tools in the bottom dock (phone).
+  bool get showsBottomDock => this == EditorBarLayout.phone;
+
+  /// Tools in the permanent left rail (landscape tablet).
+  bool get showsSideRail => this == EditorBarLayout.tabletRail;
 }
 
 // Row heights. Separators are drawn as a bottom *border inside* each row
@@ -68,6 +94,8 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
     required this.onFind,
     required this.onBack,
     required this.layout,
+    this.readingMode = false,
+    this.onToggleReadingMode,
   });
 
   final String documentId;
@@ -90,13 +118,16 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
   /// Opens "find in document" (also bound to Ctrl+F).
   final VoidCallback onFind;
   final VoidCallback onBack;
+  final bool readingMode;
+  final VoidCallback? onToggleReadingMode;
 
   @override
   Size get preferredSize => Size.fromHeight(switch (layout) {
-        EditorBarLayout.phone => _kTitleRow,
-        EditorBarLayout.stacked => _kTitleRow + _kToolRow,
-        EditorBarLayout.single => _kSingleRow,
-      });
+    EditorBarLayout.phone => _kTitleRow,
+    EditorBarLayout.tabletRail => _kTitleRow,
+    EditorBarLayout.stacked => _kTitleRow + _kToolRow,
+    EditorBarLayout.single => _kSingleRow,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -174,8 +205,12 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
       child: Row(
         children: [
           _leading(context),
-          _titleBlock(context),
-          const Spacer(),
+          if (phone)
+            Expanded(child: _titleBlock(context))
+          else ...[
+            _titleBlock(context),
+            const Spacer(),
+          ],
           if (!phone) ...[
             _PageJump(
               currentIndex: currentIndex,
@@ -186,6 +221,7 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
             _ZoomControls(controller: canvasController),
             const SizedBox(width: 4),
           ],
+          if (phone) const SizedBox(width: 2),
           ..._trailing(context),
         ],
       ),
@@ -263,9 +299,9 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
         onPressed: onFind,
       ),
       SyncIndicator(color: context.tokens.textSecondary),
-      if (phone)
-        // Five trailing icons overflow a phone row; everything but search
-        // folds behind one button.
+      if (phone) ...[
+        // Bookmark/export/settings stay in More so search remains one tap away
+        // without overflowing the compact title row.
         _OverflowMenu(
           bookmarked: bookmarked,
           onToggleBookmark: onToggleBookmark,
@@ -276,8 +312,11 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
             title: title,
             sizeFor: pageSizeFor,
           ),
-        )
-      else ...[
+          showBookmark: true,
+          readingMode: readingMode,
+          onToggleReadingMode: onToggleReadingMode,
+        ),
+      ] else ...[
         _BarIcon(
           icon: bookmarked
               ? Icons.bookmark_rounded
@@ -338,6 +377,43 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
 ///
 /// Scrolls horizontally rather than wrapping: the group must keep a single
 /// predictable height, and eleven tools don't fit a tablet in one line.
+/// Opens the sticker picker and drops the chosen sticker onto the current
+/// page. Shared by the desktop tool group and the phone dock.
+void _openStickers(BuildContext context, WidgetRef ref, String documentId) {
+  StickerPickerSheet.show(
+    context,
+    onPick: (bytes, name) => _placeSticker(ref, documentId, bytes, name),
+  );
+}
+
+/// Places [bytes] as an image element near the top of the current page, then
+/// selects it and switches to the Hand tool so it can be moved and resized
+/// right away. Stickers are just images, so they reuse the whole image path
+/// (crop, rotate, GIF animation).
+Future<void> _placeSticker(
+  WidgetRef ref,
+  String documentId,
+  Uint8List bytes,
+  String name,
+) async {
+  final state = ref.read(editorControllerProvider(documentId));
+  final pageId = state.currentPageId;
+  if (pageId == null) return;
+  final pageWidth = state.currentPage?.pageW ?? 800.0;
+  final controller = ref.read(editorControllerProvider(documentId).notifier);
+  final element = await ref
+      .read(elementRepositoryProvider)
+      .insertImage(
+        pageId: pageId,
+        bytes: bytes,
+        filename: name,
+        maxWidth: pageWidth * 0.35,
+        at: Offset(pageWidth * 0.30, 120),
+      );
+  controller.selectElement(element.id);
+  controller.setTool(ToolType.hand);
+}
+
 class _ToolGroup extends ConsumerWidget {
   const _ToolGroup({
     required this.documentId,
@@ -360,12 +436,12 @@ class _ToolGroup extends ConsumerWidget {
     final drawing = state.isDrawingTool;
 
     Widget tool(IconData icon, String label, ToolType type) => _ToolButton(
-          icon: icon,
-          label: label,
-          selected: state.tool == type,
-          onTap: () => controller.setTool(type),
-          onOptions: () => ToolOptionsSheet.show(context, documentId),
-        );
+      icon: icon,
+      label: label,
+      selected: state.tool == type,
+      onTap: () => controller.setTool(type),
+      onOptions: () => ToolOptionsSheet.show(context, documentId),
+    );
 
     return Container(
       height: 48,
@@ -385,6 +461,14 @@ class _ToolGroup extends ConsumerWidget {
             tool(Icons.brush_rounded, 'Highlighter', ToolType.highlighter),
             tool(Icons.horizontal_rule_rounded, 'Tape', ToolType.tape),
             tool(Icons.category_outlined, 'Shape', ToolType.shape),
+            tool(Icons.text_fields_rounded, 'Text', ToolType.text),
+            tool(Icons.sticky_note_2_outlined, 'Sticky note', ToolType.sticky),
+            _ToolButton(
+              icon: Icons.emoji_emotions_outlined,
+              label: 'Stickers',
+              selected: false,
+              onTap: () => _openStickers(context, ref, documentId),
+            ),
             const _BarSeparator(),
             tool(Icons.highlight_alt_rounded, 'Lasso', ToolType.lasso),
             tool(Icons.image_outlined, 'Image', ToolType.image),
@@ -398,8 +482,11 @@ class _ToolGroup extends ConsumerWidget {
               onTap: () {
                 final page = state.currentPage;
                 if (page == null) return;
-                MarginsSheet.show(context,
-                    documentId: documentId, pageSize: pageSizeFor(page));
+                MarginsSheet.show(
+                  context,
+                  documentId: documentId,
+                  pageSize: pageSizeFor(page),
+                );
               },
             ),
             // Ink settings only make sense while an ink tool is held.
@@ -547,12 +634,7 @@ class _Swatch extends StatelessWidget {
                 width: 2,
               ),
               boxShadow: selected
-                  ? [
-                      BoxShadow(
-                        color: t.accent,
-                        spreadRadius: 1.5,
-                      ),
-                    ]
+                  ? [BoxShadow(color: t.accent, spreadRadius: 1.5)]
                   : null,
             ),
           ),
@@ -641,8 +723,10 @@ class _WidthChip extends ConsumerWidget {
                 const SizedBox(width: 14),
                 Text(_label(i, presets.length)),
                 const Spacer(),
-                Text(presets[i].toStringAsFixed(1),
-                    style: AppTokens.mono(size: 11, color: t.textFaint)),
+                Text(
+                  presets[i].toStringAsFixed(1),
+                  style: AppTokens.mono(size: 11, color: t.textFaint),
+                ),
               ],
             ),
           ),
@@ -670,8 +754,10 @@ class _WidthChip extends ConsumerWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('${width.toStringAsFixed(1)} pt',
-                style: AppTokens.mono(size: 12, color: t.textSecondary)),
+            Text(
+              '${width.toStringAsFixed(1)} pt',
+              style: AppTokens.mono(size: 12, color: t.textSecondary),
+            ),
             Icon(Icons.expand_more_rounded, size: 16, color: t.textMuted),
           ],
         ),
@@ -739,110 +825,197 @@ class EditorToolDock extends ConsumerWidget {
     final selected = state.activeSettings.color;
 
     Widget tool(IconData icon, String label, ToolType type) => _DockTool(
-          icon: icon,
-          label: label,
-          selected: state.tool == type,
-          onTap: () => controller.setTool(type),
-          onOptions: () => ToolOptionsSheet.show(context, documentId),
-        );
+      icon: icon,
+      label: label,
+      selected: state.tool == type,
+      onTap: () => controller.setTool(type),
+      onOptions: () => ToolOptionsSheet.show(context, documentId),
+    );
 
-    return Container(
-      color: t.surfaceAlt,
+    return ColoredBox(
+      color: Colors.transparent,
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (state.isDrawingTool)
-              SizedBox(
-                height: 46,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+              Container(
+                height: 48,
+                margin: const EdgeInsets.fromLTRB(18, 0, 18, 6),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: t.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: t.line),
+                  boxShadow: AppTokens.elevation(
+                    t.shadow,
+                    y: 8,
+                    blur: 24,
+                    opacity: 0.16,
+                  ),
+                ),
+                child: Row(
                   children: [
-                    for (final c in palette.take(6))
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        child: _Swatch(
-                          color: c,
-                          selected: c == selected,
-                          onTap: () => controller.setColor(c),
-                        ),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4),
-                      child: _CurrentColorButton(
-                        color: selected,
-                        showDot: !palette.take(6).contains(selected),
-                        onTap: () =>
-                            ColorPickerSheet.show(context, documentId),
+                    Expanded(
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          for (final c in palette.take(6))
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                              ),
+                              child: _Swatch(
+                                color: c,
+                                selected: c == selected,
+                                onTap: () => controller.setColor(c),
+                              ),
+                            ),
+                          _CurrentColorButton(
+                            color: selected,
+                            showDot: !palette.take(6).contains(selected),
+                            onTap: () =>
+                                ColorPickerSheet.show(context, documentId),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Center(child: _WidthChip(documentId: documentId)),
+                    _WidthChip(documentId: documentId),
                   ],
                 ),
               ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      height: 58,
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: t.fill,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: t.line),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Container(
+                height: 62,
+                padding: const EdgeInsets.symmetric(horizontal: 7),
+                decoration: BoxDecoration(
+                  color: t.surface,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: t.line),
+                  boxShadow: AppTokens.elevation(
+                    t.shadow,
+                    y: 12,
+                    blur: 34,
+                    opacity: 0.22,
+                  ),
+                ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      tool(
+                        Icons.pan_tool_alt_rounded,
+                        'Hand',
+                        ToolType.hand,
                       ),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            tool(Icons.edit_rounded, 'Pen', ToolType.pen),
-                            tool(Icons.brush_outlined, 'Fountain pen',
-                                ToolType.fountainPen),
-                            tool(Icons.gesture_rounded, 'Pencil',
-                                ToolType.pencil),
-                            tool(Icons.brush_rounded, 'Highlighter',
-                                ToolType.highlighter),
-                            tool(Icons.horizontal_rule_rounded, 'Tape',
-                                ToolType.tape),
-                            tool(Icons.category_outlined, 'Shape',
-                                ToolType.shape),
-                            tool(Icons.highlight_alt_rounded, 'Lasso',
-                                ToolType.lasso),
-                            tool(Icons.image_outlined, 'Image',
-                                ToolType.image),
-                            tool(Icons.cleaning_services_rounded, 'Eraser',
-                                ToolType.eraser),
-                            tool(Icons.pan_tool_alt_rounded, 'Hand',
-                                ToolType.hand),
-                            _DockTool(
-                              icon: Icons.straighten_rounded,
-                              label: 'Margins',
-                              selected:
-                                  state.effectiveMargins?.enabled ?? false,
-                              onTap: () {
-                                final page = state.currentPage;
-                                if (page == null) return;
-                                MarginsSheet.show(context,
-                                    documentId: documentId,
-                                    pageSize: pageSizeFor(page));
-                              },
-                            ),
-                          ],
+                      tool(
+                        Icons.highlight_alt_rounded,
+                        'Select',
+                        ToolType.lasso,
+                      ),
+                      tool(Icons.edit_rounded, 'Pen', ToolType.pen),
+                      tool(
+                        Icons.brush_rounded,
+                        'Highlighter',
+                        ToolType.highlighter,
+                      ),
+                      tool(
+                        Icons.cleaning_services_rounded,
+                        'Eraser',
+                        ToolType.eraser,
+                      ),
+                      tool(Icons.category_outlined, 'Shape', ToolType.shape),
+                      tool(Icons.text_fields_rounded, 'Text', ToolType.text),
+                      tool(
+                        Icons.sticky_note_2_outlined,
+                        'Sticky note',
+                        ToolType.sticky,
+                      ),
+                      _DockTool(
+                        icon: Icons.more_horiz_rounded,
+                        label: 'More tools',
+                        selected: const {
+                          ToolType.fountainPen,
+                          ToolType.pencil,
+                          ToolType.tape,
+                          ToolType.image,
+                        }.contains(state.tool),
+                        onTap: () => _MobileMoreTools.show(
+                          context,
+                          ref: ref,
+                          documentId: documentId,
+                          pageSizeFor: pageSizeFor,
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  // Undo/redo pinned outside the scroller so they can never
-                  // slide off the end of the strip.
-                  _UndoRedo(documentId: documentId),
-                ],
+                ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileMoreTools {
+  static Future<void> show(
+    BuildContext context, {
+    required WidgetRef ref,
+    required String documentId,
+    required Size Function(NotePage) pageSizeFor,
+  }) {
+    final controller = ref.read(editorControllerProvider(documentId).notifier);
+    final state = ref.read(editorControllerProvider(documentId));
+    return showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Wrap(
+          children: [
+            const ListTile(
+              title: Text('More tools'),
+              subtitle: Text('Drawing, objects and page controls'),
+            ),
+            for (final item in const [
+              (Icons.brush_outlined, 'Fountain pen', ToolType.fountainPen),
+              (Icons.gesture_rounded, 'Pencil', ToolType.pencil),
+              (Icons.horizontal_rule_rounded, 'Tape', ToolType.tape),
+              (Icons.image_outlined, 'Image', ToolType.image),
+            ])
+              ListTile(
+                leading: Icon(item.$1),
+                title: Text(item.$2),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  controller.setTool(item.$3);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.emoji_emotions_outlined),
+              title: const Text('Stickers'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _openStickers(context, ref, documentId);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.straighten_rounded),
+              title: const Text('Margins'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                final page = state.currentPage;
+                if (page == null) return;
+                MarginsSheet.show(
+                  context,
+                  documentId: documentId,
+                  pageSize: pageSizeFor(page),
+                );
+              },
             ),
           ],
         ),
@@ -894,6 +1067,155 @@ class _DockTool extends StatelessWidget {
   }
 }
 
+/// Permanent iPad/Android-tablet annotation rail used in landscape.
+class EditorToolRail extends ConsumerWidget {
+  const EditorToolRail({
+    super.key,
+    required this.documentId,
+    required this.pageSizeFor,
+  });
+
+  final String documentId;
+  final Size Function(NotePage) pageSizeFor;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
+    final state = ref.watch(editorControllerProvider(documentId));
+    final controller = ref.read(editorControllerProvider(documentId).notifier);
+
+    Widget tool(IconData icon, String label, ToolType type) => _RailTool(
+      icon: icon,
+      label: label,
+      selected: state.tool == type,
+      onTap: () {
+        if (state.tool == type && state.isDrawingTool) {
+          ToolOptionsSheet.show(context, documentId);
+        } else {
+          controller.setTool(type);
+        }
+      },
+    );
+
+    return Container(
+      width: 58,
+      decoration: BoxDecoration(
+        color: t.surfaceAlt,
+        border: Border(right: BorderSide(color: t.line)),
+      ),
+      child: SafeArea(
+        right: false,
+        child: Column(
+          children: [
+            const SizedBox(height: 8),
+            tool(Icons.highlight_alt_rounded, 'Select', ToolType.lasso),
+            tool(Icons.pan_tool_alt_rounded, 'Hand', ToolType.hand),
+            tool(Icons.edit_rounded, 'Pen', ToolType.pen),
+            tool(Icons.brush_rounded, 'Highlighter', ToolType.highlighter),
+            tool(Icons.cleaning_services_rounded, 'Eraser', ToolType.eraser),
+            tool(Icons.category_outlined, 'Shapes', ToolType.shape),
+            _RailTool(
+              icon: Icons.straighten_rounded,
+              label: 'Margins',
+              selected: state.effectiveMargins?.enabled ?? false,
+              onTap: () {
+                final page = state.currentPage;
+                if (page == null) return;
+                MarginsSheet.show(
+                  context,
+                  documentId: documentId,
+                  pageSize: pageSizeFor(page),
+                );
+              },
+            ),
+            tool(Icons.text_fields_rounded, 'Text', ToolType.text),
+            tool(Icons.sticky_note_2_outlined, 'Sticky note', ToolType.sticky),
+            tool(Icons.image_outlined, 'Image', ToolType.image),
+            _RailTool(
+              icon: Icons.emoji_emotions_outlined,
+              label: 'Stickers',
+              selected: false,
+              onTap: () => _openStickers(context, ref, documentId),
+            ),
+            const Spacer(),
+            _RailTool(
+              icon: Icons.undo_rounded,
+              label: 'Undo',
+              selected: false,
+              enabled: state.canUndo,
+              onTap: controller.undo,
+            ),
+            _RailTool(
+              icon: Icons.redo_rounded,
+              label: 'Redo',
+              selected: false,
+              enabled: state.canRedo,
+              onTap: controller.redo,
+            ),
+            if (state.isDrawingTool) ...[
+              const SizedBox(height: 6),
+              _CurrentColorButton(
+                color: state.activeSettings.color,
+                onTap: () => ColorPickerSheet.show(context, documentId),
+              ),
+            ],
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RailTool extends StatelessWidget {
+  const _RailTool({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.enabled = true,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: label,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(Radii.inner),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: selected ? t.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(Radii.inner),
+            ),
+            child: Icon(
+              icon,
+              size: 21,
+              color: !enabled
+                  ? t.textFaint.withValues(alpha: 0.45)
+                  : selected
+                  ? Colors.white
+                  : t.textMuted,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ------------------------------------------------------------ misc pieces --
 
 /// Trailing actions folded behind a single button on narrow screens.
@@ -903,40 +1225,71 @@ class _OverflowMenu extends StatelessWidget {
     required this.onToggleBookmark,
     required this.onOpenPageSettings,
     required this.onExport,
+    this.showBookmark = true,
+    this.readingMode = false,
+    this.onToggleReadingMode,
   });
 
   final bool bookmarked;
   final VoidCallback onToggleBookmark;
   final VoidCallback onOpenPageSettings;
   final VoidCallback onExport;
+  final bool showBookmark;
+  final bool readingMode;
+  final VoidCallback? onToggleReadingMode;
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<int>(
       tooltip: 'More',
-      icon: Icon(Icons.more_vert_rounded,
-          size: 20, color: context.tokens.textSecondary),
+      icon: Icon(
+        Icons.more_vert_rounded,
+        size: 20,
+        color: context.tokens.textSecondary,
+      ),
       onSelected: (value) {
-        if (value == 0) {
-          onToggleBookmark();
-        } else if (value == 1) {
-          onExport();
-        } else {
-          onOpenPageSettings();
+        switch (value) {
+          case 0:
+            onToggleBookmark();
+          case 1:
+            onExport();
+          case 2:
+            onOpenPageSettings();
+          case 4:
+            onToggleReadingMode?.call();
         }
       },
       itemBuilder: (context) => [
-        PopupMenuItem(
-          value: 0,
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(bookmarked
-                ? Icons.bookmark_rounded
-                : Icons.bookmark_border_rounded),
-            title: Text(bookmarked ? 'Remove bookmark' : 'Bookmark page'),
+        if (showBookmark)
+          PopupMenuItem(
+            value: 0,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                bookmarked
+                    ? Icons.bookmark_rounded
+                    : Icons.bookmark_border_rounded,
+              ),
+              title: Text(bookmarked ? 'Remove bookmark' : 'Bookmark page'),
+            ),
           ),
-        ),
+        if (onToggleReadingMode != null)
+          PopupMenuItem(
+            value: 4,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                readingMode
+                    ? Icons.edit_rounded
+                    : Icons.chrome_reader_mode_outlined,
+              ),
+              title: Text(
+                readingMode ? 'Show annotation tools' : 'Reading mode',
+              ),
+            ),
+          ),
         const PopupMenuItem(
           value: 1,
           child: ListTile(
@@ -952,7 +1305,7 @@ class _OverflowMenu extends StatelessWidget {
             dense: true,
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.tune_rounded),
-            title: Text('Paper & template'),
+            title: Text('Document settings'),
           ),
         ),
       ],
@@ -977,8 +1330,9 @@ class _PageJump extends StatefulWidget {
 }
 
 class _PageJumpState extends State<_PageJump> {
-  late final TextEditingController _field =
-      TextEditingController(text: '${widget.currentIndex + 1}');
+  late final TextEditingController _field = TextEditingController(
+    text: '${widget.currentIndex + 1}',
+  );
   final _focus = FocusNode();
 
   @override
@@ -1046,8 +1400,10 @@ class _PageJumpState extends State<_PageJump> {
               onSubmitted: _submit,
             ),
           ),
-          Text(' / ${widget.pageCount}',
-              style: AppTokens.mono(size: 12, color: t.textMuted)),
+          Text(
+            ' / ${widget.pageCount}',
+            style: AppTokens.mono(size: 12, color: t.textMuted),
+          ),
           _MiniIcon(
             icon: Icons.chevron_right_rounded,
             tooltip: 'Next page',
@@ -1090,9 +1446,11 @@ class _ZoomControls extends StatelessWidget {
               ),
               SizedBox(
                 width: 42,
-                child: Text('${(controller.zoom * 100).round()}%',
-                    textAlign: TextAlign.center,
-                    style: AppTokens.mono(size: 12, color: t.textSecondary)),
+                child: Text(
+                  '${(controller.zoom * 100).round()}%',
+                  textAlign: TextAlign.center,
+                  style: AppTokens.mono(size: 12, color: t.textSecondary),
+                ),
               ),
               _MiniIcon(
                 icon: Icons.add_rounded,
@@ -1180,9 +1538,9 @@ class _BarSeparator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: 1,
-        height: 22,
-        margin: const EdgeInsets.symmetric(horizontal: 6),
-        color: context.tokens.lineStrong,
-      );
+    width: 1,
+    height: 22,
+    margin: const EdgeInsets.symmetric(horizontal: 6),
+    color: context.tokens.lineStrong,
+  );
 }

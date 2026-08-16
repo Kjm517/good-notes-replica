@@ -1,11 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../app/design.dart';
 import '../../../core/db/database.dart';
 import '../../../core/models/enums.dart';
+import '../providers.dart';
 import 'cover_styles.dart';
 
 /// A single grid tile for a folder / notebook / pdf.
@@ -13,7 +15,7 @@ import 'cover_styles.dart';
 /// The cover sits inside a bordered card rather than floating on its own
 /// shadow: at four-across on a desktop the loose shadows read as visual noise,
 /// and a hairline border keeps the grid calm.
-class DocumentCard extends StatelessWidget {
+class DocumentCard extends ConsumerWidget {
   const DocumentCard({
     super.key,
     required this.document,
@@ -32,8 +34,12 @@ class DocumentCard extends StatelessWidget {
   bool get _isFolder => document.type == DocumentType.folder;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
+    // Folders have no pages; only fetch a count for documents that show one.
+    final pageCount = _isFolder
+        ? null
+        : ref.watch(documentPageCountProvider(document.id)).asData?.value;
     return Material(
       color: t.surface,
       borderRadius: BorderRadius.circular(Radii.card),
@@ -91,7 +97,7 @@ class DocumentCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            _subtitle(document),
+                            _subtitle(document, pageCount),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: AppTokens.mono(
@@ -120,12 +126,15 @@ class DocumentCard extends StatelessWidget {
     );
   }
 
-  static String _subtitle(Document d) {
+  static String _subtitle(Document d, int? pages) {
     final when = DateFormat.MMMd().format(d.updatedAt);
+    // "· N pp" once the count has loaded; omitted rather than showing "0 pp"
+    // while the query is still in flight.
+    final pp = (pages != null && pages > 0) ? ' · $pages pp' : '';
     return switch (d.type) {
       DocumentType.folder => 'Folder',
-      DocumentType.notebook => 'Notebook · $when',
-      DocumentType.pdf => 'PDF · $when',
+      DocumentType.notebook => 'Notebook$pp · $when',
+      DocumentType.pdf => 'PDF$pp · $when',
     };
   }
 }

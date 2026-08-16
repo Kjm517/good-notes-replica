@@ -43,6 +43,7 @@ enum ToolType {
   hand, // pan/zoom only
   fountainPen,
   tape,
+  sticky, // margin sticky note
 }
 
 /// Tools that lay down ink (as opposed to selecting/erasing/navigating).
@@ -69,8 +70,8 @@ enum StrokeTip { round, square }
 /// How the lasso captures content.
 enum LassoMode { freehand, rectangular }
 
-/// Canvas element kinds (non-ink objects).
-enum ElementType { text, image, shape }
+/// Canvas element kinds (non-ink objects). Persisted by index — append only.
+enum ElementType { text, image, shape, sticky }
 
 /// Recognised/target shape kinds for the shapes tool.
 enum ShapeKind { line, arrow, rectangle, ellipse, triangle, polygon }

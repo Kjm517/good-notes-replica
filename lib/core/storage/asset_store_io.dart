@@ -17,8 +17,11 @@ Future<Directory> _assetsDir() async {
   return dir;
 }
 
-Future<StoredAsset> writeAsset(String id, Uint8List bytes,
-    {String extension = 'bin'}) async {
+Future<StoredAsset> writeAsset(
+  String id,
+  Uint8List bytes, {
+  String extension = 'bin',
+}) async {
   final dir = await _assetsDir();
   final file = File(p.join(dir.path, '$id.$extension'));
   await file.writeAsBytes(bytes, flush: true);
@@ -37,8 +40,11 @@ Future<CopiedAsset> probeFile(String sourcePath) async {
   );
 }
 
-Future<CopiedAsset> copyAssetFromFile(String id, String sourcePath,
-    {String extension = 'bin'}) async {
+Future<CopiedAsset> copyAssetFromFile(
+  String id,
+  String sourcePath, {
+  String extension = 'bin',
+}) async {
   final probe = await probeFile(sourcePath);
   final dir = await _assetsDir();
   final dest = File(p.join(dir.path, '$id.$extension'));
@@ -49,6 +55,14 @@ Future<CopiedAsset> copyAssetFromFile(String id, String sourcePath,
     sha256: probe.sha256,
     sizeBytes: probe.sizeBytes,
   );
+}
+
+Future<bool> assetExists({
+  String? localPath,
+  bool hasInlineData = false,
+}) async {
+  if (localPath != null && await File(localPath).exists()) return true;
+  return hasInlineData;
 }
 
 Future<Uint8List?> readAsset({String? localPath, String? base64}) async {

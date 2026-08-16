@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/design.dart';
 
 /// What the user picked in the create sheet.
-enum CreateAction { notebook, folder, importPdf, importImages }
+enum CreateAction { notebook, folder, importPdf, importImages, scan }
 
 /// The "Create" bottom sheet.
 ///
@@ -14,8 +14,28 @@ class CreateSheet extends StatelessWidget {
   const CreateSheet({super.key});
 
   static Future<CreateAction?> show(BuildContext context) {
+    final desktop =
+        MediaQuery.sizeOf(context).width >= AppBreakpoints.librarySidebar;
+    if (desktop) {
+      return showDialog<CreateAction>(
+        context: context,
+        builder: (_) => Dialog(
+          insetPadding: const EdgeInsets.all(32),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(Radii.sheet),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: const CreateSheet(),
+          ),
+        ),
+      );
+    }
     return showModalBottomSheet<CreateAction>(
       context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 600),
       builder: (_) => const CreateSheet(),
     );
   }
@@ -30,11 +50,12 @@ class CreateSheet extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-            child: Text('Create',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontSize: 19)),
+            child: Text(
+              'Create',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontSize: 19),
+            ),
           ),
           const SizedBox(height: 4),
           _Tile(
@@ -68,6 +89,14 @@ class CreateSheet extends StatelessWidget {
             title: 'Import images',
             subtitle: 'One page per image',
             action: CreateAction.importImages,
+          ),
+          _Tile(
+            icon: Icons.document_scanner_rounded,
+            iconColor: const Color(0xFFC08A2E),
+            iconBackground: t.fill,
+            title: 'Scan document',
+            subtitle: 'Use the camera to capture pages',
+            action: CreateAction.scan,
           ),
           const SizedBox(height: 12),
         ],
@@ -119,15 +148,19 @@ class _Tile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: t.text,
-                        )),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: t.text,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(subtitle,
-                        style: TextStyle(fontSize: 12, color: t.textMuted)),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 12, color: t.textMuted),
+                    ),
                   ],
                 ),
               ),

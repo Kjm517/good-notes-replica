@@ -25,9 +25,14 @@ class StrokeRepository {
         .map((rows) => rows.map(_toInk).toList());
   }
 
+  /// Writes [stroke], resurrecting the row if that id was tombstoned before.
+  ///
+  /// Deletes only set [deletedAt], so the primary key outlives an erase and a
+  /// plain insert would fail on redo, on undo of an erase, and on the selection
+  /// move/transform paths, which all re-write the same stroke ids.
   Future<void> insertStroke(String pageId, InkStroke stroke) async {
     final b = stroke.bounds;
-    await _db.into(_db.strokes).insert(StrokesCompanion.insert(
+    await _db.into(_db.strokes).insertOnConflictUpdate(StrokesCompanion.insert(
           id: stroke.id,
           pageId: pageId,
           tool: stroke.tool,
@@ -43,6 +48,9 @@ class StrokeRepository {
           bboxR: b.right,
           bboxB: b.bottom,
           seq: stroke.seq,
+          deletedAt: const Value(null),
+          updatedAt: Value(DateTime.now()),
+          dirty: const Value(true),
         ));
     await _touchPage(pageId);
   }

@@ -195,6 +195,24 @@ class PageRepository {
   Future<void> updateMargins(String pageId, MarginSpec margins) =>
       _update(pageId, NotePagesCompanion(marginSpec: Value(margins)));
 
+  /// One UPDATE for every non-deleted page in a document. Used by "Apply to
+  /// all pages" so a large PDF does not emit thousands of watch events that
+  /// can clobber a later in-memory margin edit.
+  Future<void> updateMarginsForDocument(
+    String documentId,
+    MarginSpec margins,
+  ) {
+    return (_db.update(_db.notePages)
+          ..where(
+            (p) => p.documentId.equals(documentId) & p.deletedAt.isNull(),
+          ))
+        .write(NotePagesCompanion(
+      marginSpec: Value(margins),
+      updatedAt: Value(DateTime.now()),
+      dirty: const Value(true),
+    ));
+  }
+
   Future<void> setBookmark(String pageId, String? title) =>
       _update(pageId, NotePagesCompanion(bookmarkTitle: Value(title)));
 

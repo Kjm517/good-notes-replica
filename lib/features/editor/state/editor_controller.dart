@@ -73,11 +73,22 @@ class EditorController extends FamilyNotifier<EditorState, String> {
   }
 
   /// Called when the pages list changes (add/delete/reorder).
+  ///
+  /// Late Drift watch snapshots (especially after "Apply to all pages") must
+  /// not overwrite a margin the user just committed in memory.
   void onPagesChanged(List<NotePage> pages) {
     final idx = pages.isEmpty
         ? 0
         : state.currentIndex.clamp(0, pages.length - 1);
-    state = state.copyWith(pages: pages, currentIndex: idx);
+    state = state.copyWith(
+      pages: mergeWatchedPages(
+        local: state.pages,
+        incoming: pages,
+        previewMargins: state.previewMargins,
+        previewPageId: state.previewPageId,
+      ),
+      currentIndex: idx,
+    );
   }
 
   /// Updates which page is considered "current" (drives page settings/margins).
@@ -331,6 +342,15 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     if (id != null) await _pages.updateTemplate(id, template);
   }
 
+  /// Applies a template to every page — the document-level template control in
+  /// the settings sheet, as opposed to per-page tweaks.
+  Future<void> applyTemplateToAllPages(PaperTemplate template) async {
+    for (final page in state.pages) {
+      await _pages.updateTemplate(page.id, template);
+    }
+    _requestSync();
+  }
+
   Future<void> setPaperColor(PaperColor color) async {
     final id = state.currentPageId;
     if (id != null) await _pages.updatePaperColor(id, color);
@@ -341,9 +361,9 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     final id = state.currentPageId;
     if (id == null) return;
     _requestSync();
-    // Show it immediately, then persist; clearing the preview once the write
-    // lands avoids a flicker back to the old value.
-    state = state.copyWith(previewMargins: margins, previewPageId: id);
+    // Patch the in-memory page first so dropping the preview cannot snap the
+    // sliders back to a stale watch snapshot.
+    _applyMarginsLocally(margins, onlyPageId: id);
     await _pages.updateMargins(id, margins);
     state = state.copyWith(clearPreview: true);
   }
@@ -358,8 +378,32 @@ class EditorController extends FamilyNotifier<EditorState, String> {
 
   /// Applies the current page's margins to every page in the document.
   Future<void> applyMarginsToAllPages(MarginSpec margins) async {
-    for (final page in state.pages) {
-      await _pages.updateMargins(page.id, margins);
-    }
+    _applyMarginsLocally(margins, preview: false);
+    await _pages.updateMarginsForDocument(arg, margins);
+    _requestSync();
+  }
+
+  /// Writes [margins] onto in-memory pages immediately. [preview] keeps the
+  /// live overlay until the caller persists (slider release); apply-to-all
+  /// skips it because every page already holds the spec.
+  void _applyMarginsLocally(
+    MarginSpec margins, {
+    String? onlyPageId,
+    bool preview = true,
+  }) {
+    final now = DateTime.now();
+    final id = onlyPageId ?? state.currentPageId;
+    state = state.copyWith(
+      previewMargins: margins,
+      previewPageId: id,
+      clearPreview: !preview,
+      pages: [
+        for (final page in state.pages)
+          if (onlyPageId == null || page.id == onlyPageId)
+            page.copyWith(marginSpec: margins, updatedAt: now)
+          else
+            page,
+      ],
+    );
   }
 }

@@ -5,6 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 
 import '../../../core/db/database.dart';
+import '../../../core/models/enums.dart';
+import '../../../core/models/outline_entry.dart';
+import '../../../core/storage/asset_store.dart';
 import '../../library/data/asset_repository.dart';
 
 /// One hit from "find in document".
@@ -43,13 +46,16 @@ class DocumentTextService {
 
   /// True once every page of [documentId] has been through extraction.
   Future<bool> isIndexed(String documentId) async {
-    final pending = await (_db.select(_db.notePages)
-          ..where((p) =>
-              p.documentId.equals(documentId) &
-              p.deletedAt.isNull() &
-              p.searchText.isNull())
-          ..limit(1))
-        .get();
+    final pending =
+        await (_db.select(_db.notePages)
+              ..where(
+                (p) =>
+                    p.documentId.equals(documentId) &
+                    p.deletedAt.isNull() &
+                    p.searchText.isNull(),
+              )
+              ..limit(1))
+            .get();
     return pending.isEmpty;
   }
 
@@ -64,20 +70,57 @@ class DocumentTextService {
     if (_indexing.contains(documentId)) return;
     _indexing.add(documentId);
     try {
-      final pages = await (_db.select(_db.notePages)
-            ..where((p) =>
-                p.documentId.equals(documentId) &
-                p.deletedAt.isNull() &
-                p.searchText.isNull())
-            ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)]))
-          .get();
-      if (pages.isEmpty) return;
+      final doc = await (_db.select(
+        _db.documents,
+      )..where((d) => d.id.equals(documentId))).getSingleOrNull();
+      // The outline is extracted the first time only: null means "never tried".
+      final needsOutline =
+          doc != null && doc.type == DocumentType.pdf && doc.outline == null;
 
-      final assetId = pages.first.pdfAssetId;
+      final pages =
+          await (_db.select(_db.notePages)
+                ..where(
+                  (p) =>
+                      p.documentId.equals(documentId) &
+                      p.deletedAt.isNull() &
+                      p.searchText.isNull(),
+                )
+                ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)]))
+              .get();
+      if (pages.isEmpty && !needsOutline) return;
+
+      // Any PDF-backed page tells us which asset to open; when text is already
+      // indexed we still need one to reach the file for the outline.
+      final assetId = pages.isNotEmpty
+          ? pages.first.pdfAssetId
+          : (await (_db.select(_db.notePages)
+                      ..where(
+                        (p) =>
+                            p.documentId.equals(documentId) &
+                            p.pdfAssetId.isNotNull(),
+                      )
+                      ..limit(1))
+                    .getSingleOrNull())
+                ?.pdfAssetId;
       if (assetId == null) {
         // Image-only document: nothing to extract, but mark it done so we
         // don't try again on every search.
-        await _markEmpty(pages);
+        if (pages.isNotEmpty) await _markEmpty(pages);
+        if (needsOutline) await _storeOutline(documentId, const []);
+        return;
+      }
+
+      // The extractor only accepts a whole document in memory, and parsing it
+      // costs several times the file on top. Past a certain size that is more
+      // than the platform allows, and the process is killed with no error —
+      // so a very large PDF stays unindexed and Find falls back to page
+      // numbers rather than taking the app down with it.
+      final size = await _assets.sizeOf(assetId);
+      if (size != null && size > kMaxInMemoryAssetBytes) {
+        debugPrint(
+          'Skipping text extraction for $documentId: '
+          '${(size / 1e6).round()} MB exceeds the in-memory limit',
+        );
         return;
       }
 
@@ -87,6 +130,9 @@ class DocumentTextService {
       final document = sf.PdfDocument(inputBytes: bytes);
       final extractor = sf.PdfTextExtractor(document);
       try {
+        if (needsOutline) {
+          await _storeOutline(documentId, _readOutline(document));
+        }
         for (var i = 0; i < pages.length; i++) {
           final page = pages[i];
           final pdfIndex = page.pdfPageIndex;
@@ -100,13 +146,16 @@ class DocumentTextService {
           } catch (_) {
             text = '';
           }
-          await (_db.update(_db.notePages)..where((p) => p.id.equals(page.id)))
-              .write(NotePagesCompanion(
-            searchText: Value(text.toLowerCase()),
-            // Extraction is a derived cache, not user content — don't dirty
-            // the row or every page would be re-uploaded to the cloud.
-            dirty: const Value(false),
-          ));
+          await (_db.update(
+            _db.notePages,
+          )..where((p) => p.id.equals(page.id))).write(
+            NotePagesCompanion(
+              searchText: Value(text.toLowerCase()),
+              // Extraction is a derived cache, not user content — don't dirty
+              // the row or every page would be re-uploaded to the cloud.
+              dirty: const Value(false),
+            ),
+          );
           if (i % 10 == 0 || i == pages.length - 1) {
             onProgress?.call((i + 1) / pages.length);
             // Let the UI breathe between chunks.
@@ -125,12 +174,75 @@ class DocumentTextService {
 
   Future<void> _markEmpty(List<NotePage> pages) async {
     for (final page in pages) {
-      await (_db.update(_db.notePages)..where((p) => p.id.equals(page.id)))
-          .write(const NotePagesCompanion(
-        searchText: Value(''),
-        dirty: Value(false),
-      ));
+      await (_db.update(
+        _db.notePages,
+      )..where((p) => p.id.equals(page.id))).write(
+        const NotePagesCompanion(searchText: Value(''), dirty: Value(false)),
+      );
     }
+  }
+
+  /// Walks the PDF's bookmark tree into a flat, depth-tagged list. Each
+  /// bookmark's destination is resolved to a zero-based page index so the
+  /// sidebar can jump straight there. Bookmarks whose target can't be resolved
+  /// are dropped rather than pointing at the wrong page.
+  List<OutlineEntry> _readOutline(sf.PdfDocument document) {
+    final entries = <OutlineEntry>[];
+
+    void walk(sf.PdfBookmarkBase node, int depth) {
+      for (var i = 0; i < node.count; i++) {
+        final sf.PdfBookmark bookmark = node[i];
+        String title;
+        try {
+          title = bookmark.title.trim();
+        } catch (_) {
+          title = '';
+        }
+
+        int? pageIndex;
+        try {
+          final destination =
+              bookmark.destination ?? bookmark.namedDestination?.destination;
+          if (destination != null) {
+            final idx = document.pages.indexOf(destination.page);
+            if (idx >= 0) pageIndex = idx;
+          }
+        } catch (_) {
+          pageIndex = null;
+        }
+
+        if (title.isNotEmpty && pageIndex != null) {
+          entries.add(
+            OutlineEntry(title: title, pageIndex: pageIndex, depth: depth),
+          );
+        }
+
+        if (bookmark.count > 0) walk(bookmark, depth + 1);
+      }
+    }
+
+    try {
+      walk(document.bookmarks, 0);
+    } catch (e) {
+      debugPrint('Outline read failed: $e');
+    }
+    return entries;
+  }
+
+  /// Persists the extracted outline as JSON. Only the outline column is
+  /// written, leaving the row's dirty flag and updatedAt untouched — the
+  /// outline is a derived cache that isn't synced, and touching those would
+  /// either cause a needless re-push or (for a not-yet-synced import) drop the
+  /// upload entirely.
+  Future<void> _storeOutline(
+    String documentId,
+    List<OutlineEntry> entries,
+  ) async {
+    await (_db.update(
+      _db.documents,
+    )..where((d) => d.id.equals(documentId))).write(
+      DocumentsCompanion(outline: Value(OutlineEntry.encode(entries))),
+    );
   }
 
   /// Finds [query] across the document's extracted text.
@@ -138,13 +250,16 @@ class DocumentTextService {
     final needle = query.trim().toLowerCase();
     if (needle.isEmpty) return const [];
 
-    final pages = await (_db.select(_db.notePages)
-          ..where((p) =>
-              p.documentId.equals(documentId) &
-              p.deletedAt.isNull() &
-              p.searchText.like('%$needle%'))
-          ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)]))
-        .get();
+    final pages =
+        await (_db.select(_db.notePages)
+              ..where(
+                (p) =>
+                    p.documentId.equals(documentId) &
+                    p.deletedAt.isNull() &
+                    p.searchText.like('%$needle%'),
+              )
+              ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)]))
+            .get();
 
     return [
       for (final page in pages)

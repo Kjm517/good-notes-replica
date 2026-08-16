@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/db/database.dart';
 import '../../core/ink/ink_stroke.dart';
+import '../../core/sync/sync_providers.dart';
 import '../library/providers.dart';
 import 'data/element_repository.dart';
 import 'data/page_repository.dart';
@@ -54,7 +55,10 @@ final documentTextServiceProvider = Provider<DocumentTextService>((ref) {
 });
 
 final pageBackgroundServiceProvider = Provider<PageBackgroundService>((ref) {
-  final service = PageBackgroundService(ref.watch(assetRepositoryProvider));
+  final service = PageBackgroundService(
+    ref.watch(assetRepositoryProvider),
+    files: ref.watch(fileSyncProvider),
+  );
   ref.onDispose(service.dispose);
   return service;
 });
@@ -70,6 +74,40 @@ final editorControllerProvider =
     NotifierProvider.family<EditorController, EditorState, String>(
   EditorController.new,
 );
+
+/// Whether a resting palm/finger is ignored once a stylus is in use. Persisted
+/// app-wide and read by the canvas' pointer routing.
+final palmRejectionProvider =
+    NotifierProvider<PalmRejectionController, bool>(PalmRejectionController.new);
+
+class PalmRejectionController extends Notifier<bool> {
+  static const _key = 'palm_rejection';
+
+  @override
+  bool build() => ref.watch(sharedPrefsProvider).getBool(_key) ?? true;
+
+  Future<void> set(bool value) async {
+    state = value;
+    await ref.read(sharedPrefsProvider).setBool(_key, value);
+  }
+}
+
+/// Whether PDF/scan text is indexed so it can be found with "find in document".
+/// Persisted app-wide and checked before the editor warms its text index.
+final ocrEnabledProvider =
+    NotifierProvider<OcrEnabledController, bool>(OcrEnabledController.new);
+
+class OcrEnabledController extends Notifier<bool> {
+  static const _key = 'ocr_enabled';
+
+  @override
+  bool build() => ref.watch(sharedPrefsProvider).getBool(_key) ?? true;
+
+  Future<void> set(bool value) async {
+    state = value;
+    await ref.read(sharedPrefsProvider).setBool(_key, value);
+  }
+}
 
 /// First-page thumbnail for a document's library card: the PDF cover / imported
 /// image if the first page has a background, otherwise null (card shows the

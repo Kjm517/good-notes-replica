@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Sync, sign-in and the runtime font fetch all need the network. Firebase
+         merges this permission in too, but declaring it here keeps release
+         builds working if those dependencies ever change. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="notably"
         android:name="${applicationName}"

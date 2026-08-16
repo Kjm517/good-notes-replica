@@ -22,9 +22,9 @@ class FileSync {
     required this.endpoint,
     http.Client? client,
     FirebaseAuth? auth,
-  })  : _db = db,
-        _client = client ?? http.Client(),
-        _auth = auth ?? FirebaseAuth.instance;
+  }) : _db = db,
+       _client = client ?? http.Client(),
+       _auth = auth ?? FirebaseAuth.instance;
 
   final AppDatabase _db;
   final http.Client _client;
@@ -41,13 +41,27 @@ class FileSync {
     void Function(String assetId, double progress)? onProgress,
   }) async {
     if (!enabled) return;
-    final pending = await (_db.select(_db.assets)
-          ..where((a) => a.remoteKey.isNull() & a.deletedAt.isNull()))
-        .get();
+    final pending = await (_db.select(
+      _db.assets,
+    )..where((a) => a.remoteKey.isNull() & a.deletedAt.isNull())).get();
 
     for (final asset in pending) {
-      final bytes =
-          await readAsset(localPath: asset.localPath, base64: asset.data);
+      // Uploads go out as one buffered body, so an asset that cannot be held in
+      // memory cannot be uploaded either. Skipping leaves remoteKey null and
+      // the file simply stays local, which is survivable; loading it would not
+      // be.
+      final size = asset.sizeBytes;
+      if (size != null && size > kMaxInMemoryAssetBytes) {
+        debugPrint(
+          'Skipping upload of ${asset.id}: '
+          '${(size / 1e6).round()} MB exceeds the in-memory limit',
+        );
+        continue;
+      }
+      final bytes = await readAsset(
+        localPath: asset.localPath,
+        base64: asset.data,
+      );
       if (bytes == null) continue;
       try {
         final key = _keyFor(asset);
@@ -68,15 +82,18 @@ class FileSync {
   /// file yet. Returns false if the file isn't available.
   Future<bool> download(String assetId) async {
     if (!enabled) return false;
-    final asset = await (_db.select(_db.assets)
-          ..where((a) => a.id.equals(assetId)))
-        .getSingleOrNull();
+    final asset = await (_db.select(
+      _db.assets,
+    )..where((a) => a.id.equals(assetId))).getSingleOrNull();
     if (asset == null) return false;
 
-    // Already here?
-    final existing =
-        await readAsset(localPath: asset.localPath, base64: asset.data);
-    if (existing != null) return true;
+    // Already here? Stat it — reading a large PDF back just to find out would
+    // cost more memory than the process is allowed.
+    final present = await assetExists(
+      localPath: asset.localPath,
+      hasInlineData: asset.data != null,
+    );
+    if (present) return true;
 
     final key = asset.remoteKey;
     if (key == null) return false;
@@ -89,12 +106,13 @@ class FileSync {
         bytes,
         extension: asset.kind == 1 ? 'pdf' : 'img',
       );
-      await (_db.update(_db.assets)..where((a) => a.id.equals(asset.id)))
-          .write(AssetsCompanion(
-        localPath: Value(stored.localPath),
-        data: Value(stored.base64),
-        sizeBytes: Value(bytes.length),
-      ));
+      await (_db.update(_db.assets)..where((a) => a.id.equals(asset.id))).write(
+        AssetsCompanion(
+          localPath: Value(stored.localPath),
+          data: Value(stored.base64),
+          sizeBytes: Value(bytes.length),
+        ),
+      );
       return true;
     } catch (e) {
       debugPrint('Download failed for $assetId: $e');
@@ -122,8 +140,10 @@ class FileSync {
       body: bytes,
     );
     if (response.statusCode >= 300) {
-      throw StateError('Upload rejected (${response.statusCode}): '
-          '${_briefly(response.body)}');
+      throw StateError(
+        'Upload rejected (${response.statusCode}): '
+        '${_briefly(response.body)}',
+      );
     }
   }
 
@@ -134,8 +154,10 @@ class FileSync {
     );
     if (response.statusCode == 404) return null;
     if (response.statusCode >= 300) {
-      throw StateError('Download rejected (${response.statusCode}): '
-          '${_briefly(response.body)}');
+      throw StateError(
+        'Download rejected (${response.statusCode}): '
+        '${_briefly(response.body)}',
+      );
     }
     return response.bodyBytes;
   }
@@ -143,7 +165,9 @@ class FileSync {
   String _briefly(String body) {
     try {
       final decoded = jsonDecode(body);
-      if (decoded is Map && decoded['error'] != null) return '${decoded['error']}';
+      if (decoded is Map && decoded['error'] != null) {
+        return '${decoded['error']}';
+      }
     } catch (_) {}
     return body.length > 120 ? '${body.substring(0, 120)}…' : body;
   }

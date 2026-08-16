@@ -192,6 +192,10 @@ class SyncEngine {
               'trashedAt': d.trashedAt?.millisecondsSinceEpoch,
               'sortIndex': d.sortIndex,
               'createdAt': d.createdAt.millisecondsSinceEpoch,
+              // Ships with the row so a device that has never seen the source
+              // PDF can still draw the card; re-rendering it would mean
+              // downloading the whole file first.
+              'coverThumb': d.coverThumb,
             },
           ),
       ],
@@ -332,14 +336,28 @@ class SyncEngine {
         continue; // local copy is newer
       }
 
+      // A thumb absent from the payload leaves the column alone rather than
+      // clearing it: an older client that doesn't send one shouldn't wipe the
+      // cover this device already rendered.
+      final thumb = record.data['coverThumb'] as String?;
+      final createdAt = _millis(record.data['createdAt']);
+
       final companion = DocumentsCompanion.insert(
         id: record.id,
         type: DocumentType.values[(record.data['type'] as num?)?.toInt() ?? 1],
         title: Value(record.data['title'] as String? ?? 'Untitled'),
         parentId: Value(record.data['parentId'] as String?),
         coverStyle: Value((record.data['coverStyle'] as num?)?.toInt() ?? 0),
+        orientation: Value(PageOrientation
+            .values[(record.data['orientation'] as num?)?.toInt() ?? 0]),
+        pageSize: Value(PageSizePreset
+            .values[(record.data['pageSize'] as num?)?.toInt() ?? 0]),
         starred: Value(record.data['starred'] as bool? ?? false),
+        coverThumb: thumb == null ? const Value.absent() : Value(thumb),
         trashedAt: Value(_millis(record.data['trashedAt'])),
+        sortIndex: Value((record.data['sortIndex'] as num?)?.toInt() ?? 0),
+        createdAt:
+            createdAt == null ? const Value.absent() : Value(createdAt),
         ownerUid: Value(uid),
         updatedAt: Value(record.updatedAt),
         deletedAt: Value(record.deletedAt),
@@ -360,6 +378,7 @@ class SyncEngine {
       parentId: documentId,
     );
 
+    final ensuredAssets = <String>{};
     for (final record in pages) {
       final local = await (_db.select(_db.notePages)
             ..where((p) => p.id.equals(record.id)))
@@ -398,6 +417,72 @@ class SyncEngine {
           );
 
       if (!record.isDeleted) await _pullInk(record.id);
+
+      // PDF / image pages point at an asset; make sure its metadata (and, when
+      // possible, its bytes) land on this device — otherwise the editor paints
+      // blank pages and logs "Missing PDF asset".
+      final pdfId = record.data['pdfAssetId'] as String?;
+      final bgId = record.data['bgAssetId'] as String?;
+      if (pdfId != null && ensuredAssets.add(pdfId)) {
+        await _ensureAsset(pdfId);
+      }
+      if (bgId != null && ensuredAssets.add(bgId)) {
+        await _ensureAsset(bgId);
+      }
+    }
+  }
+
+  /// Hydrates an asset row from the cloud and downloads its bytes when R2 is
+  /// configured. Safe to call repeatedly — already-local content is a no-op.
+  Future<void> _ensureAsset(String assetId) async {
+    final local = await (_db.select(_db.assets)
+          ..where((a) => a.id.equals(assetId)))
+        .getSingleOrNull();
+    final hasBytes = local != null &&
+        (local.localPath != null ||
+            (local.data != null && local.data!.isNotEmpty));
+    if (hasBytes) return;
+
+    if (local == null || local.remoteKey == null) {
+      final record =
+          await _remote.fetchById(RemoteCollection.assets, assetId);
+      if (record == null || record.isDeleted) return;
+      await _db.into(_db.assets).insertOnConflictUpdate(
+            AssetsCompanion.insert(
+              id: assetId,
+              kind: (record.data['kind'] as num?)?.toInt() ?? 1,
+              path: Value(record.data['path'] as String? ?? ''),
+              mime: Value(record.data['mime'] as String?),
+              sha256: Value(record.data['sha256'] as String?),
+              sizeBytes: Value((record.data['sizeBytes'] as num?)?.toInt()),
+              remoteKey: Value(record.data['remoteKey'] as String?),
+              updatedAt: Value(record.updatedAt),
+              deletedAt: Value(record.deletedAt),
+              dirty: const Value(false),
+              remoteUpdatedAt: Value(record.updatedAt),
+            ),
+          );
+    }
+
+    await _files?.download(assetId);
+  }
+
+  /// Called when opening a document so pages whose PDF was synced as metadata
+  /// only (or lost locally) try again to fetch the file before the canvas
+  /// paints blank sheets.
+  Future<void> ensureDocumentAssets(String documentId) async {
+    final pages = await (_db.select(_db.notePages)
+          ..where((p) =>
+              p.documentId.equals(documentId) & p.deletedAt.isNull()))
+        .get();
+    final ids = <String>{
+      for (final p in pages) ...[
+        if (p.pdfAssetId != null) p.pdfAssetId!,
+        if (p.bgAssetId != null) p.bgAssetId!,
+      ],
+    };
+    for (final id in ids) {
+      await _ensureAsset(id);
     }
   }
 

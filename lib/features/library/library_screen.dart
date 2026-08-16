@@ -28,7 +28,9 @@ class LibraryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final wide = MediaQuery.of(context).size.width >= kSidebarBreakpoint;
+    final width = MediaQuery.sizeOf(context).width;
+    final wide = width >= AppBreakpoints.librarySidebar;
+    final phone = width < AppBreakpoints.phone;
     // Sections are a root-level idea; inside a folder we always show its
     // children, so the chips/sidebar selection is ignored there.
     final inFolder = parentId != null;
@@ -50,6 +52,93 @@ class LibraryScreen extends ConsumerWidget {
               icon: const Icon(Icons.add_rounded),
               label: const Text('New'),
             ),
+      bottomNavigationBar: phone && parentId == null
+          ? const _MobileLibraryNav()
+          : null,
+    );
+  }
+}
+
+/// Compact navigation from the Android/iOS redesign. Filters remain available
+/// as chips above the grid; the bottom bar keeps the three destinations used
+/// most often within thumb reach.
+class _MobileLibraryNav extends ConsumerWidget {
+  const _MobileLibraryNav();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final section = ref.watch(librarySectionProvider);
+    final t = context.tokens;
+
+    Widget destination({
+      required IconData icon,
+      required String label,
+      required bool selected,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            height: 58,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 22,
+                  color: selected ? t.accentText : t.textMuted,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: selected ? t.accentText : t.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Material(
+      color: t.surfaceAlt,
+      child: SafeArea(
+        top: false,
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: t.line)),
+          ),
+          child: Row(
+            children: [
+              destination(
+                icon: Icons.description_outlined,
+                label: 'Docs',
+                selected: section == LibrarySection.all,
+                onTap: () => ref.read(librarySectionProvider.notifier).state =
+                    LibrarySection.all,
+              ),
+              destination(
+                icon: Icons.star_outline_rounded,
+                label: 'Starred',
+                selected: section == LibrarySection.starred,
+                onTap: () => ref.read(librarySectionProvider.notifier).state =
+                    LibrarySection.starred,
+              ),
+              destination(
+                icon: Icons.settings_outlined,
+                label: 'Settings',
+                selected: false,
+                onTap: () => context.push('/settings'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -64,8 +153,9 @@ class _Pane extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final inFolder = parentId != null;
-    final section =
-        inFolder ? LibrarySection.all : ref.watch(librarySectionProvider);
+    final section = inFolder
+        ? LibrarySection.all
+        : ref.watch(librarySectionProvider);
     final docsAsync = inFolder
         ? ref.watch(folderChildrenProvider(parentId))
         : switch (section) {
@@ -183,7 +273,7 @@ class _MobileHeader extends ConsumerWidget {
     final section = ref.watch(librarySectionProvider);
     final title = inFolder
         ? (ref.watch(documentProvider(parentId!)).asData?.value?.title ??
-            'Folder')
+              'Folder')
         : 'Library';
 
     return Container(
@@ -246,9 +336,9 @@ class _MobileHeader extends ConsumerWidget {
                         child: _Chip(
                           label: s.shortLabel,
                           selected: section == s,
-                          onTap: () => ref
-                              .read(librarySectionProvider.notifier)
-                              .state = s,
+                          onTap: () =>
+                              ref.read(librarySectionProvider.notifier).state =
+                                  s,
                         ),
                       ),
                     // Not a filter — Trash has its own screen, with the
@@ -322,10 +412,8 @@ class _SearchField extends StatelessWidget {
     final t = context.tokens;
     return InkWell(
       borderRadius: BorderRadius.circular(Radii.control),
-      onTap: () => showSearch(
-        context: context,
-        delegate: _LibrarySearchDelegate(ref),
-      ),
+      onTap: () =>
+          showSearch(context: context, delegate: _LibrarySearchDelegate(ref)),
       child: Container(
         height: 40,
         padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -338,8 +426,10 @@ class _SearchField extends StatelessWidget {
           children: [
             Icon(Icons.search_rounded, size: 19, color: t.textMuted),
             const SizedBox(width: 10),
-            Text('Search documents…',
-                style: TextStyle(fontSize: 14, color: t.textMuted)),
+            Text(
+              'Search documents…',
+              style: TextStyle(fontSize: 14, color: t.textMuted),
+            ),
           ],
         ),
       ),
@@ -425,8 +515,9 @@ class _Body extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final gridMode = ProviderScope.containerOf(context)
-        .read(libraryGridModeProvider);
+    final gridMode = ProviderScope.containerOf(
+      context,
+    ).read(libraryGridModeProvider);
     final pad = wide ? 28.0 : 20.0;
 
     return CustomScrollView(
@@ -439,29 +530,33 @@ class _Body extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text.rich(
-                    TextSpan(children: [
-                      TextSpan(
-                        text: parentId == null ? section.label : 'Contents',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: t.text,
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: parentId == null ? section.label : 'Contents',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: t.text,
+                          ),
                         ),
-                      ),
-                      TextSpan(
-                        text: '  · ${docs.length}',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
-                          color: t.textFaint,
+                        TextSpan(
+                          text: '  · ${docs.length}',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: t.textFaint,
+                          ),
                         ),
-                      ),
-                    ]),
+                      ],
+                    ),
                   ),
                 ),
                 if (wide)
-                  Text(_sortCaption(context),
-                      style: AppTokens.mono(size: 12, color: t.textFaint)),
+                  Text(
+                    _sortCaption(context),
+                    style: AppTokens.mono(size: 12, color: t.textFaint),
+                  ),
               ],
             ),
           ),
@@ -491,7 +586,8 @@ class _Body extends StatelessWidget {
                 )
               : SliverList.separated(
                   itemCount: docs.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 6),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 6),
                   itemBuilder: (context, i) => _ListRow(doc: docs[i]),
                 ),
         ),
@@ -500,8 +596,7 @@ class _Body extends StatelessWidget {
   }
 
   static String _sortCaption(BuildContext context) {
-    final sort =
-        ProviderScope.containerOf(context).read(librarySortProvider);
+    final sort = ProviderScope.containerOf(context).read(librarySortProvider);
     return switch (sort) {
       LibrarySort.modifiedDesc => 'Sorted by last modified',
       LibrarySort.createdDesc => 'Sorted by date created',
@@ -571,9 +666,7 @@ class _ListRow extends StatelessWidget {
               ),
               IconButton(
                 icon: Icon(
-                  doc.starred
-                      ? Icons.star_rounded
-                      : Icons.star_border_rounded,
+                  doc.starred ? Icons.star_rounded : Icons.star_border_rounded,
                   size: 19,
                 ),
                 color: doc.starred ? t.star : t.textFaint,
@@ -603,9 +696,9 @@ void _open(BuildContext context, Document d) {
 }
 
 void _toggleStar(BuildContext context, Document d) {
-  ProviderScope.containerOf(context)
-      .read(libraryRepositoryProvider)
-      .setStarred(d.id, !d.starred);
+  ProviderScope.containerOf(
+    context,
+  ).read(libraryRepositoryProvider).setStarred(d.id, !d.starred);
 }
 
 // ---------------------------------------------------------------- actions --
@@ -628,10 +721,9 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
                 d.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(sheetContext)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontSize: 16),
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleMedium?.copyWith(fontSize: 16),
               ),
             ),
           ),
@@ -645,9 +737,9 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
             },
           ),
           ListTile(
-            leading: Icon(d.starred
-                ? Icons.star_outline_rounded
-                : Icons.star_rounded),
+            leading: Icon(
+              d.starred ? Icons.star_outline_rounded : Icons.star_rounded,
+            ),
             title: Text(d.starred ? 'Remove star' : 'Add star'),
             onTap: () {
               Navigator.pop(sheetContext);
@@ -664,11 +756,14 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
           ),
           const Divider(height: 1),
           ListTile(
-            leading: Icon(Icons.delete_outline_rounded,
-                color: Theme.of(sheetContext).colorScheme.error),
-            title: Text('Move to Trash',
-                style: TextStyle(
-                    color: Theme.of(sheetContext).colorScheme.error)),
+            leading: Icon(
+              Icons.delete_outline_rounded,
+              color: Theme.of(sheetContext).colorScheme.error,
+            ),
+            title: Text(
+              'Move to Trash',
+              style: TextStyle(color: Theme.of(sheetContext).colorScheme.error),
+            ),
             onTap: () {
               Navigator.pop(sheetContext);
               repo.moveToTrash(d.id);
@@ -691,7 +786,10 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
 }
 
 Future<void> _showDetails(
-    BuildContext context, LibraryRepository repo, Document d) async {
+  BuildContext context,
+  LibraryRepository repo,
+  Document d,
+) async {
   final pages = d.type == DocumentType.folder ? 0 : await repo.pageCount(d.id);
   final fmt = DateFormat.yMMMd().add_jm();
   if (!context.mounted) return;
@@ -717,35 +815,37 @@ Future<void> _showDetails(
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close')),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
       ],
     ),
   );
 }
 
 Widget _detailRow(BuildContext context, String label, String value) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 84,
-            child: Text(label,
-                style: TextStyle(
-                    fontSize: 13, color: context.tokens.textMuted)),
-          ),
-          Expanded(
-            child: Text(value,
-                style: AppTokens.mono(
-                    size: 12.5, color: context.tokens.text)),
-          ),
-        ],
+  padding: const EdgeInsets.symmetric(vertical: 5),
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SizedBox(
+        width: 84,
+        child: Text(
+          label,
+          style: TextStyle(fontSize: 13, color: context.tokens.textMuted),
+        ),
       ),
-    );
+      Expanded(
+        child: Text(
+          value,
+          style: AppTokens.mono(size: 12.5, color: context.tokens.text),
+        ),
+      ),
+    ],
+  ),
+);
 
-Future<String?> promptText(
-    BuildContext context, String title, String initial) {
+Future<String?> promptText(BuildContext context, String title, String initial) {
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
@@ -758,8 +858,9 @@ Future<String?> promptText(
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel')),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
           onPressed: () => Navigator.pop(context, controller.text.trim()),
           child: const Text('Save'),
@@ -794,6 +895,98 @@ Future<void> runCreateFlow(
       await _import(context, ref, isPdf: true, parentId: parentId);
     case CreateAction.importImages:
       await _import(context, ref, isPdf: false, parentId: parentId);
+    case CreateAction.scan:
+      await _scan(context, ref, parentId: parentId);
+  }
+}
+
+/// Captures pages from the camera one at a time — asking "add another page?"
+/// between shots — then builds a notebook from them.
+Future<void> _scan(
+  BuildContext context,
+  WidgetRef ref, {
+  required String? parentId,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final router = GoRouter.of(context);
+  final service = ref.read(importServiceProvider);
+  final pages = <ImagePayload>[];
+
+  try {
+    while (true) {
+      final page = await service.captureScanPage();
+      // Cancelling the camera keeps whatever was captured before it.
+      if (page == null) break;
+      pages.add(page);
+      if (!context.mounted) return;
+      final again = await showDialog<bool>(
+        context: context,
+        builder: (_) => _ScanAnotherDialog(pageCount: pages.length),
+      );
+      if (again != true) break;
+    }
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('Scan failed: $e')));
+    return;
+  }
+
+  if (pages.isEmpty) return;
+
+  final progress = ValueNotifier<(double, String)>((0, 'Saving pages…'));
+  var dialogOpen = false;
+  try {
+    if (context.mounted) {
+      dialogOpen = true;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) =>
+            _ImportProgressDialog(title: 'Building scan', progress: progress),
+      );
+    }
+    final id = await service.createImageDocument(
+      images: pages,
+      parentId: parentId,
+      onProgress: (f, label) => progress.value = (f, label),
+    );
+    if (dialogOpen && context.mounted) Navigator.of(context).pop();
+    dialogOpen = false;
+    if (id != null) {
+      ref.read(libraryRepositoryProvider).touchOpened(id);
+      router.push('/doc/$id');
+    }
+  } catch (e) {
+    if (dialogOpen && context.mounted) Navigator.of(context).pop();
+    messenger.showSnackBar(SnackBar(content: Text('Scan failed: $e')));
+  } finally {
+    progress.dispose();
+  }
+}
+
+/// Between-capture prompt for the scanner: keep shooting or finish.
+class _ScanAnotherDialog extends StatelessWidget {
+  const _ScanAnotherDialog({required this.pageCount});
+
+  final int pageCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('$pageCount page${pageCount == 1 ? '' : 's'} captured'),
+      content: const Text(
+        'Scan another page, or finish and open the document?',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Done'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Scan another'),
+        ),
+      ],
+    );
   }
 }
 
@@ -886,13 +1079,17 @@ class _ImportProgressDialog extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Flexible(
-                    child: Text(label,
-                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  Text('${(fraction * 100).round()}%',
-                      style: AppTokens.mono(
-                          size: 13, weight: FontWeight.w700)),
+                  Text(
+                    '${(fraction * 100).round()}%',
+                    style: AppTokens.mono(size: 13, weight: FontWeight.w700),
+                  ),
                 ],
               ),
             ],
@@ -915,9 +1112,13 @@ class _SortButton extends StatelessWidget {
       onSelected: (s) => ref.read(librarySortProvider.notifier).state = s,
       itemBuilder: (context) => const [
         PopupMenuItem(
-            value: LibrarySort.modifiedDesc, child: Text('Last modified')),
+          value: LibrarySort.modifiedDesc,
+          child: Text('Last modified'),
+        ),
         PopupMenuItem(
-            value: LibrarySort.createdDesc, child: Text('Date created')),
+          value: LibrarySort.createdDesc,
+          child: Text('Date created'),
+        ),
         PopupMenuItem(value: LibrarySort.nameAsc, child: Text('Name (A–Z)')),
         PopupMenuItem(value: LibrarySort.nameDesc, child: Text('Name (Z–A)')),
       ],
@@ -936,25 +1137,25 @@ class _EmptyState extends StatelessWidget {
     final t = context.tokens;
     final (icon, title, hint) = switch (section) {
       _ when inFolder => (
-          Icons.folder_open_rounded,
-          'This folder is empty',
-          'Add a notebook or import a PDF into it',
-        ),
+        Icons.folder_open_rounded,
+        'This folder is empty',
+        'Add a notebook or import a PDF into it',
+      ),
       LibrarySection.starred => (
-          Icons.star_outline_rounded,
-          'Nothing starred yet',
-          'Star a document to keep it within reach',
-        ),
+        Icons.star_outline_rounded,
+        'Nothing starred yet',
+        'Star a document to keep it within reach',
+      ),
       LibrarySection.recent => (
-          Icons.schedule_rounded,
-          'No recent documents',
-          'Documents you open will show up here',
-        ),
+        Icons.schedule_rounded,
+        'No recent documents',
+        'Documents you open will show up here',
+      ),
       LibrarySection.all => (
-          Icons.auto_stories_rounded,
-          'Nothing here yet',
-          'Tap New to create a notebook or import a PDF',
-        ),
+        Icons.auto_stories_rounded,
+        'Nothing here yet',
+        'Tap New to create a notebook or import a PDF',
+      ),
     };
 
     return Center(
@@ -971,12 +1172,14 @@ class _EmptyState extends StatelessWidget {
             child: Icon(icon, size: 34, color: t.textFaint),
           ),
           const SizedBox(height: 18),
-          Text(title,
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: t.text,
-              )),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: t.text,
+            ),
+          ),
           const SizedBox(height: 6),
           Text(hint, style: TextStyle(fontSize: 13.5, color: t.textMuted)),
         ],
@@ -994,18 +1197,15 @@ class _LibrarySearchDelegate extends SearchDelegate<void> {
 
   @override
   List<Widget> buildActions(BuildContext context) => [
-        if (query.isNotEmpty)
-          IconButton(
-            icon: const Icon(Icons.clear),
-            onPressed: () => query = '',
-          ),
-      ];
+    if (query.isNotEmpty)
+      IconButton(icon: const Icon(Icons.clear), onPressed: () => query = ''),
+  ];
 
   @override
   Widget buildLeading(BuildContext context) => IconButton(
-        icon: const Icon(Icons.arrow_back),
-        onPressed: () => close(context, null),
-      );
+    icon: const Icon(Icons.arrow_back),
+    onPressed: () => close(context, null),
+  );
 
   @override
   Widget buildResults(BuildContext context) => _results(context);
@@ -1018,8 +1218,10 @@ class _LibrarySearchDelegate extends SearchDelegate<void> {
     final repo = ref.read(libraryRepositoryProvider);
     if (query.trim().isEmpty) {
       return Center(
-        child: Text('Type to search your notes',
-            style: TextStyle(color: t.textMuted)),
+        child: Text(
+          'Type to search your notes',
+          style: TextStyle(color: t.textMuted),
+        ),
       );
     }
     return StreamBuilder<List<Document>>(
@@ -1028,8 +1230,7 @@ class _LibrarySearchDelegate extends SearchDelegate<void> {
         final docs = snap.data ?? const [];
         if (docs.isEmpty) {
           return Center(
-            child:
-                Text('No matches', style: TextStyle(color: t.textMuted)),
+            child: Text('No matches', style: TextStyle(color: t.textMuted)),
           );
         }
         return ListView(

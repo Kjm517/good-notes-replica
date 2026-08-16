@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:drift/drift.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:pdfx/pdfx.dart';
 import 'package:uuid/uuid.dart';
 
@@ -14,6 +15,11 @@ import 'asset_repository.dart';
 
 /// Reports import progress: [fraction] 0..1 and a human-readable [label].
 typedef ImportProgress = void Function(double fraction, String label);
+
+/// One image destined to become a page: raw bytes plus enough naming to store
+/// it and guess a MIME type. Produced by both the image picker and the camera
+/// scanner, then handed to [ImportService.createImageDocument].
+typedef ImagePayload = ({Uint8List bytes, String name, String? ext});
 
 /// Raised when the user picks a document we can't render directly.
 ///
@@ -69,10 +75,51 @@ class ImportService {
     );
     if (result == null || result.files.isEmpty) return null;
 
-    final total = result.files.length;
-    onProgress?.call(0, 'Preparing $total image${total == 1 ? '' : 's'}…');
+    final images = <ImagePayload>[];
+    for (final file in result.files) {
+      final bytes = file.bytes;
+      if (bytes == null) continue;
+      // Keep an independent copy: decoding later can detach the original
+      // buffer (esp. on web), which would corrupt the DB write.
+      images.add((
+        bytes: Uint8List.fromList(bytes),
+        name: file.name,
+        ext: file.extension,
+      ));
+    }
+    return createImageDocument(
+      images: images,
+      parentId: parentId,
+      onProgress: onProgress,
+    );
+  }
+
+  /// Captures a single page from the device camera, returning null if the user
+  /// left the camera without taking a photo. The caller loops this to build a
+  /// multi-page scan (asking "add another page?" between shots).
+  Future<ImagePayload?> captureScanPage() async {
+    final shot = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      imageQuality: 85,
+    );
+    if (shot == null) return null;
+    final bytes = Uint8List.fromList(await shot.readAsBytes());
+    return (bytes: bytes, name: shot.name, ext: _extOf(shot.name));
+  }
+
+  /// Builds a one-page-per-image notebook from already-gathered [images].
+  /// Shared by image import and camera scanning. Returns the new document id.
+  Future<String?> createImageDocument({
+    required List<ImagePayload> images,
+    String? parentId,
+    ImportProgress? onProgress,
+  }) async {
+    if (images.isEmpty) return null;
+
+    final total = images.length;
+    onProgress?.call(0, 'Preparing $total page${total == 1 ? '' : 's'}…');
     final docId = _uuid.v4();
-    final title = _titleFrom(result.files.first.name);
+    final title = _titleFrom(images.first.name);
     await _db.transaction(() async {
       await _db.into(_db.documents).insert(DocumentsCompanion.insert(
             id: docId,
@@ -83,19 +130,15 @@ class ImportService {
           ));
       var index = 0;
       String? coverThumb;
-      for (final file in result.files) {
-        final bytes = file.bytes;
-        if (bytes == null) continue;
-        // Keep an independent copy for storage: decoding below can detach the
-        // original buffer (esp. on web), which would corrupt the DB write.
-        final stored = Uint8List.fromList(bytes);
-        final size = await _imageSize(bytes);
+      for (final img in images) {
+        final stored = Uint8List.fromList(img.bytes);
+        final size = await _imageSize(img.bytes);
         final assetId = await _assets.store(
           id: _uuid.v4(),
           bytes: stored,
           kind: 0,
-          filename: file.name,
-          mime: _mimeFromExt(file.extension),
+          filename: img.name,
+          mime: _mimeFromExt(img.ext),
         );
         await _db.into(_db.notePages).insert(NotePagesCompanion.insert(
               id: _uuid.v4(),
@@ -107,7 +150,7 @@ class ImportService {
               pageH: Value(size.height),
             ));
         coverThumb ??= base64Encode(stored);
-        onProgress?.call(index / total, 'Imported $index of $total images');
+        onProgress?.call(index / total, 'Added $index of $total pages');
       }
       if (coverThumb != null) {
         await (_db.update(_db.documents)..where((d) => d.id.equals(docId)))
@@ -364,6 +407,13 @@ class ImportService {
   String _titleFrom(String filename) {
     final dot = filename.lastIndexOf('.');
     return dot > 0 ? filename.substring(0, dot) : filename;
+  }
+
+  String? _extOf(String filename) {
+    final dot = filename.lastIndexOf('.');
+    return dot >= 0 && dot < filename.length - 1
+        ? filename.substring(dot + 1)
+        : null;
   }
 
   String _mimeFromExt(String? ext) {

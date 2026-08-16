@@ -14,7 +14,7 @@ class AppDatabase extends _$AppDatabase {
       : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -76,6 +76,27 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 9) {
             await m.addColumn(documents, documents.ownerUid);
+          }
+          if (from < 10) {
+            // Cover thumbs predate being part of the sync payload, so rows
+            // already pushed sit in the cloud without one and are no longer
+            // dirty. Re-dirty the ones that have a thumb so the next sync
+            // uploads it and other devices stop showing a blank cover.
+            //
+            // updatedAt has to move too: pulls ask for records changed since
+            // the last sync, and re-pushing the old timestamp would leave the
+            // upload invisible to every other device.
+            await (update(documents)..where((d) => d.coverThumb.isNotNull()))
+                .write(DocumentsCompanion(
+              dirty: const Value(true),
+              updatedAt: Value(DateTime.now()),
+            ));
+          }
+          if (from < 11) {
+            // PDF table-of-contents cache. Null on existing rows means the
+            // background indexer will extract it the next time each document
+            // is opened.
+            await m.addColumn(documents, documents.outline);
           }
         },
         beforeOpen: (details) async {

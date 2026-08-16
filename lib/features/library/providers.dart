@@ -107,3 +107,9 @@ final documentStreamProvider =
     StreamProvider.family<Document?, String>((ref, id) {
   return ref.watch(libraryRepositoryProvider).watchById(id);
 });
+
+/// Live page count for a document, for the library card meta line.
+final documentPageCountProvider =
+    StreamProvider.family<int, String>((ref, id) {
+  return ref.watch(libraryRepositoryProvider).watchPageCount(id);
+});

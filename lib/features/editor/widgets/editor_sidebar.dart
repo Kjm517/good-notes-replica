@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/design.dart';
 import '../../../core/db/database.dart';
+import '../../../core/models/outline_entry.dart';
 import '../providers.dart';
 import 'page_preview.dart';
 
@@ -24,6 +25,7 @@ class EditorSidebar extends ConsumerStatefulWidget {
     required this.currentIndex,
     required this.defaultPageSize,
     required this.onJumpToPage,
+    this.outline = const [],
   });
 
   final String documentId;
@@ -31,6 +33,10 @@ class EditorSidebar extends ConsumerStatefulWidget {
   final int currentIndex;
   final Size defaultPageSize;
   final void Function(int index) onJumpToPage;
+
+  /// The source PDF's embedded table of contents, extracted in the background.
+  /// Empty for notebooks, image imports, or PDFs without an outline.
+  final List<OutlineEntry> outline;
 
   @override
   ConsumerState<EditorSidebar> createState() => _EditorSidebarState();
@@ -51,6 +57,12 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
     final h = page.pageH;
     if (w != null && h != null) return Size(w, h);
     return widget.defaultPageSize;
+  }
+
+  double _thumbExtent(NotePage page) {
+    final size = _sizeFor(page);
+    final aspect = size.width == 0 ? 1.3 : size.height / size.width;
+    return 14 + _kThumbWidth * aspect + 20;
   }
 
   @override
@@ -125,10 +137,17 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
   }
 
   Widget _thumbnails() {
+    final first = widget.pages.isEmpty ? null : widget.pages.first;
+    final uniform = first != null &&
+        widget.pages.length > 1 &&
+        _sizeFor(widget.pages.last) == _sizeFor(first);
+    final extent = first == null ? null : _thumbExtent(first);
     return ListView.builder(
       controller: _scroll,
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: widget.pages.length,
+      itemExtent: uniform ? extent : null,
+      cacheExtent: 240,
       itemBuilder: (context, i) {
         final page = widget.pages[i];
         final selected = i == widget.currentIndex;
@@ -145,12 +164,22 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
   }
 
   Widget _outline(BuildContext context) {
+    final t = context.tokens;
+
+    // The PDF's own table of contents (clamped to real pages, in case the file
+    // referenced pages we didn't import).
+    final toc = [
+      for (final e in widget.outline)
+        if (e.pageIndex >= 0 && e.pageIndex < widget.pages.length) e,
+    ];
+
+    // Pages the user bookmarked by hand.
     final marked = <int>[];
     for (var i = 0; i < widget.pages.length; i++) {
       if ((widget.pages[i].bookmarkTitle ?? '').isNotEmpty) marked.add(i);
     }
-    if (marked.isEmpty) {
-      final t = context.tokens;
+
+    if (toc.isEmpty && marked.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -159,7 +188,7 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
             Icon(Icons.bookmark_border_rounded, size: 34, color: t.textFaint),
             const SizedBox(height: 12),
             Text(
-              'No outline entries yet',
+              'No outline yet',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13.5,
@@ -169,7 +198,8 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Bookmark a page to add it here.',
+              'PDFs with a table of contents show it here. '
+              'Bookmark a page to add your own.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: t.textMuted),
             ),
@@ -177,27 +207,127 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
         ),
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: marked.length,
-      itemBuilder: (context, i) {
-        final index = marked[i];
-        final page = widget.pages[index];
-        return ListTile(
-          dense: true,
-          visualDensity: VisualDensity.compact,
-          selected: index == widget.currentIndex,
-          leading: const Icon(Icons.bookmark_rounded, size: 16),
-          title: Text(page.bookmarkTitle!,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis),
-          subtitle: Text('Page ${index + 1}',
-              style: AppTokens.mono(
-                  size: 10.5, color: context.tokens.textFaint)),
-          onTap: () => widget.onJumpToPage(index),
-        );
-      },
+
+    final showSections = toc.isNotEmpty && marked.isNotEmpty;
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      children: [
+        if (showSections) _sectionLabel(context, 'Contents'),
+        for (final entry in toc)
+          _OutlineTile(
+            title: entry.title,
+            pageNumber: entry.pageIndex + 1,
+            depth: entry.depth,
+            selected: entry.pageIndex == widget.currentIndex,
+            onTap: () => widget.onJumpToPage(entry.pageIndex),
+          ),
+        if (showSections) ...[
+          const SizedBox(height: 6),
+          _sectionLabel(context, 'Bookmarks'),
+        ],
+        for (final index in marked)
+          _OutlineTile(
+            title: widget.pages[index].bookmarkTitle!,
+            pageNumber: index + 1,
+            depth: 0,
+            bookmark: true,
+            selected: index == widget.currentIndex,
+            onTap: () => widget.onJumpToPage(index),
+          ),
+      ],
+    );
+  }
+
+  Widget _sectionLabel(BuildContext context, String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 6),
+      child: Text(text.toUpperCase(),
+          style: AppTokens.sectionLabel(context.tokens.textFaint)),
+    );
+  }
+}
+
+/// One row in the outline: a TOC entry (indented by depth) or a manual
+/// bookmark. Tapping it jumps to the page.
+class _OutlineTile extends StatelessWidget {
+  const _OutlineTile({
+    required this.title,
+    required this.pageNumber,
+    required this.depth,
+    required this.selected,
+    required this.onTap,
+    this.bookmark = false,
+  });
+
+  final String title;
+  final int pageNumber;
+  final int depth;
+  final bool selected;
+  final bool bookmark;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    // Indent nested entries; cap the depth so a deep outline never marches off
+    // the edge of a 240px sidebar.
+    final indent = 18.0 + (depth.clamp(0, 5)) * 14.0;
+    final topLevel = depth == 0;
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected ? t.accentSoft : Colors.transparent,
+          border: Border(
+            left: BorderSide(
+              color: selected ? t.accent : Colors.transparent,
+              width: 2.5,
+            ),
+          ),
+        ),
+        padding: EdgeInsets.fromLTRB(indent - 2, 7, 12, 7),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (bookmark) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 1, right: 6),
+                child: Icon(Icons.bookmark_rounded,
+                    size: 14, color: t.accentText),
+              ),
+            ],
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: topLevel ? 13 : 12.5,
+                  height: 1.3,
+                  fontWeight:
+                      topLevel ? FontWeight.w600 : FontWeight.w500,
+                  color: selected
+                      ? t.accentText
+                      : (topLevel ? t.text : t.textSecondary),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Text(
+                '$pageNumber',
+                style: AppTokens.mono(
+                  size: 10.5,
+                  color: selected ? t.accentText : t.textFaint,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

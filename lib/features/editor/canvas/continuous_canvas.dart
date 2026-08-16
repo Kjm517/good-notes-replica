@@ -1,23 +1,26 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/database.dart';
 import '../../../core/ink/ink_stroke.dart';
 import '../../../core/models/enums.dart';
+import '../../../core/models/text_element.dart';
 import '../ink/shape_recognizer.dart';
 import '../pages/background_painter.dart';
 import '../pages/paper_painter.dart';
+import '../providers.dart';
 import '../state/lasso_selection.dart';
 import '../state/tool_settings.dart';
 import 'image_layer.dart';
 import 'ink_painters.dart';
 import 'lasso_painter.dart';
+import 'text_layer.dart';
 
 const double _kPageGap = 16;
 
@@ -58,6 +61,15 @@ class ContinuousCanvas extends StatefulWidget {
     this.onSelectElement,
     this.onElementTransform,
     this.onElementRotate,
+    this.onDeleteElement,
+    this.onShiftElementZ,
+    this.onCreateElement,
+    this.onEditElement,
+    this.editingElementId,
+    this.onChangeText,
+    this.onEndEditText,
+    this.palmRejection = true,
+    this.twoPageSpread = false,
   });
 
   final List<NotePage> pages;
@@ -101,12 +113,43 @@ class ContinuousCanvas extends StatefulWidget {
   final ValueChanged<String?>? onSelectElement;
 
   /// (elementId, rect, committed) — committed=false while dragging.
-  final void Function(String id, Rect rect, bool committed)?
-      onElementTransform;
+  /// [pageId] is set on commit when the object was dropped on a different page.
+  final void Function(String id, Rect rect, bool committed, {String? pageId})?
+  onElementTransform;
 
   /// (elementId, radians, committed)
   final void Function(String id, double rotation, bool committed)?
-      onElementRotate;
+  onElementRotate;
+
+  /// Deletes an image/sticker element from its delete grip.
+  final ValueChanged<String>? onDeleteElement;
+
+  /// Bring the object forward (true) or send it backward (false) in z-order.
+  final void Function(String id, bool forward)? onShiftElementZ;
+
+  /// Tapping an empty spot with the Text/Sticky tool: (pageId, content point,
+  /// isSticky). The screen inserts the element and opens it for editing.
+  final void Function(String pageId, Offset at, bool sticky)? onCreateElement;
+
+  /// Double-tapping a text/sticky element (or tapping the toolbar pencil) opens
+  /// it for inline editing.
+  final ValueChanged<String>? onEditElement;
+
+  /// The element currently open for inline text entry, if any.
+  final String? editingElementId;
+
+  /// Persists a text/sticky element's content or formatting as it's edited.
+  final void Function(String id, TextElementData data)? onChangeText;
+
+  /// The inline text field lost focus / the user tapped Done.
+  final VoidCallback? onEndEditText;
+
+  /// When true, a finger resting on the page is ignored once a stylus is in
+  /// use (fingers pan instead of mark). Off means every touch draws.
+  final bool palmRejection;
+
+  /// Renders consecutive pages side by side. Used by landscape tablet layout.
+  final bool twoPageSpread;
 
   @override
   State<ContinuousCanvas> createState() => _ContinuousCanvasState();
@@ -157,6 +200,16 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
 
   double get _scale => _baseScale * _zoom;
 
+  /// Prefix sums of row heights so jump/scroll on a 4,000-page PDF is O(log n)
+  /// instead of walking every row on each frame.
+  List<double>? _rowOffsets;
+  double? _cachedContentWidth;
+  double? _uniformRowExtent;
+  int _layoutLen = -1;
+  double _layoutScale = -1;
+  bool _layoutSpread = false;
+  int _layoutPagesIdentity = 0;
+
   /// Tools that consume one-pointer drags on the page (so the view must not
   /// scroll underneath them).
   bool get _marking =>
@@ -170,10 +223,23 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
 
   bool get _imageTool => widget.tool == ToolType.image;
 
-  /// True when the scroll views' own physics are disabled, meaning this widget
-  /// is responsible for wheel scrolling.
-  bool get _scrollLocked =>
-      _marking || _ctrlHeld || _handTool || _imageTool;
+  bool get _textTool => widget.tool == ToolType.text;
+
+  bool get _stickyTool => widget.tool == ToolType.sticky;
+
+  /// Tools that place/move on-page objects (images, text, sticky notes).
+  bool get _elementTool => _imageTool || _textTool || _stickyTool;
+
+  /// True when a one-finger drag should pan the document instead of drawing.
+  bool get _canOneFingerPan {
+    if (_handTool || _elementTool) return true;
+    return widget.palmRejection &&
+        _stylusMode &&
+        _downKind == PointerDeviceKind.touch;
+  }
+
+  Offset? _panOrigin;
+  PointerDeviceKind? _downKind;
 
   // Grab-and-pan state for the hand tool.
   bool _panning = false;
@@ -182,8 +248,27 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   // Live pointers, used for two-finger pinch-zoom / pan on touch devices.
   final Map<int, Offset> _pointers = {};
   bool _multiTouch = false;
+  bool _elementPinch = false;
+  String? _elPinchId;
+  int _elPinchPage = 0;
+  Rect _elPinchStartRect = Rect.zero;
+  double _elPinchStartRot = 0;
+  Offset _elPinchStartFocal = Offset.zero;
+  double _elPinchStartDist = 1;
+  double _elPinchStartAngle = 0;
+  Rect? _elPinchLiveRect;
+  double? _elPinchLiveRot;
+  double? _elPinchStartFont;
   Offset _pinchFocal = Offset.zero;
   double _pinchDistance = 1;
+
+  /// Empty-space tap tracking so we can deselect on pointer *up* instead of
+  /// down. Clearing on down disposed the delete/rotate grips before their
+  /// GestureDetector could fire.
+  Offset? _downGlobal;
+  Offset? _downContent;
+  bool _downOnElement = false;
+  int? _downPointer;
 
   /// When a stylus has been used recently, fingers pan instead of drawing
   /// (palm rejection). Reset if the stylus goes unused for a while.
@@ -217,6 +302,10 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
       old.controller?._detach(this);
       widget.controller?._attach(this);
     }
+    if (old.twoPageSpread != widget.twoPageSpread && _viewport != Size.zero) {
+      _computeBaseScale(_viewport);
+      widget.controller?._publishZoom(_zoom);
+    }
   }
 
   @override
@@ -236,9 +325,25 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
       _lastStylusAt = DateTime.now();
     }
     _pointers[e.pointer] = e.localPosition;
-    if (_pointers.length >= 2 && !_multiTouch) {
-      // A second finger arrived: abandon any nascent stroke and switch to
-      // pinch/pan so two fingers always navigate, whatever tool is active.
+    if (_pointers.length == 1) {
+      _panOrigin = e.position;
+      _panLast = e.position;
+      _downKind = e.kind;
+      // Do not clear _downOnElement here. The page Listener is inner, so
+      // _onPageDown already ran and recorded whether this finger landed on
+      // a sticker/text/image. Resetting would let one-finger pan steal the
+      // drag: the object and the page both move, and the sticker jumps
+      // ahead of the finger.
+      if (_pointerHitsAnyElement(e.localPosition)) {
+        _downOnElement = true;
+      }
+    }
+    if (_pointers.length >= 2 && !_multiTouch && !_elementPinch) {
+      if (_beginElementPinch()) {
+        return;
+      }
+      // Otherwise abandon any nascent stroke and switch to pinch/pan so two
+      // fingers always navigate, whatever tool is active.
       _multiTouch = true;
       _activePointer = -1;
       _panning = false;
@@ -256,34 +361,186 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   void _onRootMove(PointerMoveEvent e) {
     if (!_pointers.containsKey(e.pointer)) return;
     _pointers[e.pointer] = e.localPosition;
-    if (_multiTouch && _pointers.length >= 2) _updatePinch();
+    if (_elementPinch) {
+      _updateElementPinch();
+      return;
+    }
+    if (_multiTouch && _pointers.length >= 2) {
+      _updatePinch();
+      return;
+    }
+    if (_pointers.length < 2) _multiTouch = false;
+
+    // One-finger pan from the root so it still works on the gutter and after
+    // zoom (nested scroll views would otherwise eat the vertical drag).
+    // Never pan while the finger is on an object — that object owns the drag.
+    if (_pointers.length == 1 && _canOneFingerPan && !_downOnElement) {
+      final origin = _panOrigin;
+      if (origin != null && !_panning) {
+        final slop = _handTool ||
+                (widget.palmRejection &&
+                    _stylusMode &&
+                    _downKind == PointerDeviceKind.touch)
+            ? 0.0
+            : 14.0;
+        if ((e.position - origin).distance > slop) {
+          _panning = true;
+        }
+      }
+      if (_panning) {
+        _panBy(e.position - _panLast);
+        _panLast = e.position;
+      }
+    }
   }
 
   void _onRootUp(PointerEvent e) {
     _pointers.remove(e.pointer);
     if (_pointers.length < 2) {
+      if (_elementPinch) _commitElementPinch();
       _multiTouch = false;
-      // Keep the gesture "locked" until every finger lifts, so the remaining
-      // finger doesn't suddenly start drawing mid-gesture.
+      _elementPinch = false;
       if (_pointers.isNotEmpty) _activePointer = -2;
     }
-    if (_pointers.isEmpty && _activePointer == -2) _activePointer = -1;
+    if (_pointers.isEmpty) {
+      if (_activePointer == -2) _activePointer = -1;
+      _panning = false;
+      _panOrigin = null;
+      _downOnElement = false;
+    }
+  }
+
+  bool _beginElementPinch() {
+    final selected = _findSelectedElement();
+    if (selected == null) return false;
+    final (element, pageIndex) = selected;
+    // Once an object is selected, two fingers resize/rotate it. Page pinch
+    // only runs when nothing is selected — otherwise the canvas zoom always
+    // wins and stickers feel stuck.
+    final pts = _pointers.values
+        .map((p) => _viewportToContentAlways(p, pageIndex))
+        .toList();
+    if (pts.length < 2) return false;
+    _elementPinch = true;
+    _elPinchId = element.id;
+    _elPinchPage = pageIndex;
+    _elPinchStartRect = Rect.fromLTWH(
+      element.x,
+      element.y,
+      element.width,
+      element.height,
+    );
+    _elPinchStartRot = element.rotation;
+    _elPinchStartFocal = (pts[0] + pts[1]) / 2;
+    _elPinchStartDist = (pts[0] - pts[1]).distance.clamp(1.0, double.infinity);
+    _elPinchStartAngle = math.atan2(
+      pts[1].dy - pts[0].dy,
+      pts[1].dx - pts[0].dx,
+    );
+    _elPinchStartFont =
+        (element.type == ElementType.text || element.type == ElementType.sticky)
+        ? TextElementData.fromJson(element.data).fontSize
+        : null;
+    _activePointer = -1;
+    _panning = false;
+    if (_active.isNotEmpty || _lassoPoints.isNotEmpty) {
+      setState(() {
+        _active = const [];
+        _lassoPoints = const [];
+        _activePageId = null;
+      });
+    }
+    return true;
+  }
+
+  void _updateElementPinch() {
+    final id = _elPinchId;
+    if (id == null || _pointers.length < 2) return;
+    final pts = _pointers.values
+        .map((p) => _viewportToContentAlways(p, _elPinchPage))
+        .toList();
+    final focal = (pts[0] + pts[1]) / 2;
+    final dist = (pts[0] - pts[1]).distance.clamp(1.0, double.infinity);
+    final angle = math.atan2(pts[1].dy - pts[0].dy, pts[1].dx - pts[0].dx);
+    final factor = dist / _elPinchStartDist;
+    final start = _elPinchStartRect;
+    final aspect = start.height == 0 ? 1.0 : start.width / start.height;
+    final width = (start.width * factor).clamp(24.0, 100000.0);
+    final height = width / aspect;
+    final next = Rect.fromCenter(
+      center: start.center + (focal - _elPinchStartFocal),
+      width: width,
+      height: height,
+    );
+    final rotation = _elPinchStartRot + (angle - _elPinchStartAngle);
+    setState(() {
+      _elPinchLiveRect = next;
+      _elPinchLiveRot = rotation;
+    });
+  }
+
+  void _commitElementPinch() {
+    final id = _elPinchId;
+    final rect = _elPinchLiveRect;
+    final rot = _elPinchLiveRot;
+    final startRect = _elPinchStartRect;
+    final startFont = _elPinchStartFont;
+    _elPinchId = null;
+    _elPinchLiveRect = null;
+    _elPinchLiveRot = null;
+    _elPinchStartFont = null;
+    if (id == null || rect == null) return;
+    _commitElementTransform(id, rect);
+    if (rot != null) widget.onElementRotate?.call(id, rot, true);
+    if (startFont != null && startRect.width > 0) {
+      final nextFont = TextElementData.clampFontSize(
+        startFont * rect.width / startRect.width,
+      );
+      if ((nextFont - startFont).abs() > 0.05) {
+        final selected = _findSelectedElement();
+        if (selected != null && selected.$1.id == id) {
+          final data = TextElementData.fromJson(selected.$1.data);
+          widget.onChangeText?.call(id, data.copyWith(fontSize: nextFont));
+        }
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  (CanvasElement, int)? _findSelectedElement() {
+    final id = widget.selectedElementId;
+    if (id == null) return null;
+    for (var i = 0; i < widget.pages.length; i++) {
+      final elements = widget.elementsFor?.call(widget.pages[i].id) ?? const [];
+      for (final element in elements) {
+        if (element.id == id) return (element, i);
+      }
+    }
+    return null;
+  }
+
+  Offset _viewportToContentAlways(Offset local, int index) {
+    final origin = _pageOriginInContent(index);
+    final sheet = ((local + _scrollOffset) - origin) / _scale;
+    return sheet - widget.pages[index].marginSpec.contentOffset;
   }
 
   void _resetPinchBaseline() {
     final pts = _pointers.values.toList();
     if (pts.length < 2) return;
     _pinchFocal = (pts[0] + pts[1]) / 2;
-    _pinchDistance =
-        (pts[0] - pts[1]).distance.clamp(1.0, double.infinity).toDouble();
+    _pinchDistance = (pts[0] - pts[1]).distance
+        .clamp(1.0, double.infinity)
+        .toDouble();
   }
 
   void _updatePinch() {
     final pts = _pointers.values.toList();
     if (pts.length < 2) return;
     final focal = (pts[0] + pts[1]) / 2;
-    final dist =
-        (pts[0] - pts[1]).distance.clamp(1.0, double.infinity).toDouble();
+    final dist = (pts[0] - pts[1]).distance
+        .clamp(1.0, double.infinity)
+        .toDouble();
 
     // Pan by how far the fingers moved together...
     _panBy(focal - _pinchFocal);
@@ -298,26 +555,32 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   /// Drags the view by [delta] (screen pixels), both axes at once.
   void _panBy(Offset delta) {
     if (_vertical.hasClients) {
-      final v = (_vertical.offset - delta.dy)
-          .clamp(0.0, _vertical.position.maxScrollExtent);
+      final v = (_vertical.offset - delta.dy).clamp(
+        0.0,
+        _vertical.position.maxScrollExtent,
+      );
       _vertical.jumpTo(v);
     }
     if (_horizontal.hasClients) {
-      final h = (_horizontal.offset - delta.dx)
-          .clamp(0.0, _horizontal.position.maxScrollExtent);
+      final h = (_horizontal.offset - delta.dx).clamp(
+        0.0,
+        _horizontal.position.maxScrollExtent,
+      );
       _horizontal.jumpTo(h);
     }
   }
 
   /// Re-reads the real modifier state (guards against a missed key-up).
   void _syncModifiers() {
-    final held = HardwareKeyboard.instance.isControlPressed ||
+    final held =
+        HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
     if (held != _ctrlHeld && mounted) setState(() => _ctrlHeld = held);
   }
 
   bool _onKey(KeyEvent event) {
-    final held = HardwareKeyboard.instance.isControlPressed ||
+    final held =
+        HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
     if (held != _ctrlHeld && mounted) setState(() => _ctrlHeld = held);
     return false;
@@ -333,52 +596,214 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   void _computeBaseScale(Size viewport) {
     if (widget.pages.isEmpty) return;
     final first = _sheetSize(widget.pages.first);
-    final sw = viewport.width / first.width;
-    final sh = viewport.height / first.height;
+    final second = widget.twoPageSpread && widget.pages.length > 1
+        ? _sheetSize(widget.pages[1])
+        : Size.zero;
+    final spreadWidth = widget.twoPageSpread
+        ? first.width + second.width + _kPageGap
+        : first.width;
+    final spreadHeight = widget.twoPageSpread
+        ? math.max(first.height, second.height)
+        : first.height;
+    final sw = viewport.width / spreadWidth;
+    final sh = viewport.height / spreadHeight;
     _baseScale = (sw < sh ? sw : sh) * 0.94;
   }
 
-  double _itemHeight(int index) =>
-      _sheetSize(widget.pages[index]).height * _scale + _kPageGap;
+  int get _rowCount => widget.twoPageSpread
+      ? (widget.pages.length + 1) ~/ 2
+      : widget.pages.length;
+
+  int _rowForPage(int index) => widget.twoPageSpread ? index ~/ 2 : index;
+
+  void _ensureLayoutCache() {
+    final identity = identityHashCode(widget.pages);
+    if (_rowOffsets != null &&
+        _layoutLen == widget.pages.length &&
+        _layoutScale == _scale &&
+        _layoutSpread == widget.twoPageSpread &&
+        _layoutPagesIdentity == identity) {
+      return;
+    }
+    _layoutLen = widget.pages.length;
+    _layoutScale = _scale;
+    _layoutSpread = widget.twoPageSpread;
+    _layoutPagesIdentity = identity;
+    final n = _rowCount;
+    final offsets = List<double>.filled(n + 1, 0);
+    var maxW = 0.0;
+    var uniform = true;
+    double? firstH;
+    for (var row = 0; row < n; row++) {
+      final h = _measureRowHeight(row);
+      firstH ??= h;
+      if ((h - firstH).abs() > 0.5) uniform = false;
+      offsets[row + 1] = offsets[row] + h;
+      final w = _measureRowWidth(row);
+      if (w > maxW) maxW = w;
+    }
+    _rowOffsets = offsets;
+    _uniformRowExtent = uniform ? firstH : null;
+    _cachedContentWidth =
+        maxW + 32 > _viewport.width ? maxW + 32 : _viewport.width;
+  }
+
+  double _measureRowHeight(int row) {
+    final firstIndex = widget.twoPageSpread ? row * 2 : row;
+    var height = _sheetSize(widget.pages[firstIndex]).height;
+    final secondIndex = firstIndex + 1;
+    if (widget.twoPageSpread && secondIndex < widget.pages.length) {
+      height = math.max(height, _sheetSize(widget.pages[secondIndex]).height);
+    }
+    return height * _scale + _kPageGap;
+  }
+
+  double _measureRowWidth(int row) {
+    final firstIndex = widget.twoPageSpread ? row * 2 : row;
+    var w = _sheetSize(widget.pages[firstIndex]).width * _scale;
+    final secondIndex = firstIndex + 1;
+    if (widget.twoPageSpread && secondIndex < widget.pages.length) {
+      w += _kPageGap + _sheetSize(widget.pages[secondIndex]).width * _scale;
+    }
+    return w;
+  }
+
+  double _rowHeight(int row) {
+    _ensureLayoutCache();
+    final offsets = _rowOffsets!;
+    return offsets[row + 1] - offsets[row];
+  }
 
   double _offsetOfPage(int index) {
-    var offset = _kPageGap;
-    for (var i = 0; i < index; i++) {
-      offset += _itemHeight(i);
-    }
-    return offset;
+    _ensureLayoutCache();
+    return _kPageGap + _rowOffsets![_rowForPage(index)];
   }
 
   double get _contentWidth {
-    var maxW = 0.0;
-    for (final p in widget.pages) {
-      final w = _sheetSize(p).width * _scale;
-      if (w > maxW) maxW = w;
+    _ensureLayoutCache();
+    return _cachedContentWidth!;
+  }
+
+  /// Top-left of a page tile in the scrollable content's coordinate space.
+  Offset _pageOriginInContent(int index) {
+    final y = _offsetOfPage(index);
+    final row = _rowForPage(index);
+    final firstIndex = widget.twoPageSpread ? row * 2 : row;
+    final firstW = _sheetSize(widget.pages[firstIndex]).width * _scale;
+    var rowW = firstW;
+    final secondIndex = firstIndex + 1;
+    if (widget.twoPageSpread && secondIndex < widget.pages.length) {
+      rowW += _kPageGap + _sheetSize(widget.pages[secondIndex]).width * _scale;
     }
-    return maxW + 32 > _viewport.width ? maxW + 32 : _viewport.width;
+    var x = (_contentWidth - rowW) / 2;
+    if (widget.twoPageSpread && index == secondIndex) {
+      x += firstW + _kPageGap;
+    }
+    return Offset(x, y);
+  }
+
+  Offset get _scrollOffset => Offset(
+    _horizontal.hasClients ? _horizontal.offset : 0,
+    _vertical.hasClients ? _vertical.offset : 0,
+  );
+
+  /// On finger-up, if the object was dragged onto another page, rewrite its
+  /// coordinates into that page's content space so it stays visible.
+  ({Rect rect, String? pageId}) _resolveDrop(String id, Rect rect) {
+    int? srcIndex;
+    for (var i = 0; i < widget.pages.length; i++) {
+      final elements = widget.elementsFor?.call(widget.pages[i].id) ?? const [];
+      if (elements.any((e) => e.id == id)) {
+        srcIndex = i;
+        break;
+      }
+    }
+    if (srcIndex == null) return (rect: rect, pageId: null);
+
+    final src = widget.pages[srcIndex];
+    final centerSheet = rect.center + src.marginSpec.contentOffset;
+    final global = _pageOriginInContent(srcIndex) + centerSheet * _scale;
+
+    int? destIndex;
+    for (var i = 0; i < widget.pages.length; i++) {
+      final origin = _pageOriginInContent(i);
+      final size = _sheetSize(widget.pages[i]);
+      final pageRect = origin & Size(size.width * _scale, size.height * _scale);
+      if (pageRect.contains(global)) {
+        destIndex = i;
+        break;
+      }
+    }
+    if (destIndex == null || destIndex == srcIndex) {
+      final content = widget.sizeFor(src);
+      return (rect: _clampToPage(rect, content), pageId: null);
+    }
+
+    final dest = widget.pages[destIndex];
+    final destOrigin = _pageOriginInContent(destIndex);
+    final destSheet = (global - destOrigin) / _scale;
+    final destContent = destSheet - dest.marginSpec.contentOffset;
+    final placed = Rect.fromCenter(
+      center: destContent,
+      width: rect.width,
+      height: rect.height,
+    );
+    return (rect: placed, pageId: dest.id);
+  }
+
+  /// Keeps enough of [rect] on the page that the object can't vanish into the
+  /// gutter if the user dropped it short of the next sheet.
+  Rect _clampToPage(Rect rect, Size page) {
+    if (page.width <= 0 || page.height <= 0) return rect;
+    final minX = 8 - rect.width * 0.4;
+    final minY = 8 - rect.height * 0.4;
+    final maxX = page.width - 8 - rect.width * 0.6;
+    final maxY = page.height - 8 - rect.height * 0.6;
+    return Rect.fromLTWH(
+      rect.left.clamp(minX, math.max(minX, maxX)),
+      rect.top.clamp(minY, math.max(minY, maxY)),
+      rect.width,
+      rect.height,
+    );
+  }
+
+  void _commitElementTransform(String id, Rect rect) {
+    final drop = _resolveDrop(id, rect);
+    widget.onElementTransform?.call(id, drop.rect, true, pageId: drop.pageId);
   }
 
   void _jumpToPage(int index) {
     if (index < 0 || index >= widget.pages.length) return;
     if (!_vertical.hasClients) return;
-    final target = _offsetOfPage(index)
-        .clamp(0.0, _vertical.position.maxScrollExtent);
+    final target = _offsetOfPage(
+      index,
+    ).clamp(0.0, _vertical.position.maxScrollExtent);
     _vertical.jumpTo(target);
     widget.onCurrentPageChanged(index);
   }
 
   void _reportCurrentPage() {
     if (!_vertical.hasClients || widget.pages.isEmpty) return;
-    final centre = _vertical.offset + _viewport.height / 2;
-    var acc = _kPageGap;
-    for (var i = 0; i < widget.pages.length; i++) {
-      acc += _itemHeight(i);
-      if (centre < acc) {
-        widget.onCurrentPageChanged(i);
-        return;
+    _ensureLayoutCache();
+    final offsets = _rowOffsets!;
+    final n = _rowCount;
+    if (n <= 0) return;
+    final centre = _vertical.offset + _viewport.height / 2 - _kPageGap;
+    var row = n - 1;
+    if (centre < offsets[n]) {
+      var lo = 0;
+      var hi = n - 1;
+      while (lo < hi) {
+        final mid = (lo + hi + 1) >> 1;
+        if (offsets[mid] <= centre) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
       }
+      row = lo;
     }
-    widget.onCurrentPageChanged(widget.pages.length - 1);
+    widget.onCurrentPageChanged(widget.twoPageSpread ? row * 2 : row);
   }
 
   // ---- Zoom ----------------------------------------------------------------
@@ -400,13 +825,17 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_vertical.hasClients) {
-        final target = ((oldV + anchorY) * ratio - anchorY)
-            .clamp(0.0, _vertical.position.maxScrollExtent);
+        final target = ((oldV + anchorY) * ratio - anchorY).clamp(
+          0.0,
+          _vertical.position.maxScrollExtent,
+        );
         _vertical.jumpTo(target);
       }
       if (_horizontal.hasClients) {
-        final target = ((oldH + anchorX) * ratio - anchorX)
-            .clamp(0.0, _horizontal.position.maxScrollExtent);
+        final target = ((oldH + anchorX) * ratio - anchorX).clamp(
+          0.0,
+          _horizontal.position.maxScrollExtent,
+        );
         _horizontal.jumpTo(target);
       }
     });
@@ -425,23 +854,27 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
       return;
     }
     if (event is! PointerScrollEvent) return;
-    final zoomHeld = HardwareKeyboard.instance.isControlPressed ||
+    final zoomHeld =
+        HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
     if (zoomHeld) {
       // Smooth, proportional zoom rather than fixed steps.
       final factor = math.exp(-event.scrollDelta.dy / 220);
       _zoomBy(factor, focal: event.localPosition);
-    } else if (_scrollLocked) {
-      // Physics are off (hand tool / marking tool), so drive scrolling here —
-      // both axes, so a horizontal wheel or shift+wheel pans sideways too.
+    } else {
+      // Scroll physics stay off so zoomed pages can pan on both axes.
       if (_vertical.hasClients && event.scrollDelta.dy != 0) {
-        final target = (_vertical.offset + event.scrollDelta.dy)
-            .clamp(0.0, _vertical.position.maxScrollExtent);
+        final target = (_vertical.offset + event.scrollDelta.dy).clamp(
+          0.0,
+          _vertical.position.maxScrollExtent,
+        );
         _vertical.jumpTo(target);
       }
       if (_horizontal.hasClients && event.scrollDelta.dx != 0) {
-        final target = (_horizontal.offset + event.scrollDelta.dx)
-            .clamp(0.0, _horizontal.position.maxScrollExtent);
+        final target = (_horizontal.offset + event.scrollDelta.dx).clamp(
+          0.0,
+          _horizontal.position.maxScrollExtent,
+        );
         _horizontal.jumpTo(target);
       }
     }
@@ -449,7 +882,29 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
 
   // ---- Drawing -------------------------------------------------------------
 
-  /// Whether [local] (sheet coordinates) lands on one of the page's images.
+  /// Whether a pointer in the root Listener's local space is on any object.
+  ///
+  /// Used as a belt-and-suspenders check so one-finger pan cannot start even
+  /// if the page handler's hit test used slightly different coordinates.
+  bool _pointerHitsAnyElement(Offset rootLocal) {
+    if (widget.elementsFor == null || widget.pages.isEmpty) return false;
+    for (var i = 0; i < widget.pages.length; i++) {
+      final page = widget.pages[i];
+      final origin = _pageOriginInContent(i);
+      final sheet = ((rootLocal + _scrollOffset) - origin) / _scale;
+      final size = _sheetSize(page);
+      if (sheet.dx < -24 ||
+          sheet.dy < -24 ||
+          sheet.dx > size.width + 24 ||
+          sheet.dy > size.height + 24) {
+        continue;
+      }
+      if (_hitsElement(sheet * _scale, page)) return true;
+    }
+    return false;
+  }
+
+  /// Whether [local] (sheet coordinates) lands on a canvas element.
   ///
   /// The picture's own gesture detector handles the interaction; this is only
   /// so the canvas knows to keep its hands off.
@@ -457,13 +912,16 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     final elements = widget.elementsFor?.call(page.id) ?? const [];
     if (elements.isEmpty) return false;
     final point = _toContent(local, page);
+    final scale = _scale <= 0 ? 1.0 : _scale;
     for (final element in elements) {
+      final pad =
+          (element.id == widget.selectedElementId ? 24.0 : 16.0) / scale;
       final rect = Rect.fromLTWH(
         element.x,
         element.y,
         element.width,
         element.height,
-      ).inflate(12 / (_scale <= 0 ? 1 : _scale));
+      ).inflate(pad);
       if (rect.contains(point)) return true;
     }
     return false;
@@ -480,29 +938,37 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     // after Ctrl+wheel zoom), which would otherwise leave scrolling locked.
     _syncModifiers();
 
-    // Two fingers down: the root handler is driving pinch/pan.
-    if (_multiTouch || _activePointer == -2) return;
+    // Two fingers down: the root handler is driving pinch/pan or an
+    // object resize/rotate.
+    if (_multiTouch || _elementPinch || _activePointer == -2) return;
 
-    // Tapping the page (rather than a picture) dismisses the current image
-    // selection. If the tap did land on an image, that image's own gesture
-    // recogniser re-selects it a moment later, so this is safe to do eagerly.
-    if (_imageTool && widget.selectedElementId != null) {
-      widget.onSelectElement?.call(null);
+    final onElement = _hitsElement(e.localPosition, page);
+    _downGlobal = e.position;
+    _downContent = _toContent(e.localPosition, page);
+    _downOnElement = onElement;
+    _downPointer = e.pointer;
+
+    // Text / sticky: a tap places a box; a drag is panned by the root handler.
+    if (_textTool || _stickyTool) {
+      if (onElement) return;
+      return;
+    }
+
+    // Selected objects own the pointer so a tap doesn't start a pen stroke.
+    if (onElement &&
+        (_elementTool || _handTool || widget.selectedElementId != null)) {
+      return;
     }
 
     // Palm rejection: once a stylus is in use, fingers pan rather than mark.
     final fingerWhileStylus =
-        e.kind == PointerDeviceKind.touch && _stylusMode;
+        widget.palmRejection &&
+        e.kind == PointerDeviceKind.touch &&
+        _stylusMode;
 
-    // With the hand tool, a drag that starts on a picture belongs to that
-    // picture; panning the page as well would move both at once.
-    if (_handTool && _hitsElement(e.localPosition, page)) return;
+    if (_handTool && onElement) return;
 
     if (_handTool || fingerWhileStylus) {
-      if (_activePointer != -1) return;
-      _activePointer = e.pointer;
-      _panning = true;
-      _panLast = e.position;
       return;
     }
     if (!_marking || _activePointer != -1) return;
@@ -519,8 +985,9 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
         return;
       }
       widget.onClearSelection();
-      _rectAnchor =
-          widget.lassoOptions.mode == LassoMode.rectangular ? p : null;
+      _rectAnchor = widget.lassoOptions.mode == LassoMode.rectangular
+          ? p
+          : null;
       setState(() {
         _activePageId = page.id;
         _lassoPoints = [p];
@@ -539,14 +1006,9 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   }
 
   void _onPageMove(PointerMoveEvent e, NotePage page) {
-    if (_multiTouch) return;
+    if (_multiTouch || _panning) return;
     if (e.pointer != _activePointer) return;
 
-    if (_panning) {
-      _panBy(e.position - _panLast);
-      _panLast = e.position;
-      return;
-    }
     final p = _toContent(e.localPosition, page);
 
     if (_lassoing) {
@@ -567,19 +1029,46 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
       _eraseAt(page, p);
     } else if (_activePageId == page.id) {
       _lastMoveAt = DateTime.now();
-      setState(() => _active = [..._active, StrokePoint(p.dx, p.dy, e.pressure)]);
+      setState(
+        () => _active = [..._active, StrokePoint(p.dx, p.dy, e.pressure)],
+      );
     }
   }
 
   /// Four corners of the rectangle between [a] and [b].
   static List<Offset> _rectOutline(Offset a, Offset b) => [
-        a,
-        Offset(b.dx, a.dy),
-        b,
-        Offset(a.dx, b.dy),
-      ];
+    a,
+    Offset(b.dx, a.dy),
+    b,
+    Offset(a.dx, b.dy),
+  ];
 
   void _onPageUp(PointerEvent e, NotePage page) {
+    if (e.pointer == _downPointer) {
+      final moved =
+          _downGlobal != null && (e.position - _downGlobal!).distance > 14;
+      // A still tap with the text / sticky tool places a new box. A drag
+      // was already used to scroll, so it must not create anything.
+      if ((_textTool || _stickyTool) &&
+          !_downOnElement &&
+          !moved &&
+          _downContent != null) {
+        widget.onCreateElement?.call(page.id, _downContent!, _stickyTool);
+      }
+      // Image / hand tools: an empty tap drops the selection.
+      // Never deselect on pointer-down — that disposed chrome before tap.
+      if ((_imageTool || _handTool) &&
+          widget.selectedElementId != null &&
+          !_downOnElement &&
+          !moved) {
+        widget.onSelectElement?.call(null);
+      }
+      _downPointer = null;
+      _downGlobal = null;
+      _downContent = null;
+      _downOnElement = false;
+    }
+
     if (e.pointer != _activePointer) return;
     _activePointer = -1;
 
@@ -661,6 +1150,65 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     if (hits.isNotEmpty) widget.onErase(page.id, hits);
   }
 
+  Widget _buildPageTile(int index) {
+    final page = widget.pages[index];
+    final size = widget.sizeFor(page);
+    return _PageTile(
+      key: ValueKey(page.id),
+      page: page,
+      baseSize: size,
+      scale: _scale,
+      strokes: widget.strokesByPage[page.id] ?? const [],
+      active: _activePageId == page.id ? _active : const [],
+      lasso: _activePageId == page.id ? _lassoPoints : const [],
+      selection: widget.selection?.pageId == page.id ? widget.selection : null,
+      tool: widget.tool,
+      color: widget.color,
+      width: widget.width,
+      strokeStyle: widget.strokeStyle,
+      strokeTip: widget.strokeTip,
+      elements: widget.elementsFor?.call(page.id) ?? const [],
+      imageBytesFor: widget.imageBytesFor,
+      selectedElementId: widget.selectedElementId,
+      onSelectElement: widget.onSelectElement,
+      onElementTransform: (id, rect, committed, {pageId}) {
+        if (committed) {
+          _commitElementTransform(id, rect);
+        } else {
+          widget.onElementTransform?.call(id, rect, false);
+        }
+      },
+      onElementRotate: widget.onElementRotate,
+      onDeleteElement: widget.onDeleteElement,
+      onShiftElementZ: widget.onShiftElementZ,
+      onEditElement: widget.onEditElement,
+      editingElementId: widget.editingElementId,
+      onChangeText: widget.onChangeText,
+      onEndEditText: widget.onEndEditText,
+      // Any element tool (or Hand) can select / move / resize / rotate every
+      // canvas object — otherwise picking Sticky would lock images.
+      imagesInteractive: _elementTool || _handTool,
+      textInteractive: _elementTool || _handTool,
+      backgroundLoader: widget.backgroundLoader,
+      cachedBackground: widget.cachedBackground,
+      onPointerDown: (e) => _onPageDown(e, page),
+      onPointerMove: (e) => _onPageMove(e, page),
+      onPointerUp: (e) => _onPageUp(e, page),
+      pageNumber: index + 1,
+      liveElementId: _elPinchId,
+      liveRect: _elPinchLiveRect,
+      liveRotation: _elPinchLiveRot,
+      onBecameVisible: () {
+        widget.onPageVisible(page.id);
+        final ahead = widget.pages.sublist(
+          (index + 1).clamp(0, widget.pages.length),
+          (index + 4).clamp(0, widget.pages.length),
+        );
+        if (ahead.isNotEmpty) widget.prefetch?.call(ahead);
+      },
+    );
+  }
+
   // ---- Build ---------------------------------------------------------------
 
   @override
@@ -675,9 +1223,9 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
           _viewport = vp;
           _computeBaseScale(vp);
         }
-        // The hand tool pans manually (below) so it can move both axes at
-        // once; marking tools must not scroll the view out from under them.
-        final lockScroll = _scrollLocked;
+        // Nested orthogonal scroll views swallow vertical drags once the page
+        // is wider than the screen (zoomed in). Pan is driven by the root
+        // pointer handler instead.
         return MouseRegion(
           cursor: _cursorForTool(),
           child: Listener(
@@ -691,74 +1239,42 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
               child: SingleChildScrollView(
                 controller: _horizontal,
                 scrollDirection: Axis.horizontal,
-                physics: lockScroll
-                    ? const NeverScrollableScrollPhysics()
-                    : null,
+                physics: const NeverScrollableScrollPhysics(),
                 child: SizedBox(
                   width: _contentWidth,
                   height: vp.height,
                   child: ListView.builder(
                     controller: _vertical,
-                    physics: lockScroll
-                        ? const NeverScrollableScrollPhysics()
-                        : null,
+                    physics: const NeverScrollableScrollPhysics(),
                     padding: const EdgeInsets.only(
-                        top: _kPageGap, bottom: _kPageGap * 4),
-                    itemCount: widget.pages.length,
-                    itemBuilder: (context, index) {
-                      final page = widget.pages[index];
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        // Load this page's ink as it scrolls into view...
-                        widget.onPageVisible(page.id);
-                        // ...and start rendering the next few pages so they
-                        // are ready before the user reaches them.
-                        final ahead = widget.pages.sublist(
-                          (index + 1).clamp(0, widget.pages.length),
-                          (index + 4).clamp(0, widget.pages.length),
-                        );
-                        if (ahead.isNotEmpty) widget.prefetch?.call(ahead);
-                      });
-                      final size = widget.sizeFor(page);
+                      top: _kPageGap,
+                      bottom: _kPageGap * 4,
+                    ),
+                    itemCount: _rowCount,
+                    itemExtent: _uniformRowExtent,
+                    itemExtentBuilder: _uniformRowExtent == null
+                        ? (index, _) => index >= 0 && index < _rowCount
+                            ? _rowHeight(index)
+                            : null
+                        : null,
+                    cacheExtent: 180,
+                    itemBuilder: (context, row) {
+                      final firstIndex = widget.twoPageSpread ? row * 2 : row;
+                      final secondIndex = firstIndex + 1;
                       return Padding(
-                        padding:
-                            const EdgeInsets.only(bottom: _kPageGap),
+                        padding: const EdgeInsets.only(bottom: _kPageGap),
                         child: Center(
-                          child: _PageTile(
-                            page: page,
-                            baseSize: size,
-                            scale: _scale,
-                            strokes:
-                                widget.strokesByPage[page.id] ?? const [],
-                            active:
-                                _activePageId == page.id ? _active : const [],
-                            lasso: _activePageId == page.id
-                                ? _lassoPoints
-                                : const [],
-                            selection: widget.selection?.pageId == page.id
-                                ? widget.selection
-                                : null,
-                            tool: widget.tool,
-                            color: widget.color,
-                            width: widget.width,
-                            strokeStyle: widget.strokeStyle,
-                            strokeTip: widget.strokeTip,
-                            elements:
-                                widget.elementsFor?.call(page.id) ?? const [],
-                            imageBytesFor: widget.imageBytesFor,
-                            selectedElementId: widget.selectedElementId,
-                            onSelectElement: widget.onSelectElement,
-                            onElementTransform: widget.onElementTransform,
-                            onElementRotate: widget.onElementRotate,
-                            // Canva-style: pictures are clickable whenever
-                            // you're not holding a drawing tool, so the Hand
-                            // (default) tool selects and moves them.
-                            imagesInteractive: _imageTool || _handTool,
-                            backgroundLoader: widget.backgroundLoader,
-                            cachedBackground: widget.cachedBackground,
-                            onPointerDown: (e) => _onPageDown(e, page),
-                            onPointerMove: (e) => _onPageMove(e, page),
-                            onPointerUp: (e) => _onPageUp(e, page),
-                            pageNumber: index + 1,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildPageTile(firstIndex),
+                              if (widget.twoPageSpread &&
+                                  secondIndex < widget.pages.length) ...[
+                                const SizedBox(width: _kPageGap),
+                                _buildPageTile(secondIndex),
+                              ],
+                            ],
                           ),
                         ),
                       );
@@ -789,8 +1305,9 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
 }
 
 /// A single page rendered at [scale], with its background, ink and live stroke.
-class _PageTile extends StatefulWidget {
+class _PageTile extends ConsumerStatefulWidget {
   const _PageTile({
+    super.key,
     required this.page,
     required this.baseSize,
     required this.scale,
@@ -809,13 +1326,24 @@ class _PageTile extends StatefulWidget {
     required this.onSelectElement,
     required this.onElementTransform,
     required this.onElementRotate,
+    required this.onDeleteElement,
+    required this.onShiftElementZ,
+    required this.onEditElement,
+    required this.editingElementId,
+    required this.onChangeText,
+    required this.onEndEditText,
     required this.imagesInteractive,
+    required this.textInteractive,
     required this.backgroundLoader,
     required this.cachedBackground,
     required this.onPointerDown,
     required this.onPointerMove,
     required this.onPointerUp,
     required this.pageNumber,
+    this.liveElementId,
+    this.liveRect,
+    this.liveRotation,
+    this.onBecameVisible,
   });
 
   final NotePage page;
@@ -836,23 +1364,34 @@ class _PageTile extends StatefulWidget {
   final Future<Uint8List?> Function(String assetId)? imageBytesFor;
   final String? selectedElementId;
   final ValueChanged<String?>? onSelectElement;
-  final void Function(String id, Rect rect, bool committed)?
-      onElementTransform;
+  final void Function(String id, Rect rect, bool committed, {String? pageId})?
+  onElementTransform;
   final void Function(String id, double rotation, bool committed)?
-      onElementRotate;
+  onElementRotate;
+  final ValueChanged<String>? onDeleteElement;
+  final void Function(String id, bool forward)? onShiftElementZ;
+  final ValueChanged<String>? onEditElement;
+  final String? editingElementId;
+  final void Function(String id, TextElementData data)? onChangeText;
+  final VoidCallback? onEndEditText;
   final bool imagesInteractive;
+  final bool textInteractive;
   final Future<ui.Image?> Function(NotePage) backgroundLoader;
   final ui.Image? Function(NotePage)? cachedBackground;
   final ValueChanged<PointerDownEvent> onPointerDown;
   final ValueChanged<PointerMoveEvent> onPointerMove;
   final ValueChanged<PointerEvent> onPointerUp;
   final int pageNumber;
+  final String? liveElementId;
+  final Rect? liveRect;
+  final double? liveRotation;
+  final VoidCallback? onBecameVisible;
 
   @override
-  State<_PageTile> createState() => _PageTileState();
+  ConsumerState<_PageTile> createState() => _PageTileState();
 }
 
-class _PageTileState extends State<_PageTile> {
+class _PageTileState extends ConsumerState<_PageTile> {
   ui.Image? _background;
   bool _loading = false;
 
@@ -866,6 +1405,9 @@ class _PageTileState extends State<_PageTile> {
     // so a fast scroll shows content instead of a white page.
     _background = widget.cachedBackground?.call(widget.page);
     _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onBecameVisible?.call();
+    });
   }
 
   Future<void> _load() async {
@@ -886,6 +1428,9 @@ class _PageTileState extends State<_PageTile> {
 
   @override
   Widget build(BuildContext context) {
+    final watched =
+        ref.watch(pageElementsProvider(widget.page.id)).asData?.value;
+    final elements = watched ?? widget.elements;
     final margins = widget.page.marginSpec;
     final sheet = margins.outerSize(widget.baseSize);
     final offset = margins.contentOffset;
@@ -910,13 +1455,14 @@ class _PageTileState extends State<_PageTile> {
             ),
           ],
         ),
-        clipBehavior: Clip.hardEdge,
+        clipBehavior: Clip.none,
         child: FittedBox(
           fit: BoxFit.fill,
           child: SizedBox(
             width: sheet.width,
             height: sheet.height,
             child: Stack(
+              clipBehavior: Clip.none,
               children: [
                 RepaintBoundary(
                   child: CustomPaint(
@@ -935,14 +1481,14 @@ class _PageTileState extends State<_PageTile> {
                           ),
                   ),
                 ),
-                if (widget.elements.isNotEmpty &&
-                    widget.imageBytesFor != null)
-                  Positioned.fill(
-                    child: ImageLayer(
-                      elements: widget.elements,
+                // Positioned children (not full-page overlays) so a busy page
+                // does not run N full-sheet hit tests / layouts per frame.
+                for (final element in elements)
+                  if (element.type == ElementType.image &&
+                      widget.imageBytesFor != null)
+                    ImageLayer(
+                      elements: [element],
                       bytesFor: widget.imageBytesFor!,
-                      // Layout is in content units (inside the FittedBox), but
-                      // pointer deltas arrive in screen pixels.
                       dragScale: widget.scale,
                       offset: offset,
                       interactive: widget.imagesInteractive,
@@ -952,39 +1498,76 @@ class _PageTileState extends State<_PageTile> {
                           widget.onElementTransform?.call(id, r, false),
                       onTransformEnd: (id, r) =>
                           widget.onElementTransform?.call(id, r, true),
-                      onRotate: (id, a, c) =>
-                          widget.onElementRotate?.call(id, a, c),
+                      previewRect: element.id == widget.liveElementId
+                          ? widget.liveRect
+                          : null,
+                      previewRotation: element.id == widget.liveElementId
+                          ? widget.liveRotation
+                          : null,
+                    )
+                  else if (element.type == ElementType.text ||
+                      element.type == ElementType.sticky)
+                    TextLayer(
+                      elements: [element],
+                      dragScale: widget.scale,
+                      offset: offset,
+                      interactive: widget.textInteractive,
+                      selectedId: widget.selectedElementId,
+                      editingId: widget.editingElementId,
+                      onSelect: (id) => widget.onSelectElement?.call(id),
+                      onBeginEdit: (id) => widget.onEditElement?.call(id),
+                      onChanged: (id, data) =>
+                          widget.onChangeText?.call(id, data),
+                      onEndEdit: () => widget.onEndEditText?.call(),
+                      onDelete: (id) => widget.onDeleteElement?.call(id),
+                      onShiftZ: (id, forward) =>
+                          widget.onShiftElementZ?.call(id, forward),
+                      onTransform: (id, r) =>
+                          widget.onElementTransform?.call(id, r, false),
+                      onTransformEnd: (id, r) =>
+                          widget.onElementTransform?.call(id, r, true),
+                      previewRect: element.id == widget.liveElementId
+                          ? widget.liveRect
+                          : null,
+                      previewRotation: element.id == widget.liveElementId
+                          ? widget.liveRotation
+                          : null,
+                    ),
+                IgnorePointer(
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      size: sheet,
+                      painter: CommittedInkPainter(
+                        widget.strokes,
+                        offset: offset,
+                        shiftedIds: widget.selection?.strokeIds,
+                        shift: widget.selection?.offset ?? Offset.zero,
+                      ),
                     ),
                   ),
-                RepaintBoundary(
+                ),
+                IgnorePointer(
                   child: CustomPaint(
                     size: sheet,
-                    painter: CommittedInkPainter(
-                      widget.strokes,
+                    painter: ActiveStrokePainter(
+                      points: widget.active,
+                      tool: widget.tool,
+                      color: widget.color,
+                      width: widget.width,
+                      style: widget.strokeStyle,
+                      tip: widget.strokeTip,
                       offset: offset,
-                      shiftedIds: widget.selection?.strokeIds,
-                      shift: widget.selection?.offset ?? Offset.zero,
                     ),
                   ),
                 ),
-                CustomPaint(
-                  size: sheet,
-                  painter: ActiveStrokePainter(
-                    points: widget.active,
-                    tool: widget.tool,
-                    color: widget.color,
-                    width: widget.width,
-                    style: widget.strokeStyle,
-                    tip: widget.strokeTip,
-                    offset: offset,
-                  ),
-                ),
-                CustomPaint(
-                  size: sheet,
-                  painter: LassoPainter(
-                    lasso: widget.lasso,
-                    selection: widget.selection,
-                    offset: offset,
+                IgnorePointer(
+                  child: CustomPaint(
+                    size: sheet,
+                    painter: LassoPainter(
+                      lasso: widget.lasso,
+                      selection: widget.selection,
+                      offset: offset,
+                    ),
                   ),
                 ),
                 if (_loading)

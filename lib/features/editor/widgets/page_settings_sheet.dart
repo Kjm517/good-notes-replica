@@ -4,12 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/design.dart';
 import '../../../core/models/enums.dart';
 import '../../../core/models/page_geometry.dart';
+import '../../library/providers.dart';
 import '../providers.dart';
 import 'margins_sheet.dart';
 
-/// Bottom sheet to change the current page's template, paper colour and the
-/// adjustable margins. The margins editor is the UI seam for the custom
-/// "adjustable / extendable margins" feature.
+/// Bottom sheet for document-level settings: paper size / orientation /
+/// template, the adjustable margins, and reading & annotation preferences.
+/// The margins editor is the UI seam for the custom "adjustable / extendable
+/// margins" feature.
 class PageSettingsSheet extends ConsumerWidget {
   const PageSettingsSheet({
     super.key,
@@ -38,6 +40,8 @@ class PageSettingsSheet extends ConsumerWidget {
     final t = context.tokens;
     final state = ref.watch(editorControllerProvider(documentId));
     final controller = ref.read(editorControllerProvider(documentId).notifier);
+    final document = ref.watch(documentStreamProvider(documentId)).asData?.value;
+    final library = ref.read(libraryRepositoryProvider);
     final page = state.currentPage;
     if (page == null) return const SizedBox.shrink();
     final margins = page.marginSpec;
@@ -59,14 +63,16 @@ class PageSettingsSheet extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Page settings',
+                        Text('Document settings',
                             style: Theme.of(context)
                                 .textTheme
                                 .titleLarge
                                 ?.copyWith(fontSize: 18)),
                         const SizedBox(height: 3),
                         Text(
-                          'Page ${state.currentIndex + 1}',
+                          document?.title ?? 'Document',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style:
                               AppTokens.mono(size: 11, color: t.textFaint),
                         ),
@@ -128,6 +134,70 @@ class PageSettingsSheet extends ConsumerWidget {
                           ),
                       ],
                     ),
+                  ),
+                  if (document != null) ...[
+                    _Row(
+                      label: 'Paper size',
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final s in PageSizePreset.values)
+                            _Pill(
+                              label: s.label,
+                              selected: document.pageSize == s,
+                              onTap: () =>
+                                  library.setPageSetup(documentId, pageSize: s),
+                            ),
+                        ],
+                      ),
+                    ),
+                    _Row(
+                      label: 'Orientation',
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 8,
+                        children: [
+                          for (final o in PageOrientation.values)
+                            _Pill(
+                              label: o == PageOrientation.portrait
+                                  ? 'Portrait'
+                                  : 'Landscape',
+                              selected: document.orientation == o,
+                              onTap: () => library.setPageSetup(documentId,
+                                  orientation: o),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  _Caption(label: 'Reading & annotation'),
+                  _ToggleRow(
+                    label: 'Continuous scroll',
+                    sub: 'Pages flow vertically',
+                    value: true,
+                    onChanged: null,
+                  ),
+                  _ToggleRow(
+                    label: 'Palm rejection',
+                    sub: 'Ignore your hand while a stylus draws',
+                    value: ref.watch(palmRejectionProvider),
+                    onChanged: (v) =>
+                        ref.read(palmRejectionProvider.notifier).set(v),
+                  ),
+                  _ToggleRow(
+                    label: 'Auto-save',
+                    sub: 'Every change, saved instantly',
+                    value: true,
+                    onChanged: null,
+                  ),
+                  _ToggleRow(
+                    label: 'Searchable text (OCR)',
+                    sub: 'Index PDF text so Find can reach it',
+                    value: ref.watch(ocrEnabledProvider),
+                    onChanged: (v) =>
+                        ref.read(ocrEnabledProvider.notifier).set(v),
                   ),
                   _Caption(label: 'Layout'),
                   // Margins live in their own panel — see the Margins toolbar
@@ -226,6 +296,53 @@ class _Row extends StatelessWidget {
           ),
           const SizedBox(width: 16),
           Expanded(child: Align(alignment: Alignment.centerRight, child: child)),
+        ],
+      ),
+    );
+  }
+}
+
+/// A label + subtitle on the left with a switch on the right. A null
+/// [onChanged] renders a locked-on control for behaviour that is always active
+/// (continuous scroll, auto-save) rather than a switch that lies.
+class _ToggleRow extends StatelessWidget {
+  const _ToggleRow({
+    required this.label,
+    required this.sub,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String sub;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: t.text,
+                    )),
+                const SizedBox(height: 2),
+                Text(sub,
+                    style: TextStyle(fontSize: 12, color: t.textMuted)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Switch(value: value, onChanged: onChanged),
         ],
       ),
     );
