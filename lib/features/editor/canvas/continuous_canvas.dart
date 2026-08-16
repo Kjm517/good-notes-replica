@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -23,6 +24,44 @@ import 'lasso_painter.dart';
 import 'text_layer.dart';
 
 const double _kPageGap = 16;
+
+/// Splits a scaled-axis delta into unscaled sheet coordinate + leftover pixels.
+///
+/// Page sheets scale with zoom; [_kPageGap] gutters and the centred empty
+/// space around a row do not. Overflow past the sheet is kept as screen pixels
+/// so it is not multiplied by the zoom ratio.
+(double sheet, double extra) _unscaleAxis(
+  double delta,
+  double extent,
+  double scale,
+) {
+  final scaled = extent * scale;
+  if (delta < 0) return (0.0, delta);
+  if (delta > scaled) return (extent, delta - scaled);
+  if (scale <= 0) return (0.0, 0.0);
+  return (delta / scale, 0.0);
+}
+
+/// A document point that must stay under a viewport location across zoom.
+class _ZoomAnchor {
+  const _ZoomAnchor({
+    required this.pageIndex,
+    required this.sheet,
+    required this.extra,
+    required this.viewport,
+  });
+
+  final int pageIndex;
+
+  /// Unscaled coordinates on the page sheet (clamped to the sheet).
+  final Offset sheet;
+
+  /// Overflow into non-scaling gutters, in screen pixels.
+  final Offset extra;
+
+  /// Viewport-local point that should stay on [sheet] + [extra].
+  final Offset viewport;
+}
 
 /// Continuously scrolling page view — scroll up/down through pages like a PDF
 /// reader, with a shared zoom level. Drawing happens directly on whichever
@@ -55,6 +94,8 @@ class ContinuousCanvas extends StatefulWidget {
     this.eraserRadius = 12,
     this.cachedBackground,
     this.prefetch,
+    this.thumbnailLoader,
+    this.onScrollSettled,
     this.elementsFor,
     this.imageBytesFor,
     this.selectedElementId,
@@ -87,7 +128,8 @@ class ContinuousCanvas extends StatefulWidget {
   final void Function(String pageId, Set<String> ids) onErase;
   final void Function(String pageId) onPageVisible;
   final ValueChanged<int> onCurrentPageChanged;
-  final Future<ui.Image?> Function(NotePage page) backgroundLoader;
+  final Future<ui.Image?> Function(NotePage page, double viewScale)
+      backgroundLoader;
 
   /// Returns an already-cached image for a page (no work), so a tile can paint
   /// something immediately instead of flashing white while it renders.
@@ -95,6 +137,10 @@ class ContinuousCanvas extends StatefulWidget {
 
   /// Asked to render upcoming pages ahead of the scroll position.
   final void Function(List<NotePage> pages)? prefetch;
+
+  /// Cheap preview used while scrolling. Full-resolution loads wait until
+  /// [onScrollSettled].
+  final Future<ui.Image?> Function(NotePage page)? thumbnailLoader;
 
   /// Lasso finished: the outline in content coordinates for that page.
   final void Function(String pageId, List<Offset> lasso) onLassoComplete;
@@ -151,6 +197,10 @@ class ContinuousCanvas extends StatefulWidget {
   /// Renders consecutive pages side by side. Used by landscape tablet layout.
   final bool twoPageSpread;
 
+  /// Fired after pan/zoom/wheel input has been idle briefly, so the
+  /// background service can drop fling-queued prefetch work.
+  final VoidCallback? onScrollSettled;
+
   @override
   State<ContinuousCanvas> createState() => _ContinuousCanvasState();
 }
@@ -200,15 +250,18 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
 
   double get _scale => _baseScale * _zoom;
 
-  /// Prefix sums of row heights so jump/scroll on a 4,000-page PDF is O(log n)
-  /// instead of walking every row on each frame.
+  /// Prefix sums of unscaled row sheet heights. Scaled positions are
+  /// `offset[r] * _scale + r * _kPageGap` so pinch does not rebuild this.
   List<double>? _rowOffsets;
-  double? _cachedContentWidth;
-  double? _uniformRowExtent;
+  double? _unscaledMaxSheetWidth;
+  double _maxRowGap = 0;
+  double? _uniformUnscaledHeight;
   int _layoutLen = -1;
-  double _layoutScale = -1;
   bool _layoutSpread = false;
   int _layoutPagesIdentity = 0;
+
+  Timer? _settleTimer;
+  bool _scrollSettled = true;
 
   /// Tools that consume one-pointer drags on the page (so the view must not
   /// scroll underneath them).
@@ -292,7 +345,8 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     super.initState();
     widget.controller?._attach(this);
     HardwareKeyboard.instance.addHandler(_onKey);
-    _vertical.addListener(_reportCurrentPage);
+    _vertical.addListener(_onScrollActivity);
+    _horizontal.addListener(_onScrollActivity);
   }
 
   @override
@@ -312,6 +366,7 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   void dispose() {
     widget.controller?._detach(this);
     HardwareKeyboard.instance.removeHandler(_onKey);
+    _settleTimer?.cancel();
     _vertical.dispose();
     _horizontal.dispose();
     super.dispose();
@@ -620,68 +675,92 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     final identity = identityHashCode(widget.pages);
     if (_rowOffsets != null &&
         _layoutLen == widget.pages.length &&
-        _layoutScale == _scale &&
         _layoutSpread == widget.twoPageSpread &&
         _layoutPagesIdentity == identity) {
       return;
     }
     _layoutLen = widget.pages.length;
-    _layoutScale = _scale;
     _layoutSpread = widget.twoPageSpread;
     _layoutPagesIdentity = identity;
     final n = _rowCount;
     final offsets = List<double>.filled(n + 1, 0);
-    var maxW = 0.0;
+    var maxSheetW = 0.0;
+    var maxGap = 0.0;
     var uniform = true;
     double? firstH;
     for (var row = 0; row < n; row++) {
-      final h = _measureRowHeight(row);
+      final h = _unscaledRowHeight(row);
       firstH ??= h;
       if ((h - firstH).abs() > 0.5) uniform = false;
       offsets[row + 1] = offsets[row] + h;
-      final w = _measureRowWidth(row);
-      if (w > maxW) maxW = w;
+      final firstIndex = widget.twoPageSpread ? row * 2 : row;
+      var sheetW = _sheetSize(widget.pages[firstIndex]).width;
+      var gap = 0.0;
+      final secondIndex = firstIndex + 1;
+      if (widget.twoPageSpread && secondIndex < widget.pages.length) {
+        sheetW += _sheetSize(widget.pages[secondIndex]).width;
+        gap = _kPageGap;
+      }
+      if (sheetW > maxSheetW) maxSheetW = sheetW;
+      if (gap > maxGap) maxGap = gap;
     }
     _rowOffsets = offsets;
-    _uniformRowExtent = uniform ? firstH : null;
-    _cachedContentWidth =
-        maxW + 32 > _viewport.width ? maxW + 32 : _viewport.width;
+    _uniformUnscaledHeight = uniform ? firstH : null;
+    _unscaledMaxSheetWidth = maxSheetW;
+    _maxRowGap = maxGap;
   }
 
-  double _measureRowHeight(int row) {
+  double _unscaledRowHeight(int row) {
     final firstIndex = widget.twoPageSpread ? row * 2 : row;
     var height = _sheetSize(widget.pages[firstIndex]).height;
     final secondIndex = firstIndex + 1;
     if (widget.twoPageSpread && secondIndex < widget.pages.length) {
       height = math.max(height, _sheetSize(widget.pages[secondIndex]).height);
     }
-    return height * _scale + _kPageGap;
+    return height;
   }
 
-  double _measureRowWidth(int row) {
-    final firstIndex = widget.twoPageSpread ? row * 2 : row;
-    var w = _sheetSize(widget.pages[firstIndex]).width * _scale;
-    final secondIndex = firstIndex + 1;
-    if (widget.twoPageSpread && secondIndex < widget.pages.length) {
-      w += _kPageGap + _sheetSize(widget.pages[secondIndex]).width * _scale;
-    }
-    return w;
+  /// Content-Y of the start of [row], not including the list's top padding.
+  double _scaledRowStart(int row) {
+    _ensureLayoutCache();
+    return _rowOffsets![row] * _scale + row * _kPageGap;
   }
 
   double _rowHeight(int row) {
     _ensureLayoutCache();
-    final offsets = _rowOffsets!;
-    return offsets[row + 1] - offsets[row];
+    final unscaled = _rowOffsets![row + 1] - _rowOffsets![row];
+    return unscaled * _scale + _kPageGap;
   }
 
   double _offsetOfPage(int index) {
     _ensureLayoutCache();
-    return _kPageGap + _rowOffsets![_rowForPage(index)];
+    final row = _rowForPage(index);
+    return _kPageGap + _scaledRowStart(row);
   }
 
-  double get _contentWidth {
+  double get _contentWidth => _contentWidthAt(_scale);
+
+  double _contentWidthAt(double scale) {
     _ensureLayoutCache();
-    return _cachedContentWidth!;
+    final scaled = (_unscaledMaxSheetWidth ?? 0) * scale + _maxRowGap;
+    return scaled + 32 > _viewport.width ? scaled + 32 : _viewport.width;
+  }
+
+  /// Analytic [ScrollPosition.maxScrollExtent] at [scale], including the
+  /// constant page gaps and ListView padding that do not zoom.
+  double _maxVerticalExtentAt(double scale) {
+    _ensureLayoutCache();
+    if (_viewport.height <= 0) return 0;
+    final n = _rowCount;
+    final unscaled = n == 0 ? 0.0 : _rowOffsets![n];
+    final total =
+        unscaled * scale + n * _kPageGap + _kPageGap + _kPageGap * 4;
+    return math.max(0.0, total - _viewport.height);
+  }
+
+  double _maxHorizontalExtentAt(double scale) {
+    if (_viewport.width <= 0) return 0;
+    return math.max(0.0, _contentWidthAt(scale) - _viewport.width);
   }
 
   /// Top-left of a page tile in the scrollable content's coordinate space.
@@ -784,26 +863,81 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
 
   void _reportCurrentPage() {
     if (!_vertical.hasClients || widget.pages.isEmpty) return;
-    _ensureLayoutCache();
-    final offsets = _rowOffsets!;
     final n = _rowCount;
     if (n <= 0) return;
-    final centre = _vertical.offset + _viewport.height / 2 - _kPageGap;
-    var row = n - 1;
-    if (centre < offsets[n]) {
-      var lo = 0;
-      var hi = n - 1;
-      while (lo < hi) {
-        final mid = (lo + hi + 1) >> 1;
-        if (offsets[mid] <= centre) {
-          lo = mid;
-        } else {
-          hi = mid - 1;
-        }
-      }
-      row = lo;
-    }
+    final row = _rowAtContentY(_vertical.offset + _viewport.height / 2);
     widget.onCurrentPageChanged(widget.twoPageSpread ? row * 2 : row);
+  }
+
+  void _onScrollActivity() {
+    _reportCurrentPage();
+    if (_scrollSettled) {
+      setState(() => _scrollSettled = false);
+    }
+    _scheduleScrollSettle();
+  }
+
+  void _scheduleScrollSettle() {
+    _settleTimer?.cancel();
+    _settleTimer = Timer(const Duration(milliseconds: 80), _onScrollSettled);
+  }
+
+  void _onScrollSettled() {
+    if (!mounted) return;
+    widget.onScrollSettled?.call();
+    setState(() => _scrollSettled = true);
+    if (!_vertical.hasClients || widget.pages.isEmpty) return;
+    final row = _rowAtContentY(_vertical.offset + _viewport.height / 2);
+    final index = widget.twoPageSpread ? row * 2 : row;
+    final ahead = widget.pages.sublist(
+      (index + 1).clamp(0, widget.pages.length),
+      (index + 4).clamp(0, widget.pages.length),
+    );
+    if (ahead.isNotEmpty) widget.prefetch?.call(ahead);
+    _debugCheckExtents();
+  }
+
+  /// Debug-only: analytic extents must match the laid-out controllers
+  /// within a pixel, or a same-frame zoom jumpTo will be corrected later
+  /// and the flicker comes back.
+  void _debugCheckExtents() {
+    assert(() {
+      if (!_vertical.hasClients || !_horizontal.hasClients) return true;
+      final v = _maxVerticalExtentAt(_scale);
+      final h = _maxHorizontalExtentAt(_scale);
+      final realV = _vertical.position.maxScrollExtent;
+      final realH = _horizontal.position.maxScrollExtent;
+      assert(
+        (v - realV).abs() < 1.0,
+        'vertical extent $v vs laid-out $realV',
+      );
+      assert(
+        (h - realH).abs() < 1.0,
+        'horizontal extent $h vs laid-out $realH',
+      );
+      return true;
+    }());
+  }
+
+  /// Row whose tile contains [contentY] in scrollable-content coordinates.
+  int _rowAtContentY(double contentY) {
+    _ensureLayoutCache();
+    final n = _rowCount;
+    if (n <= 0) return 0;
+    final y = contentY - _kPageGap;
+    if (y >= _scaledRowStart(n)) return n - 1;
+    if (y <= 0) return 0;
+    var lo = 0;
+    var hi = n - 1;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) >> 1;
+      if (_scaledRowStart(mid) <= y) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
   }
 
   // ---- Zoom ----------------------------------------------------------------
@@ -811,34 +945,77 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   void _setZoom(double target, {Offset? focal}) {
     final clamped = target.clamp(0.25, 8.0).toDouble();
     if ((clamped - _zoom).abs() < 0.0001) return;
-    final ratio = clamped / _zoom;
 
     final anchorY = focal?.dy ?? _viewport.height / 2;
     final anchorX = focal?.dx ?? _viewport.width / 2;
-    final oldV = _vertical.hasClients ? _vertical.offset : 0.0;
-    final oldH = _horizontal.hasClients ? _horizontal.offset : 0.0;
+    final pin = _anchorAt(Offset(anchorX, anchorY));
 
     setState(() => _zoom = clamped);
     widget.controller?._publishZoom(clamped);
 
-    // Keep the point under the cursor roughly stable after the relayout.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_vertical.hasClients) {
-        final target = ((oldV + anchorY) * ratio - anchorY).clamp(
-          0.0,
-          _vertical.position.maxScrollExtent,
-        );
-        _vertical.jumpTo(target);
+    // jumpTo (forcePixels) must land in this turn, before the dirty build.
+    // A post-frame restore paints one frame at the new scale with the old
+    // offset, which swaps the ListView's visible range and recreates tiles.
+    if (pin != null) _restoreZoomAnchor(pin);
+    _reportCurrentPage();
+  }
+
+  /// Document point currently under [viewport], in unscaled sheet coordinates.
+  _ZoomAnchor? _anchorAt(Offset viewport) {
+    if (widget.pages.isEmpty) return null;
+    final content = Offset(
+      (_horizontal.hasClients ? _horizontal.offset : 0) + viewport.dx,
+      (_vertical.hasClients ? _vertical.offset : 0) + viewport.dy,
+    );
+    final row = _rowAtContentY(content.dy);
+    final firstIndex = widget.twoPageSpread ? row * 2 : row;
+    var pageIndex = firstIndex;
+    if (widget.twoPageSpread) {
+      final secondIndex = firstIndex + 1;
+      if (secondIndex < widget.pages.length) {
+        final firstOrigin = _pageOriginInContent(firstIndex);
+        final firstW = _sheetSize(widget.pages[firstIndex]).width * _scale;
+        if (content.dx >= firstOrigin.dx + firstW + _kPageGap / 2) {
+          pageIndex = secondIndex;
+        }
       }
-      if (_horizontal.hasClients) {
-        final target = ((oldH + anchorX) * ratio - anchorX).clamp(
+    }
+    if (pageIndex < 0 || pageIndex >= widget.pages.length) return null;
+
+    final page = widget.pages[pageIndex];
+    final size = _sheetSize(page);
+    final origin = _pageOriginInContent(pageIndex);
+    final local = content - origin;
+    final scale = _scale <= 0 ? 1.0 : _scale;
+    final x = _unscaleAxis(local.dx, size.width, scale);
+    final y = _unscaleAxis(local.dy, size.height, scale);
+    return _ZoomAnchor(
+      pageIndex: pageIndex,
+      sheet: Offset(x.$1, y.$1),
+      extra: Offset(x.$2, y.$2),
+      viewport: viewport,
+    );
+  }
+
+  void _restoreZoomAnchor(_ZoomAnchor pin) {
+    if (pin.pageIndex < 0 || pin.pageIndex >= widget.pages.length) return;
+    _ensureLayoutCache();
+    final origin = _pageOriginInContent(pin.pageIndex);
+    final content =
+        origin + Offset(pin.sheet.dx * _scale, pin.sheet.dy * _scale) + pin.extra;
+    if (_vertical.hasClients) {
+      _vertical.jumpTo(
+        (content.dy - pin.viewport.dy).clamp(0.0, _maxVerticalExtentAt(_scale)),
+      );
+    }
+    if (_horizontal.hasClients) {
+      _horizontal.jumpTo(
+        (content.dx - pin.viewport.dx).clamp(
           0.0,
-          _horizontal.position.maxScrollExtent,
-        );
-        _horizontal.jumpTo(target);
-      }
-    });
+          _maxHorizontalExtentAt(_scale),
+        ),
+      );
+    }
   }
 
   void _zoomBy(double factor, {Offset? focal}) =>
@@ -1189,8 +1366,10 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
       // canvas object — otherwise picking Sticky would lock images.
       imagesInteractive: _elementTool || _handTool,
       textInteractive: _elementTool || _handTool,
-      backgroundLoader: widget.backgroundLoader,
+      backgroundLoader: (p) => widget.backgroundLoader(p, _scale),
       cachedBackground: widget.cachedBackground,
+      thumbnailLoader: widget.thumbnailLoader,
+      requestFull: _scrollSettled,
       onPointerDown: (e) => _onPageDown(e, page),
       onPointerMove: (e) => _onPageMove(e, page),
       onPointerUp: (e) => _onPageUp(e, page),
@@ -1251,13 +1430,15 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
                       bottom: _kPageGap * 4,
                     ),
                     itemCount: _rowCount,
-                    itemExtent: _uniformRowExtent,
-                    itemExtentBuilder: _uniformRowExtent == null
+                    itemExtent: _uniformUnscaledHeight == null
+                        ? null
+                        : _uniformUnscaledHeight! * _scale + _kPageGap,
+                    itemExtentBuilder: _uniformUnscaledHeight == null
                         ? (index, _) => index >= 0 && index < _rowCount
                             ? _rowHeight(index)
                             : null
                         : null,
-                    cacheExtent: 180,
+                    cacheExtent: _viewport.height > 0 ? _viewport.height : 180,
                     itemBuilder: (context, row) {
                       final firstIndex = widget.twoPageSpread ? row * 2 : row;
                       final secondIndex = firstIndex + 1;
@@ -1336,6 +1517,8 @@ class _PageTile extends ConsumerStatefulWidget {
     required this.textInteractive,
     required this.backgroundLoader,
     required this.cachedBackground,
+    this.thumbnailLoader,
+    this.requestFull = true,
     required this.onPointerDown,
     required this.onPointerMove,
     required this.onPointerUp,
@@ -1378,6 +1561,11 @@ class _PageTile extends ConsumerStatefulWidget {
   final bool textInteractive;
   final Future<ui.Image?> Function(NotePage) backgroundLoader;
   final ui.Image? Function(NotePage)? cachedBackground;
+  final Future<ui.Image?> Function(NotePage)? thumbnailLoader;
+
+  /// When false (user is flinging), only a thumbnail is requested. Full
+  /// resolution waits until scrolling settles.
+  final bool requestFull;
   final ValueChanged<PointerDownEvent> onPointerDown;
   final ValueChanged<PointerMoveEvent> onPointerMove;
   final ValueChanged<PointerEvent> onPointerUp;
@@ -1394,6 +1582,7 @@ class _PageTile extends ConsumerStatefulWidget {
 class _PageTileState extends ConsumerState<_PageTile> {
   ui.Image? _background;
   bool _loading = false;
+  bool _requestedFull = false;
 
   bool get _hasBackground =>
       widget.page.pdfAssetId != null || widget.page.bgAssetId != null;
@@ -1404,23 +1593,70 @@ class _PageTileState extends ConsumerState<_PageTile> {
     // Paint whatever is already cached (full image or thumbnail) right away,
     // so a fast scroll shows content instead of a white page.
     _background = widget.cachedBackground?.call(widget.page);
-    _load();
+    if (widget.requestFull) {
+      _loadFull();
+    } else if (_background == null) {
+      _loadThumb();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.onBecameVisible?.call();
     });
   }
 
-  Future<void> _load() async {
-    if (!_hasBackground) return;
+  @override
+  void didUpdateWidget(covariant _PageTile old) {
+    super.didUpdateWidget(old);
+    if (widget.requestFull && !old.requestFull) {
+      _loadFull();
+    } else if (widget.requestFull) {
+      final crossedFull = old.scale < 0.6 && widget.scale >= 0.6;
+      final crossedHiRes = old.scale <= 2.0 && widget.scale > 2.0;
+      if (crossedFull || crossedHiRes) {
+        _requestedFull = false;
+        _loadFull();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _background?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadThumb() async {
+    final loader = widget.thumbnailLoader;
+    if (loader == null || !_hasBackground) return;
+    try {
+      final img = await loader(widget.page);
+      if (!mounted) {
+        img?.dispose();
+        return;
+      }
+      if (_background != null) {
+        img?.dispose();
+        return;
+      }
+      setState(() => _background = img);
+    } catch (_) {}
+  }
+
+  Future<void> _loadFull() async {
+    if (!_hasBackground || _requestedFull) return;
+    _requestedFull = true;
     if (_background == null) setState(() => _loading = true);
     try {
       final img = await widget.backgroundLoader(widget.page);
-      if (mounted) {
-        setState(() {
-          _background = img;
-          _loading = false;
-        });
+      if (!mounted) {
+        img?.dispose();
+        return;
       }
+      final old = _background;
+      setState(() {
+        if (img != null) _background = img;
+        _loading = false;
+      });
+      if (old != null && !identical(old, _background)) old.dispose();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }

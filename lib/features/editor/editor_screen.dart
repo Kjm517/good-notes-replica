@@ -158,28 +158,36 @@ class _EditorState extends ConsumerState<_Editor> {
     final controller = ref.read(
       editorControllerProvider(widget.document.id).notifier,
     );
-    final window = pages.take(PageBackgroundService.prepareWindow).toList();
-    final total = window.where(bg.hasBackground).length;
-    if (total == 0) {
+    NotePage? first;
+    for (final page in pages) {
+      if (bg.hasBackground(page)) {
+        first = page;
+        break;
+      }
+    }
+    if (first == null) {
       _finishPrepare();
       return;
     }
 
-    _setPrepare('Rendering pages…', 0.1);
+    _setPrepare('Rendering page…', 0.1);
     await bg.warmPages(
-      window,
+      [first],
       onProgress: (step, count) {
         _setPrepare(
-          'Rendering page $step of $count…',
+          'Rendering page…',
           0.1 + 0.85 * (step / count),
         );
       },
     );
-    for (final page in window) {
-      if (!mounted) return;
-      await controller.ensurePageLoaded(page.id);
-    }
     if (!mounted) return;
+    await controller.ensurePageLoaded(first.id);
+    if (!mounted) return;
+    final ahead = [
+      for (final page in pages.take(PageBackgroundService.prepareWindow))
+        if (page.id != first.id && bg.hasBackground(page)) page,
+    ];
+    if (ahead.isNotEmpty) bg.prefetchAll(ahead);
     _setPrepare('Ready', 1);
     _finishPrepare();
   }
@@ -411,11 +419,15 @@ class _EditorState extends ConsumerState<_Editor> {
                             onErase: controller.eraseStrokes,
                             onPageVisible: controller.ensurePageLoaded,
                             onCurrentPageChanged: controller.setCurrentIndex,
-                            backgroundLoader: (p) =>
-                                ref.read(pageBackgroundServiceProvider).load(p),
+                            backgroundLoader: (p, scale) => ref
+                                .read(pageBackgroundServiceProvider)
+                                .load(p, viewScale: scale),
                             cachedBackground: (p) => ref
                                 .read(pageBackgroundServiceProvider)
                                 .cachedOrThumb(p),
+                            thumbnailLoader: (p) => ref
+                                .read(pageBackgroundServiceProvider)
+                                .loadThumbnail(p),
                             prefetch: (pages) => ref
                                 .read(pageBackgroundServiceProvider)
                                 .prefetch(pages),
@@ -474,6 +486,9 @@ class _EditorState extends ConsumerState<_Editor> {
                             onEndEditText: _endEditElement,
                             palmRejection: ref.watch(palmRejectionProvider),
                             twoPageSpread: layout.showsSideRail,
+                            onScrollSettled: () => ref
+                                .read(pageBackgroundServiceProvider)
+                                .notifyScrollSettled(),
                           ),
                         ),
                       ),
