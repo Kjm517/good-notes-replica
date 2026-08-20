@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
@@ -99,7 +98,19 @@ class AssetRepository {
               ..where((a) => a.sha256.equals(digest) & a.deletedAt.isNull())
               ..limit(1))
             .getSingleOrNull();
-    if (existing != null) return existing.id;
+    if (existing != null) {
+      // A synced row can share this hash without having bytes on *this*
+      // device. Reusing it as-is leaves every page that points at it blank.
+      if (await _hasBytes(existing)) return existing.id;
+      await replaceBytes(
+        id: existing.id,
+        bytes: bytes,
+        kind: kind,
+        filename: filename,
+        mime: mime,
+      );
+      return existing.id;
+    }
 
     final stored = await writeAsset(
       id,
@@ -127,7 +138,7 @@ class AssetRepository {
   /// large import never has to fit in memory. Returns the asset id.
   ///
   /// Same dedupe contract as [store]: identical content reuses the existing
-  /// asset, and in that case nothing is copied at all.
+  /// asset. If that row has no bytes on this device, the file is copied in.
   Future<String> storeFile({
     required String id,
     required String sourcePath,
@@ -145,7 +156,17 @@ class AssetRepository {
               )
               ..limit(1))
             .getSingleOrNull();
-    if (existing != null) return existing.id;
+    if (existing != null) {
+      if (await _hasBytes(existing)) return existing.id;
+      await replaceFromFile(
+        id: existing.id,
+        sourcePath: sourcePath,
+        kind: kind,
+        filename: filename,
+        mime: mime,
+      );
+      return existing.id;
+    }
 
     final copied = await copyAssetFromFile(
       id,
@@ -207,5 +228,66 @@ class AssetRepository {
       moved++;
     }
     return moved;
+  }
+
+  Future<bool> _hasBytes(Asset row) => assetExists(
+        localPath: row.localPath,
+        hasInlineData: row.data != null && row.data!.isNotEmpty,
+      );
+
+  /// Writes [bytes] onto an existing asset row (the one pages already point
+  /// at). Used when this device has the metadata from sync but not the file.
+  Future<void> replaceBytes({
+    required String id,
+    required Uint8List bytes,
+    required int kind,
+    required String filename,
+    String? mime,
+  }) async {
+    final digest = sha256.convert(bytes).toString();
+    final stored = await writeAsset(
+      id,
+      bytes,
+      extension: kind == 1 ? 'pdf' : 'img',
+    );
+    await (_db.update(_db.assets)..where((a) => a.id.equals(id))).write(
+      AssetsCompanion(
+        path: Value(filename),
+        mime: Value(mime),
+        data: Value(stored.base64),
+        localPath: Value(stored.localPath),
+        sha256: Value(digest),
+        sizeBytes: Value(bytes.length),
+        dirty: const Value(true),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  /// Same as [replaceBytes] for a file on disk, so a textbook never has to
+  /// sit in memory.
+  Future<void> replaceFromFile({
+    required String id,
+    required String sourcePath,
+    required int kind,
+    required String filename,
+    String? mime,
+  }) async {
+    final copied = await copyAssetFromFile(
+      id,
+      sourcePath,
+      extension: kind == 1 ? 'pdf' : 'img',
+    );
+    await (_db.update(_db.assets)..where((a) => a.id.equals(id))).write(
+      AssetsCompanion(
+        path: Value(filename),
+        mime: Value(mime),
+        localPath: Value(copied.localPath),
+        sha256: Value(copied.sha256),
+        sizeBytes: Value(copied.sizeBytes),
+        dirty: const Value(true),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
   }
 }

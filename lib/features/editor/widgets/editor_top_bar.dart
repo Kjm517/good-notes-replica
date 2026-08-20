@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/design.dart';
+import '../../../app/page_routes.dart';
 import '../../../core/db/database.dart';
 import '../../../core/models/enums.dart';
 import '../canvas/continuous_canvas.dart';
@@ -92,6 +93,7 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
     required this.bookmarked,
     required this.onOpenPageSettings,
     required this.onFind,
+    required this.onQuiz,
     required this.onBack,
     required this.layout,
     this.readingMode = false,
@@ -117,6 +119,9 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
 
   /// Opens "find in document" (also bound to Ctrl+F).
   final VoidCallback onFind;
+
+  /// Opens the premium quiz-from-PDF flow (redesign §11).
+  final VoidCallback onQuiz;
   final VoidCallback onBack;
   final bool readingMode;
   final VoidCallback? onToggleReadingMode;
@@ -233,16 +238,16 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _BarIcon(
-          icon: Icons.arrow_back_rounded,
-          tooltip: 'Back to library',
+          icon: notablyBackIcon,
+          tooltip: 'Back',
           onPressed: onBack,
         ),
-        if (layout != EditorBarLayout.phone)
-          _BarIcon(
-            icon: sidebarOpen ? Icons.menu_open_rounded : Icons.menu_rounded,
-            tooltip: sidebarOpen ? 'Hide pages' : 'Show pages',
-            onPressed: onToggleSidebar,
-          ),
+        _BarIcon(
+          icon: sidebarOpen ? Icons.list_alt_rounded : Icons.list_alt_outlined,
+          tooltip: sidebarOpen ? 'Hide pages & outline' : 'Pages & outline',
+          onPressed: onToggleSidebar,
+          active: sidebarOpen,
+        ),
         const SizedBox(width: 6),
       ],
     );
@@ -297,6 +302,12 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
         icon: Icons.search_rounded,
         tooltip: 'Find in document (Ctrl+F)',
         onPressed: onFind,
+      ),
+      _BarIcon(
+        icon: Icons.quiz_rounded,
+        tooltip: 'Quiz from this document',
+        onPressed: onQuiz,
+        color: context.tokens.premiumText,
       ),
       SyncIndicator(color: context.tokens.textSecondary),
       if (phone) ...[
@@ -1510,12 +1521,14 @@ class _BarIcon extends StatelessWidget {
     required this.tooltip,
     required this.onPressed,
     this.active = false,
+    this.color,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
   final bool active;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -1527,7 +1540,7 @@ class _BarIcon extends StatelessWidget {
       visualDensity: VisualDensity.compact,
       constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
       padding: EdgeInsets.zero,
-      color: active ? t.accentText : t.textSecondary,
+      color: color ?? (active ? t.accentText : t.textSecondary),
       disabledColor: t.textFaint,
     );
   }

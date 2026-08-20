@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../../core/db/database.dart';
+import '../../../core/db/sync_touch.dart';
 import '../../../core/ink/ink_stroke.dart';
 
 /// Data access for ink strokes belonging to a page.
@@ -52,13 +53,15 @@ class StrokeRepository {
           updatedAt: Value(DateTime.now()),
           dirty: const Value(true),
         ));
-    await _touchPage(pageId);
+    await touchPageForSync(_db, pageId);
   }
 
   /// Tombstones the strokes so the erase replicates to other devices.
   Future<void> deleteStrokes(Iterable<String> ids) async {
     if (ids.isEmpty) return;
     final now = DateTime.now();
+    final rows = await (_db.select(_db.strokes)..where((s) => s.id.isIn(ids)))
+        .get();
     await (_db.update(_db.strokes)..where((s) => s.id.isIn(ids))).write(
       StrokesCompanion(
         deletedAt: Value(now),
@@ -66,6 +69,9 @@ class StrokeRepository {
         dirty: const Value(true),
       ),
     );
+    for (final pageId in rows.map((s) => s.pageId).toSet()) {
+      await touchPageForSync(_db, pageId);
+    }
   }
 
   Future<void> clearPage(String pageId) async {
@@ -76,7 +82,7 @@ class StrokeRepository {
       updatedAt: Value(now),
       dirty: const Value(true),
     ));
-    await _touchPage(pageId);
+    await touchPageForSync(_db, pageId);
   }
 
   Future<int> maxSeq(String pageId) async {
@@ -99,11 +105,4 @@ class StrokeRepository {
         points: InkStroke.unpackPoints(s.points),
       );
 
-  Future<void> _touchPage(String pageId) async {
-    await (_db.update(_db.notePages)..where((p) => p.id.equals(pageId)))
-        .write(NotePagesCompanion(
-      updatedAt: Value(DateTime.now()),
-      dirty: const Value(true),
-    ));
-  }
 }

@@ -3,6 +3,8 @@ import 'dart:ui' as ui;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/ai/ai_providers.dart';
+import '../../core/ai/gemini_service.dart';
 import '../../core/db/database.dart';
 import '../../core/ink/ink_stroke.dart';
 import '../../core/sync/sync_providers.dart';
@@ -11,6 +13,11 @@ import 'data/element_repository.dart';
 import 'data/page_repository.dart';
 import 'data/stroke_repository.dart';
 import 'pages/page_background_service.dart';
+import 'quiz/quiz_generator.dart';
+import 'quiz/quiz_history.dart';
+import 'quiz/quiz_history_repository.dart';
+import 'quiz/quiz_models.dart';
+import 'quiz/quiz_source_locator.dart';
 import 'search/document_text_service.dart';
 import 'state/editor_controller.dart';
 import 'state/editor_state.dart';
@@ -52,6 +59,18 @@ final documentTextServiceProvider = Provider<DocumentTextService>((ref) {
     ref.watch(databaseProvider),
     ref.watch(assetRepositoryProvider),
   );
+});
+
+/// Finds the page and the lines a quiz answer came from, so the source
+/// preview can highlight them.
+final quizSourceLocatorProvider = Provider<QuizSourceLocator>((ref) {
+  final locator = QuizSourceLocator(
+    ref.watch(databaseProvider),
+    ref.watch(pageRepositoryProvider),
+    ref.watch(assetRepositoryProvider),
+  );
+  ref.onDispose(locator.dispose);
+  return locator;
 });
 
 final pageBackgroundServiceProvider = Provider<PageBackgroundService>((ref) {
@@ -124,3 +143,105 @@ final documentThumbnailProvider =
   ref.onDispose(() => image?.dispose());
   return image;
 });
+
+// ---------------------------------------------------------------------------
+// Quiz providers
+// ---------------------------------------------------------------------------
+
+/// The AI quiz generator (uses Gemini when the API key is loaded).
+final aiQuizGeneratorProvider = Provider<AiQuizGenerator?>((ref) {
+  final gemini = ref.watch(geminiServiceProvider);
+  if (gemini == null) return null;
+  return AiQuizGenerator(gemini);
+});
+
+final quizHistoryRepositoryProvider = Provider<QuizHistoryRepository>((ref) {
+  return QuizHistoryRepository(
+    ref.watch(databaseProvider),
+    ref.watch(uuidProvider),
+  );
+});
+
+final quizHistoryProvider =
+    StreamProvider.family<List<QuizHistoryRecord>, String>((ref, documentId) {
+  return ref.watch(quizHistoryRepositoryProvider).watchForDocument(documentId);
+});
+
+/// Quiz generation state — tracks the async generation process.
+class QuizGenerationState {
+  const QuizGenerationState({
+    this.questions = const [],
+    this.isGenerating = false,
+    this.error,
+    this.usedAI = false,
+  });
+
+  final List<QuizQuestion> questions;
+  final bool isGenerating;
+  final String? error;
+  final bool usedAI;
+
+  QuizGenerationState copyWith({
+    List<QuizQuestion>? questions,
+    bool? isGenerating,
+    String? error,
+    bool? usedAI,
+    bool clearError = false,
+  }) =>
+      QuizGenerationState(
+        questions: questions ?? this.questions,
+        isGenerating: isGenerating ?? this.isGenerating,
+        error: clearError ? null : (error ?? this.error),
+        usedAI: usedAI ?? this.usedAI,
+      );
+}
+
+/// Manages quiz generation for a document via Gemini.
+class QuizGenerationController extends Notifier<QuizGenerationState> {
+  @override
+  QuizGenerationState build() => const QuizGenerationState();
+
+  /// Generates questions from a document's pre-extracted text.
+  Future<void> generate({
+    required List<QuizSourcePage> textPages,
+    required QuizConfig config,
+    String? additionalInstructions,
+  }) async {
+    state = state.copyWith(isGenerating: true, clearError: true);
+
+    try {
+      final ai = ref.read(aiQuizGeneratorProvider);
+      if (ai == null) {
+        throw StateError('Add a Gemini API key to generate quizzes.');
+      }
+      final passages = textPages
+          .map((p) => SourcePassage(pageIndex: p.pageIndex, sentence: p.text))
+          .toList();
+      final questions = await generateExamQuiz(
+        passages: passages,
+        config: config,
+        ai: ai,
+        additionalInstructions: additionalInstructions,
+      );
+      state = state.copyWith(
+        questions: questions,
+        isGenerating: false,
+        usedAI: true,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isGenerating: false,
+        error: e.toString(),
+      );
+    }
+  }
+
+  void reset() {
+    state = const QuizGenerationState();
+  }
+}
+
+final quizGenerationProvider =
+    NotifierProvider<QuizGenerationController, QuizGenerationState>(
+  QuizGenerationController.new,
+);

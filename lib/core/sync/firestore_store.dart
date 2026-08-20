@@ -1,6 +1,7 @@
-import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import 'remote_store.dart';
 
@@ -49,7 +50,7 @@ class FirestoreStore implements RemoteStore {
     }
     if (since != null) {
       query = query.where('updatedAt',
-          isGreaterThan: Timestamp.fromDate(since));
+          isGreaterThanOrEqualTo: Timestamp.fromDate(since));
     }
     final snap = await query.get();
     return snap.docs.map(_toRecord).toList();
@@ -108,16 +109,23 @@ class FirestoreStore implements RemoteStore {
   }
 
   @override
-  Future<void> putInk(
+  Future<bool> putInk(
       String pageId, Uint8List bytes, DateTime updatedAt) async {
     // A Firestore document is capped at ~1 MiB. Normal pages are a few KB;
     // anything larger is dropped rather than failing the whole sync, and will
     // move to object storage with the rest of the files (phase 4).
-    if (bytes.lengthInBytes > 900 * 1024) return;
+    if (bytes.lengthInBytes > 900 * 1024) {
+      debugPrint(
+        'Skipping ink upload for $pageId: '
+        '${bytes.lengthInBytes} bytes exceeds Firestore cap',
+      );
+      return false;
+    }
     await _user.collection('ink').doc(pageId).set({
       'bytes': Blob(bytes),
       'updatedAt': Timestamp.fromDate(updatedAt),
     });
+    return true;
   }
 
   @override
@@ -136,5 +144,29 @@ class FirestoreStore implements RemoteStore {
           _readTime(data['updatedAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
       deletedAt: _readTime(data['deletedAt']),
     );
+  }
+
+  @override
+  Stream<void> watchChanges() {
+    late final StreamController<void> controller;
+    final subs = <StreamSubscription<dynamic>>[];
+    controller = StreamController<void>.broadcast(
+      onListen: () {
+        void ping(Object? _) {
+          if (!controller.isClosed) controller.add(null);
+        }
+
+        subs.add(_user.collection('documents').snapshots().listen(ping));
+        subs.add(_user.collection('elements').snapshots().listen(ping));
+        subs.add(_user.collection('ink').snapshots().listen(ping));
+      },
+      onCancel: () async {
+        for (final sub in subs) {
+          await sub.cancel();
+        }
+        subs.clear();
+      },
+    );
+    return controller.stream;
   }
 }

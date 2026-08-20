@@ -153,6 +153,69 @@ class PageBackgroundService {
       page.bgAssetId != null ||
       (page.pdfAssetId != null && page.pdfPageIndex != null);
 
+  /// JPEG/PNG bytes of a page for Gemini vision (scans, photos, slides).
+  ///
+  /// Longest side is capped so a 12-page quiz request stays well under the
+  /// HTTP payload limit. Callers own the returned bytes.
+  Future<({Uint8List bytes, String mimeType})?> bytesForAiQuiz(
+    NotePage page, {
+    int maxSide = 768,
+  }) async {
+    ui.Image? owned;
+    try {
+      if (page.bgAssetId != null) {
+        final raw = await _bytesFor(page.bgAssetId!);
+        if (raw == null || raw.isEmpty) return null;
+        final asset = await _assets.get(page.bgAssetId!);
+        final mime = _guessImageMime(raw, asset?.mime);
+        if (raw.lengthInBytes <= 280000) {
+          return (bytes: raw, mimeType: mime);
+        }
+        owned = await _decode(raw, targetWidth: maxSide);
+      } else if (page.pdfAssetId != null && page.pdfPageIndex != null) {
+        owned = await loadThumbnail(
+          page,
+          targetWidth: maxSide.toDouble(),
+        );
+      }
+      if (owned == null) return null;
+      final png = await owned.toByteData(format: ui.ImageByteFormat.png);
+      owned.dispose();
+      owned = null;
+      if (png == null) return null;
+      return (bytes: png.buffer.asUint8List(), mimeType: 'image/png');
+    } catch (e) {
+      debugPrint('[bg] AI quiz bytes failed for ${page.id}: $e');
+      owned?.dispose();
+      return null;
+    }
+  }
+
+  static String _guessImageMime(Uint8List bytes, String? stored) {
+    if (stored != null && stored.startsWith('image/')) return stored;
+    if (bytes.length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return 'image/png';
+    }
+    if (bytes.length >= 6 && bytes[0] == 0x47 && bytes[1] == 0x49) {
+      return 'image/gif';
+    }
+    if (bytes.length >= 12 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50) {
+      return 'image/webp';
+    }
+    return 'image/jpeg';
+  }
+
   /// Returns a *clone* of the cached image. Callers own the clone and must
   /// dispose it; that lets the cache dispose its own copy on eviction without
   /// pulling the texture out from under a widget that is still painting it.
@@ -464,6 +527,18 @@ class PageBackgroundService {
   /// work — used to paint something immediately instead of a blank page.
   ui.Image? cachedOrThumb(NotePage page) =>
       (_cache[page.id] ?? _thumbs[page.id])?.clone();
+
+  /// Drops cached PDF handles and page textures for [assetId] so a later
+  /// attach / re-import is not stuck on the first "missing file" failure.
+  void forgetAsset(String assetId) {
+    final pending = _pdfDocs.remove(assetId);
+    if (pending != null) {
+      unawaited(
+        pending.then((doc) => doc.close()).catchError((_) {}),
+      );
+    }
+    _pdfQueues.remove(assetId)?.completeAll();
+  }
 
   /// Drops cached renders for a page (e.g. after its background changes).
   void evict(String pageId) {

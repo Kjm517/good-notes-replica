@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +21,7 @@ import 'widgets/editor_prepare_overlay.dart';
 import 'widgets/editor_sidebar.dart';
 import 'widgets/editor_top_bar.dart';
 import 'search/document_search_panel.dart';
+import 'quiz/quiz_flow.dart';
 import 'widgets/element_actions.dart';
 import 'widgets/page_settings_sheet.dart';
 import 'widgets/selection_actions.dart';
@@ -82,6 +85,10 @@ class _EditorState extends ConsumerState<_Editor> {
   /// Mobile immersive reader state; a page tap restores annotation chrome.
   bool _readingMode = false;
 
+  /// Explicit jumps (outline, find, quiz, page field) so Back can return.
+  final List<int> _pageHistory = [];
+  var _restoringPage = false;
+
   /// Blocks the canvas until the file is local and the first pages are
   /// rendered — scrolling a half-loaded textbook is what causes the lag.
   bool _preparing = true;
@@ -91,6 +98,7 @@ class _EditorState extends ConsumerState<_Editor> {
   @override
   void initState() {
     super.initState();
+    _canvasController.onJumpToPage = _recordPageJump;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_prepareDocument());
     });
@@ -121,11 +129,6 @@ class _EditorState extends ConsumerState<_Editor> {
     final needsFile = pages.any(
       (p) => p.pdfAssetId != null || p.bgAssetId != null,
     );
-    if (!needsFile) {
-      _finishPrepare();
-      return;
-    }
-
     _setPrepare('Downloading files…', 0.04);
     final engine = ref.read(syncEngineProvider);
     if (engine != null) {
@@ -133,22 +136,32 @@ class _EditorState extends ConsumerState<_Editor> {
     }
     if (!mounted) return;
 
+    if (!needsFile) {
+      _finishPrepare();
+      return;
+    }
+
     final assetIds = <String>{
       for (final p in pages)
         if (p.pdfAssetId != null) p.pdfAssetId!,
     };
     for (final id in assetIds) {
       final present = await ref.read(assetRepositoryProvider).hasBytes(id);
-      if (!present && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'This document’s PDF isn’t on this device. '
-              'Re-import the file, or enable file sync so it can download.',
+      if (present) continue;
+      if (!mounted) return;
+      final attached = await _attachMissingFile(id);
+      if (!attached) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'This document’s PDF isn’t on this device. '
+                'Choose the original file when asked, or enable file sync.',
+              ),
+              duration: Duration(seconds: 6),
             ),
-            duration: Duration(seconds: 6),
-          ),
-        );
+          );
+        }
         _finishPrepare();
         return;
       }
@@ -192,6 +205,73 @@ class _EditorState extends ConsumerState<_Editor> {
     _finishPrepare();
   }
 
+  /// Lets this device supply the original PDF when sync only brought metadata.
+  Future<bool> _attachMissingFile(String assetId) async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final t = ctx.tokens;
+        return AlertDialog(
+          title: const Text('PDF isn’t on this device'),
+          content: const Text(
+            'The notes synced, but the source file did not. '
+            'Choose the original PDF to render these pages.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('Later', style: TextStyle(color: t.textMuted)),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Choose file'),
+            ),
+          ],
+        );
+      },
+    );
+    if (go != true || !mounted) return false;
+
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+      withData: kIsWeb,
+    );
+    if (result == null || result.files.isEmpty || !mounted) return false;
+    final file = result.files.first;
+    final assets = ref.read(assetRepositoryProvider);
+    try {
+      if (!kIsWeb && file.path != null) {
+        await assets.replaceFromFile(
+          id: assetId,
+          sourcePath: file.path!,
+          kind: 1,
+          filename: file.name,
+          mime: 'application/pdf',
+        );
+      } else {
+        final bytes = file.bytes;
+        if (bytes == null) return false;
+        await assets.replaceBytes(
+          id: assetId,
+          bytes: Uint8List.fromList(bytes),
+          kind: 1,
+          filename: file.name,
+          mime: 'application/pdf',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Couldn’t attach the file: $e')),
+        );
+      }
+      return false;
+    }
+    ref.read(pageBackgroundServiceProvider).forgetAsset(assetId);
+    return true;
+  }
+
   void _finishPrepare() {
     if (!mounted) return;
     setState(() {
@@ -200,13 +280,115 @@ class _EditorState extends ConsumerState<_Editor> {
     });
     // Find-in-document builds its own index when opened. Starting it here
     // on a multi-thousand-page PDF fights the UI right after first paint.
+    // Bookmarks are cheap (catalog objects, not a page loop) so the Outline
+    // tab can fill in after this frame.
+    if (widget.document.type == DocumentType.pdf &&
+        widget.document.outline == null) {
+      unawaited(
+        ref.read(documentTextServiceProvider).ensureOutline(widget.document.id),
+      );
+    }
   }
 
   @override
   void dispose() {
+    _canvasController.onJumpToPage = null;
     _canvasController.dispose();
     _shortcutFocus.dispose();
     super.dispose();
+  }
+
+  void _recordPageJump(int index) {
+    if (_restoringPage) return;
+    final from =
+        ref.read(editorControllerProvider(widget.document.id)).currentIndex;
+    if (from == index) return;
+    _pageHistory.add(from);
+    if (_pageHistory.length > 50) _pageHistory.removeAt(0);
+  }
+
+  bool _usesOverlaySidebar(Size screenSize) {
+    final layout = EditorBarLayout.forSize(screenSize);
+    final wideScreen = screenSize.width >= AppBreakpoints.editorSidebar;
+    final tabletPortrait =
+        screenSize.shortestSide >= AppBreakpoints.tabletShortest &&
+            screenSize.height > screenSize.width &&
+            screenSize.width < AppBreakpoints.desktop;
+    return layout == EditorBarLayout.phone || tabletPortrait || !wideScreen;
+  }
+
+  bool _isSidebarOpen(Size screenSize) {
+    if (_sidebarOpen != null) return _sidebarOpen!;
+    final tablet = screenSize.shortestSide >= AppBreakpoints.tabletShortest;
+    final tabletPortrait =
+        screenSize.shortestSide >= AppBreakpoints.tabletShortest &&
+            screenSize.height > screenSize.width &&
+            screenSize.width < AppBreakpoints.desktop;
+    final wideScreen = screenSize.width >= AppBreakpoints.editorSidebar;
+    return tablet || (wideScreen && !tabletPortrait);
+  }
+
+  bool _overlayDrawerOpen() {
+    final size = MediaQuery.sizeOf(context);
+    return _isSidebarOpen(size) && _usesOverlaySidebar(size);
+  }
+
+  bool _canHandleBackLocally() {
+    if (_searchOpen || _editingElementId != null || _readingMode) {
+      return true;
+    }
+    if (_overlayDrawerOpen()) {
+      return true;
+    }
+    final state = ref.read(editorControllerProvider(widget.document.id));
+    if (state.selection != null || state.selectedElementId != null) {
+      return true;
+    }
+    return _pageHistory.isNotEmpty;
+  }
+
+  /// Unwinds the last overlay, page jump, or route — same as the system back.
+  void _handleBack() {
+    if (_searchOpen) {
+      setState(() => _searchOpen = false);
+      return;
+    }
+    if (_editingElementId != null) {
+      _endEditElement();
+      return;
+    }
+    final controller =
+        ref.read(editorControllerProvider(widget.document.id).notifier);
+    final state = ref.read(editorControllerProvider(widget.document.id));
+    if (state.selection != null || state.selectedElementId != null) {
+      controller.clearSelection();
+      controller.selectElement(null);
+      return;
+    }
+    if (_readingMode) {
+      setState(() => _readingMode = false);
+      return;
+    }
+    if (_overlayDrawerOpen()) {
+      setState(() => _sidebarOpen = false);
+      return;
+    }
+    if (_pageHistory.isNotEmpty) {
+      final index = _pageHistory.removeLast();
+      _restoringPage = true;
+      _canvasController.jumpToPage(index);
+      _restoringPage = false;
+      return;
+    }
+    _leaveDocument();
+  }
+
+  void _leaveDocument() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/');
+    }
   }
 
   /// Ctrl/Cmd+Z to undo, Ctrl+Shift+Z or Ctrl+Y to redo.
@@ -298,9 +480,17 @@ class _EditorState extends ConsumerState<_Editor> {
         screenSize.shortestSide >= AppBreakpoints.tabletShortest &&
         screenSize.height > screenSize.width &&
         screenSize.width < AppBreakpoints.desktop;
-    // Default open on tablets/desktop, closed on phones; the user's explicit
-    // toggle wins once they've set it.
-    final sidebarOpen = _sidebarOpen ?? (wideScreen && !tabletPortrait);
+    final tablet =
+        screenSize.shortestSide >= AppBreakpoints.tabletShortest;
+    // Phones and portrait tablets overlay the Edge-style pages/outline
+    // drawer so it doesn't crush the canvas. Landscape tablets/desktop keep
+    // the persistent rail.
+    final overlaySidebar =
+        layout == EditorBarLayout.phone || tabletPortrait || !wideScreen;
+    final drawerWidth = (screenSize.width * 0.86).clamp(240.0, 320.0);
+    // Default open on tablet/desktop; phones start closed so the PDF is full
+    // width until the user taps Pages & outline.
+    final sidebarOpen = _sidebarOpen ?? (tablet || (wideScreen && !tabletPortrait));
     final spreadStart = (state.currentIndex ~/ 2) * 2;
     final spreadEnd = spreadStart + 2 > state.pages.length
         ? state.pages.length
@@ -312,7 +502,12 @@ class _EditorState extends ConsumerState<_Editor> {
               '${spreadStart + 1}–$spreadEnd'
         : 'Page ${state.currentIndex + 1} of ${state.pages.length}';
 
-    return Stack(
+    return PopScope(
+      canPop: !_canHandleBackLocally(),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: Stack(
       children: [
         Focus(
           focusNode: _shortcutFocus,
@@ -347,7 +542,14 @@ class _EditorState extends ConsumerState<_Editor> {
                       ),
                 layout: layout,
                 onFind: () => setState(() => _searchOpen = !_searchOpen),
-                onBack: () => context.pop(),
+                onQuiz: () => QuizFlow.open(
+                  context,
+                  documentId: documentId,
+                  title: widget.document.title,
+                  pageCount: state.pages.length,
+                  onJumpToPage: _canvasController.jumpToPage,
+                ),
+                onBack: _handleBack,
                 readingMode: _readingMode,
                 onToggleReadingMode: layout == EditorBarLayout.phone
                     ? () {
@@ -385,23 +587,13 @@ class _EditorState extends ConsumerState<_Editor> {
                           documentId: documentId,
                           pageSizeFor: _sizeFor,
                         ),
-                      if (sidebarOpen)
-                        EditorSidebar(
-                          documentId: documentId,
-                          pages: state.pages,
-                          currentIndex: state.currentIndex,
-                          defaultPageSize: _defaultPageSize,
-                          onJumpToPage: _canvasController.jumpToPage,
-                          outline: OutlineEntry.decode(widget.document.outline),
+                      if (sidebarOpen && !overlaySidebar)
+                        _pagesOutlineSidebar(
+                          width: 240,
+                          closeOnJump: false,
                         ),
                       Expanded(
-                        child: Listener(
-                          onPointerDown: (_) {
-                            if (_readingMode) {
-                              setState(() => _readingMode = false);
-                            }
-                          },
-                          child: ContinuousCanvas(
+                        child: ContinuousCanvas(
                             key: ValueKey('canvas-$_bgEpoch'),
                             controller: _canvasController,
                             pages: state.pagesForRender,
@@ -490,10 +682,21 @@ class _EditorState extends ConsumerState<_Editor> {
                                 .read(pageBackgroundServiceProvider)
                                 .notifyScrollSettled(),
                           ),
-                        ),
                       ),
                     ],
                   ),
+                  if (sidebarOpen && overlaySidebar)
+                    Positioned.fill(
+                      child: _PagesOutlineDrawer(
+                        width: drawerWidth,
+                        onDismiss: () =>
+                            setState(() => _sidebarOpen = false),
+                        child: _pagesOutlineSidebar(
+                          width: drawerWidth,
+                          closeOnJump: true,
+                        ),
+                      ),
+                    ),
                   if (state.selection != null)
                     Positioned(
                       left: 0,
@@ -522,41 +725,35 @@ class _EditorState extends ConsumerState<_Editor> {
                         onClose: () => setState(() => _searchOpen = false),
                       ),
                     ),
-                  if (_readingMode && layout == EditorBarLayout.phone)
+                  if (_readingMode)
                     Positioned(
-                      left: 0,
+                      top: 0,
                       right: 0,
-                      bottom: 24,
-                      child: IgnorePointer(
-                        child: Center(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: context.tokens.surface.withValues(
-                                alpha: 0.92,
+                      child: SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 4, right: 10),
+                          child: Material(
+                            color: context.tokens.surface,
+                            shape: const CircleBorder(),
+                            elevation: 0,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: context.tokens.line),
+                                boxShadow: AppTokens.elevation(
+                                  context.tokens.shadow,
+                                  y: 8,
+                                  blur: 24,
+                                ),
                               ),
-                              borderRadius: BorderRadius.circular(18),
-                              boxShadow: AppTokens.elevation(
-                                context.tokens.shadow,
-                                y: 8,
-                                blur: 24,
-                              ),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 10,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.touch_app_rounded,
-                                    size: 18,
-                                    color: context.tokens.accentText,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  const Text('Tap page to show tools'),
-                                ],
+                              child: IconButton(
+                                tooltip: 'Show tools',
+                                onPressed: () =>
+                                    setState(() => _readingMode = false),
+                                icon: Icon(
+                                  Icons.close_rounded,
+                                  color: context.tokens.text,
+                                ),
                               ),
                             ),
                           ),
@@ -589,10 +786,33 @@ class _EditorState extends ConsumerState<_Editor> {
               label: _prepareLabel,
               fraction: _prepareFraction,
               pageCount: state.pages.length,
-              onClose: () => context.pop(),
+              onClose: _leaveDocument,
             ),
           ),
       ],
+    ),
+    );
+  }
+
+  Widget _pagesOutlineSidebar({
+    required double width,
+    required bool closeOnJump,
+  }) {
+    final state = ref.read(editorControllerProvider(widget.document.id));
+    return EditorSidebar(
+      documentId: widget.document.id,
+      pages: state.pages,
+      currentIndex: state.currentIndex,
+      defaultPageSize: _defaultPageSize,
+      width: width,
+      onJumpToPage: (index) {
+        _canvasController.jumpToPage(index);
+        if (closeOnJump) setState(() => _sidebarOpen = false);
+      },
+      outline: OutlineEntry.decode(widget.document.outline),
+      outlinePending:
+          widget.document.type == DocumentType.pdf &&
+          widget.document.outline == null,
     );
   }
 
@@ -868,6 +1088,45 @@ class _TabletDocumentRow extends ConsumerWidget {
           onTap: onTap,
         ),
       ),
+    );
+  }
+}
+
+/// Edge-style pages/outline drawer: the panel on the left, tap the dimmed
+/// remainder to close. Used on phones and portrait tablets where an inline
+/// rail would leave no room for the page.
+class _PagesOutlineDrawer extends StatelessWidget {
+  const _PagesOutlineDrawer({
+    required this.width,
+    required this.onDismiss,
+    required this.child,
+  });
+
+  final double width;
+  final VoidCallback onDismiss;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Row(
+      children: [
+        Material(
+          color: t.surfaceAlt,
+          elevation: 12,
+          shadowColor: t.shadow,
+          child: SizedBox(width: width, child: child),
+        ),
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onDismiss,
+            child: ColoredBox(
+              color: t.shadow.withValues(alpha: 0.28),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

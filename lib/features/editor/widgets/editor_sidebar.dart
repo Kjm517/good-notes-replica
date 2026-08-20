@@ -26,6 +26,8 @@ class EditorSidebar extends ConsumerStatefulWidget {
     required this.defaultPageSize,
     required this.onJumpToPage,
     this.outline = const [],
+    this.outlinePending = false,
+    this.width = 240,
   });
 
   final String documentId;
@@ -38,6 +40,13 @@ class EditorSidebar extends ConsumerStatefulWidget {
   /// Empty for notebooks, image imports, or PDFs without an outline.
   final List<OutlineEntry> outline;
 
+  /// True while bookmarks have not been read yet (column still null).
+  final bool outlinePending;
+
+  /// Panel width. Overlay drawers on phones are a bit wider than the desktop
+  /// rail so nested chapter titles stay readable.
+  final double width;
+
   @override
   ConsumerState<EditorSidebar> createState() => _EditorSidebarState();
 }
@@ -45,11 +54,56 @@ class EditorSidebar extends ConsumerStatefulWidget {
 class _EditorSidebarState extends ConsumerState<EditorSidebar> {
   SidebarTab _tab = SidebarTab.thumbnails;
   final _scroll = ScrollController();
+  final _expanded = <String>{};
+  bool _userPickedTab = false;
+  String? _lastActiveId;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.outlinePending || widget.outline.isNotEmpty) {
+      _tab = SidebarTab.outline;
+    }
+  }
 
   @override
   void dispose() {
     _scroll.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant EditorSidebar old) {
+    super.didUpdateWidget(old);
+    final toc = _toc;
+    final tree = OutlineNode.nest(toc);
+    if (!_userPickedTab &&
+        old.outline.isEmpty &&
+        toc.isNotEmpty &&
+        _tab == SidebarTab.thumbnails) {
+      _tab = SidebarTab.outline;
+    }
+    _syncExpanded(tree);
+  }
+
+  List<OutlineEntry> get _toc => [
+        for (final e in widget.outline)
+          if (e.pageIndex >= 0 && e.pageIndex < widget.pages.length) e,
+      ];
+
+  void _syncExpanded(List<OutlineNode> tree) {
+    if (tree.isEmpty) return;
+    if (_expanded.isEmpty) {
+      for (final root in tree) {
+        _expanded.add(root.id);
+      }
+    }
+    final active = OutlineNode.activeIdForPage(tree, widget.currentIndex);
+    if (active != null && active != _lastActiveId) {
+      _lastActiveId = active;
+      _expanded.addAll(OutlineNode.ancestorIds(active));
+      _expanded.add(active);
+    }
   }
 
   Size _sizeFor(NotePage page) {
@@ -69,7 +123,7 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     return Container(
-      width: 240,
+      width: widget.width,
       decoration: BoxDecoration(
         color: t.surfaceAlt,
         border: Border(right: BorderSide(color: t.line)),
@@ -93,7 +147,12 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
                     Expanded(
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onTap: () => setState(() => _tab = tab),
+                        onTap: () {
+                          setState(() {
+                            _userPickedTab = true;
+                            _tab = tab;
+                          });
+                        },
                         child: Container(
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
@@ -142,44 +201,79 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
         widget.pages.length > 1 &&
         _sizeFor(widget.pages.last) == _sizeFor(first);
     final extent = first == null ? null : _thumbExtent(first);
-    return ListView.builder(
+    return Scrollbar(
       controller: _scroll,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: widget.pages.length,
-      itemExtent: uniform ? extent : null,
-      cacheExtent: 240,
-      itemBuilder: (context, i) {
-        final page = widget.pages[i];
-        final selected = i == widget.currentIndex;
-        return _ThumbTile(
-          key: ValueKey(page.id),
-          page: page,
-          pageSize: _sizeFor(page),
-          number: i + 1,
-          selected: selected,
-          onTap: () => widget.onJumpToPage(i),
-        );
-      },
+      thumbVisibility: true,
+      interactive: true,
+      child: ListView.builder(
+        controller: _scroll,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: widget.pages.length,
+        itemExtent: uniform ? extent : null,
+        cacheExtent: 240,
+        itemBuilder: (context, i) {
+          final page = widget.pages[i];
+          final selected = i == widget.currentIndex;
+          return _ThumbTile(
+            key: ValueKey(page.id),
+            page: page,
+            pageSize: _sizeFor(page),
+            number: i + 1,
+            selected: selected,
+            onTap: () => widget.onJumpToPage(i),
+          );
+        },
+      ),
     );
   }
 
   Widget _outline(BuildContext context) {
     final t = context.tokens;
+    final toc = _toc;
+    final tree = OutlineNode.nest(toc);
+    if (tree.isNotEmpty) _syncExpanded(tree);
 
-    // The PDF's own table of contents (clamped to real pages, in case the file
-    // referenced pages we didn't import).
-    final toc = [
-      for (final e in widget.outline)
-        if (e.pageIndex >= 0 && e.pageIndex < widget.pages.length) e,
-    ];
+    if (widget.outlinePending && toc.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: t.accentText,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Reading contents…',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: t.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Using the PDF’s bookmarks when it has them.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: t.textMuted),
+            ),
+          ],
+        ),
+      );
+    }
 
-    // Pages the user bookmarked by hand.
     final marked = <int>[];
     for (var i = 0; i < widget.pages.length; i++) {
       if ((widget.pages[i].bookmarkTitle ?? '').isNotEmpty) marked.add(i);
     }
 
-    if (toc.isEmpty && marked.isEmpty) {
+    if (tree.isEmpty && marked.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -208,19 +302,22 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
       );
     }
 
-    final showSections = toc.isNotEmpty && marked.isNotEmpty;
+    final activeId = OutlineNode.activeIdForPage(tree, widget.currentIndex);
+    final showSections = tree.isNotEmpty && marked.isNotEmpty;
 
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 6),
       children: [
         if (showSections) _sectionLabel(context, 'Contents'),
-        for (final entry in toc)
-          _OutlineTile(
-            title: entry.title,
-            pageNumber: entry.pageIndex + 1,
-            depth: entry.depth,
-            selected: entry.pageIndex == widget.currentIndex,
-            onTap: () => widget.onJumpToPage(entry.pageIndex),
+        for (final node in tree)
+          _OutlineBranch(
+            node: node,
+            activeId: activeId,
+            expanded: _expanded,
+            onToggle: (id) => setState(() {
+              if (!_expanded.add(id)) _expanded.remove(id);
+            }),
+            onJump: widget.onJumpToPage,
           ),
         if (showSections) ...[
           const SizedBox(height: 6),
@@ -231,9 +328,9 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
             title: widget.pages[index].bookmarkTitle!,
             pageNumber: index + 1,
             depth: 0,
-            bookmark: true,
             selected: index == widget.currentIndex,
             onTap: () => widget.onJumpToPage(index),
+            bookmark: true,
           ),
       ],
     );
@@ -248,6 +345,52 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
   }
 }
 
+/// Nested outline rows: chevron when the node has children, indent by depth.
+class _OutlineBranch extends StatelessWidget {
+  const _OutlineBranch({
+    required this.node,
+    required this.activeId,
+    required this.expanded,
+    required this.onToggle,
+    required this.onJump,
+  });
+
+  final OutlineNode node;
+  final String? activeId;
+  final Set<String> expanded;
+  final ValueChanged<String> onToggle;
+  final void Function(int pageIndex) onJump;
+
+  @override
+  Widget build(BuildContext context) {
+    final open = expanded.contains(node.id);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _OutlineTile(
+          title: node.title,
+          pageNumber: node.pageNumber,
+          depth: node.depth,
+          selected: node.id == activeId,
+          expandable: node.hasChildren,
+          expanded: open,
+          onToggle: node.hasChildren ? () => onToggle(node.id) : null,
+          onTap: () => onJump(node.pageIndex),
+        ),
+        if (open)
+          for (final child in node.children)
+            _OutlineBranch(
+              node: child,
+              activeId: activeId,
+              expanded: expanded,
+              onToggle: onToggle,
+              onJump: onJump,
+            ),
+      ],
+    );
+  }
+}
+
 /// One row in the outline: a TOC entry (indented by depth) or a manual
 /// bookmark. Tapping it jumps to the page.
 class _OutlineTile extends StatelessWidget {
@@ -258,6 +401,9 @@ class _OutlineTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.bookmark = false,
+    this.expandable = false,
+    this.expanded = false,
+    this.onToggle,
   });
 
   final String title;
@@ -265,6 +411,9 @@ class _OutlineTile extends StatelessWidget {
   final int depth;
   final bool selected;
   final bool bookmark;
+  final bool expandable;
+  final bool expanded;
+  final VoidCallback? onToggle;
   final VoidCallback onTap;
 
   @override
@@ -272,7 +421,7 @@ class _OutlineTile extends StatelessWidget {
     final t = context.tokens;
     // Indent nested entries; cap the depth so a deep outline never marches off
     // the edge of a 240px sidebar.
-    final indent = 18.0 + (depth.clamp(0, 5)) * 14.0;
+    final indent = 10.0 + (depth.clamp(0, 5)) * 12.0;
     final topLevel = depth == 0;
 
     return InkWell(
@@ -287,36 +436,58 @@ class _OutlineTile extends StatelessWidget {
             ),
           ),
         ),
-        padding: EdgeInsets.fromLTRB(indent - 2, 7, 12, 7),
+        padding: EdgeInsets.fromLTRB(indent, 6, 12, 6),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (bookmark) ...[
-              Padding(
-                padding: const EdgeInsets.only(top: 1, right: 6),
-                child: Icon(Icons.bookmark_rounded,
-                    size: 14, color: t.accentText),
-              ),
-            ],
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: expandable
+                  ? IconButton(
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      tooltip: expanded ? 'Collapse' : 'Expand',
+                      onPressed: onToggle,
+                      icon: Icon(
+                        expanded
+                            ? Icons.expand_more_rounded
+                            : Icons.chevron_right_rounded,
+                        size: 18,
+                        color: selected ? t.accentText : t.textMuted,
+                      ),
+                    )
+                  : bookmark
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Icon(Icons.bookmark_rounded,
+                              size: 14, color: t.accentText),
+                        )
+                      : null,
+            ),
             Expanded(
-              child: Text(
-                title,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: topLevel ? 13 : 12.5,
-                  height: 1.3,
-                  fontWeight:
-                      topLevel ? FontWeight.w600 : FontWeight.w500,
-                  color: selected
-                      ? t.accentText
-                      : (topLevel ? t.text : t.textSecondary),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  title,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: topLevel ? 13 : 12.5,
+                    height: 1.3,
+                    fontWeight: selected || topLevel
+                        ? FontWeight.w600
+                        : FontWeight.w500,
+                    color: selected
+                        ? t.accentText
+                        : (topLevel ? t.text : t.textSecondary),
+                  ),
                 ),
               ),
             ),
             const SizedBox(width: 8),
             Padding(
-              padding: const EdgeInsets.only(top: 1),
+              padding: const EdgeInsets.only(top: 3),
               child: Text(
                 '$pageNumber',
                 style: AppTokens.mono(

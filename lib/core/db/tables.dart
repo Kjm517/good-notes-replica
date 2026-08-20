@@ -219,3 +219,33 @@ class Assets extends Table with SyncedTable {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+/// A finished quiz run, kept locally so the history page can retake or review.
+///
+/// Not synced — each device records its own attempts.
+class QuizAttempts extends Table {
+  TextColumn get id => text()();
+  TextColumn get documentId =>
+      text().references(Documents, #id, onDelete: KeyAction.cascade)();
+
+  /// Shared across retakes of the same generated question set.
+  TextColumn get familyId => text()();
+
+  TextColumn get title => text()();
+  TextColumn get sourceLabel => text().withDefault(const Constant(''))();
+  IntColumn get questionCount => integer()();
+  IntColumn get correctCount => integer()();
+  IntColumn get durationMs => integer().withDefault(const Constant(0))();
+  TextColumn get questionsJson => text()();
+  TextColumn get answersJson => text()();
+  DateTimeColumn get completedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+
+  /// False until the user finishes (or times out of) this generated set.
+  /// Existing rows were only written on finish, so they default to true.
+  BoolColumn get completed =>
+      boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

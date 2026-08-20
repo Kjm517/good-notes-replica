@@ -137,6 +137,8 @@ class _TextItemState extends State<_TextItem> {
   );
   late final FocusNode _focus = FocusNode();
   Rect? _live;
+  Rect? _gestureStart;
+  Offset? _dragOriginGlobal;
   bool _canvasOwnsPinch = false;
 
   static const double _minSize = 40;
@@ -230,20 +232,33 @@ class _TextItemState extends State<_TextItem> {
     }
   }
 
-  Offset _toContent(Offset delta) =>
-      widget.dragScale <= 0 ? delta : delta / widget.dragScale;
+  /// Global/screen-pixel delta → content-unit delta.
+  Offset _toContent(Offset screenDelta) =>
+      widget.dragScale <= 0 ? screenDelta : screenDelta / widget.dragScale;
 
-  void _move(Offset screenDelta) {
-    final next = _rect.shift(_toContent(screenDelta));
+  void _beginDrag(Offset global) {
+    widget.onSelect();
+    _gestureStart = _rect;
+    _dragOriginGlobal = global;
+  }
+
+  void _moveTo(Offset global) {
+    final start = _gestureStart;
+    final origin = _dragOriginGlobal;
+    if (start == null || origin == null) return;
+    final next = start.shift(_toContent(global - origin));
     setState(() => _live = next);
     widget.onTransform(next);
   }
 
   /// Free resize from a corner — width and height move independently so a
   /// text box can be made wider (for wrapping) without locking aspect.
-  void _resize(_Corner corner, Offset screenDelta) {
-    final d = _toContent(screenDelta);
-    final r = _rect;
+  void _resize(_Corner corner, Offset global) {
+    final start = _gestureStart;
+    final origin = _dragOriginGlobal;
+    if (start == null || origin == null) return;
+    final d = _toContent(global - origin);
+    final r = start;
     final growX = switch (corner) {
       _Corner.topRight || _Corner.bottomRight => d.dx,
       _Corner.topLeft || _Corner.bottomLeft => -d.dx,
@@ -283,6 +298,8 @@ class _TextItemState extends State<_TextItem> {
     final r = _rect;
     setState(() {
       _live = null;
+      _gestureStart = null;
+      _dragOriginGlobal = null;
     });
     widget.onTransformEnd(r);
   }
@@ -291,6 +308,7 @@ class _TextItemState extends State<_TextItem> {
     widget.onSelect();
     _canvasOwnsPinch = d.pointerCount >= 2;
     if (_canvasOwnsPinch) return;
+    _beginDrag(d.focalPoint);
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
@@ -298,7 +316,7 @@ class _TextItemState extends State<_TextItem> {
       _canvasOwnsPinch = true;
       return;
     }
-    _move(d.focalPointDelta);
+    _moveTo(d.focalPoint);
   }
 
   void _onScaleEnd(ScaleEndDetails _) {
@@ -306,12 +324,16 @@ class _TextItemState extends State<_TextItem> {
       _canvasOwnsPinch = false;
       setState(() {
         _live = null;
+        _gestureStart = null;
+        _dragOriginGlobal = null;
       });
       return;
     }
     final r = _rect;
     setState(() {
       _live = null;
+      _gestureStart = null;
+      _dragOriginGlobal = null;
     });
     widget.onTransformEnd(r);
   }
@@ -382,7 +404,8 @@ class _TextItemState extends State<_TextItem> {
               corner: corner,
               scale: s,
               pad: EdgeInsets.all(chrome),
-              onDrag: (delta) => _resize(corner, delta),
+              onDragStart: (global) => _beginDrag(global),
+              onDrag: (global) => _resize(corner, global),
               onEnd: _commitRect,
             ),
         ],
@@ -572,6 +595,7 @@ class _CornerHandle extends StatelessWidget {
     required this.corner,
     required this.scale,
     required this.pad,
+    required this.onDragStart,
     required this.onDrag,
     required this.onEnd,
   });
@@ -579,6 +603,7 @@ class _CornerHandle extends StatelessWidget {
   final _Corner corner;
   final double scale;
   final EdgeInsets pad;
+  final ValueChanged<Offset> onDragStart;
   final ValueChanged<Offset> onDrag;
   final VoidCallback onEnd;
 
@@ -606,7 +631,8 @@ class _CornerHandle extends StatelessWidget {
             : SystemMouseCursors.resizeUpRightDownLeft,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onPanUpdate: (d) => onDrag(d.delta),
+          onPanStart: (d) => onDragStart(d.globalPosition),
+          onPanUpdate: (d) => onDrag(d.globalPosition),
           onPanEnd: (_) => onEnd(),
           child: Container(
             decoration: BoxDecoration(

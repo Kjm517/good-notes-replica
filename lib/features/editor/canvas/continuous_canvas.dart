@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/design.dart';
 import '../../../core/db/database.dart';
 import '../../../core/ink/ink_stroke.dart';
 import '../../../core/models/enums.dart';
@@ -24,6 +25,11 @@ import 'lasso_painter.dart';
 import 'text_layer.dart';
 
 const double _kPageGap = 16;
+
+/// Finger-sized hit strip for the always-visible page scrubber.
+const double _kScrubberWidth = 32;
+const double _kScrubberThumb = 44;
+const double _kScrubberPad = 6;
 
 /// Splits a scaled-axis delta into unscaled sheet coordinate + leftover pixels.
 ///
@@ -226,7 +232,13 @@ class ContinuousCanvasController extends ChangeNotifier {
   /// Current zoom multiplier; 1.0 == one whole page fits the viewport.
   double get zoom => _zoomValue;
 
-  void jumpToPage(int index) => _state?._jumpToPage(index);
+  /// Fired before an explicit jump (outline, find, page field, quiz).
+  void Function(int index)? onJumpToPage;
+
+  void jumpToPage(int index) {
+    onJumpToPage?.call(index);
+    _state?._jumpToPage(index);
+  }
   void zoomIn() => _state?._zoomBy(1.2);
   void zoomOut() => _state?._zoomBy(1 / 1.2);
   void setZoom(double z) => _state?._setZoom(z);
@@ -347,6 +359,9 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     HardwareKeyboard.instance.addHandler(_onKey);
     _vertical.addListener(_onScrollActivity);
     _horizontal.addListener(_onScrollActivity);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -1407,63 +1422,75 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
         // pointer handler instead.
         return MouseRegion(
           cursor: _cursorForTool(),
-          child: Listener(
-            onPointerSignal: _onPointerSignal,
-            onPointerDown: _onRootDown,
-            onPointerMove: _onRootMove,
-            onPointerUp: _onRootUp,
-            onPointerCancel: _onRootUp,
-            child: Scrollbar(
-              controller: _vertical,
-              child: SingleChildScrollView(
-                controller: _horizontal,
-                scrollDirection: Axis.horizontal,
-                physics: const NeverScrollableScrollPhysics(),
-                child: SizedBox(
-                  width: _contentWidth,
-                  height: vp.height,
-                  child: ListView.builder(
-                    controller: _vertical,
-                    physics: const NeverScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(
-                      top: _kPageGap,
-                      bottom: _kPageGap * 4,
-                    ),
-                    itemCount: _rowCount,
-                    itemExtent: _uniformUnscaledHeight == null
-                        ? null
-                        : _uniformUnscaledHeight! * _scale + _kPageGap,
-                    itemExtentBuilder: _uniformUnscaledHeight == null
-                        ? (index, _) => index >= 0 && index < _rowCount
-                            ? _rowHeight(index)
-                            : null
-                        : null,
-                    cacheExtent: _viewport.height > 0 ? _viewport.height : 180,
-                    itemBuilder: (context, row) {
-                      final firstIndex = widget.twoPageSpread ? row * 2 : row;
-                      final secondIndex = firstIndex + 1;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: _kPageGap),
-                        child: Center(
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildPageTile(firstIndex),
-                              if (widget.twoPageSpread &&
-                                  secondIndex < widget.pages.length) ...[
-                                const SizedBox(width: _kPageGap),
-                                _buildPageTile(secondIndex),
+          child: Stack(
+            children: [
+              Listener(
+                onPointerSignal: _onPointerSignal,
+                onPointerDown: _onRootDown,
+                onPointerMove: _onRootMove,
+                onPointerUp: _onRootUp,
+                onPointerCancel: _onRootUp,
+                child: SingleChildScrollView(
+                  controller: _horizontal,
+                  scrollDirection: Axis.horizontal,
+                  physics: const NeverScrollableScrollPhysics(),
+                  child: SizedBox(
+                    width: _contentWidth,
+                    height: vp.height,
+                    child: ListView.builder(
+                      controller: _vertical,
+                      physics: const NeverScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(
+                        top: _kPageGap,
+                        bottom: _kPageGap * 4,
+                      ),
+                      itemCount: _rowCount,
+                      itemExtent: _uniformUnscaledHeight == null
+                          ? null
+                          : _uniformUnscaledHeight! * _scale + _kPageGap,
+                      itemExtentBuilder: _uniformUnscaledHeight == null
+                          ? (index, _) => index >= 0 && index < _rowCount
+                              ? _rowHeight(index)
+                              : null
+                          : null,
+                      cacheExtent:
+                          _viewport.height > 0 ? _viewport.height : 180,
+                      itemBuilder: (context, row) {
+                        final firstIndex =
+                            widget.twoPageSpread ? row * 2 : row;
+                        final secondIndex = firstIndex + 1;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: _kPageGap),
+                          child: Center(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildPageTile(firstIndex),
+                                if (widget.twoPageSpread &&
+                                    secondIndex < widget.pages.length) ...[
+                                  const SizedBox(width: _kPageGap),
+                                  _buildPageTile(secondIndex),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
-            ),
+              // Always visible on Android and iOS — the platform scrollbar
+              // fades away and is not draggable on iOS.
+              Positioned(
+                right: 0,
+                top: 8,
+                bottom: 72,
+                width: _kScrubberWidth,
+                child: _VerticalPageScrubber(controller: _vertical),
+              ),
+            ],
           ),
         );
       },
@@ -1482,6 +1509,97 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
       default:
         return SystemMouseCursors.basic;
     }
+  }
+}
+
+/// Always-on vertical page slider. iOS hides the Material scrollbar and
+/// disables thumb dragging; this control stays visible on both platforms.
+class _VerticalPageScrubber extends StatelessWidget {
+  const _VerticalPageScrubber({required this.controller});
+
+  final ScrollController controller;
+
+  void _jumpTo(double localY, double height, double max) {
+    final usable =
+        (height - _kScrubberPad * 2 - _kScrubberThumb).clamp(1.0, height);
+    final t =
+        ((localY - _kScrubberPad - _kScrubberThumb / 2) / usable).clamp(0.0, 1.0);
+    controller.jumpTo(t * max);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        if (!controller.hasClients) {
+          return const IgnorePointer(child: SizedBox.expand());
+        }
+        final max = controller.position.maxScrollExtent;
+        if (max <= 0) {
+          return const IgnorePointer(child: SizedBox.expand());
+        }
+        final progress = (controller.offset / max).clamp(0.0, 1.0);
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final height = constraints.maxHeight;
+            final usable = (height - _kScrubberPad * 2 - _kScrubberThumb)
+                .clamp(0.0, height);
+            final thumbTop = _kScrubberPad + usable * progress;
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (d) => _jumpTo(d.localPosition.dy, height, max),
+              onVerticalDragStart: (d) =>
+                  _jumpTo(d.localPosition.dy, height, max),
+              onVerticalDragUpdate: (d) =>
+                  _jumpTo(d.localPosition.dy, height, max),
+              child: Stack(
+                children: [
+                  Center(
+                    child: Container(
+                      width: 4,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      decoration: BoxDecoration(
+                        color: t.fill,
+                        borderRadius: BorderRadius.circular(100),
+                        border: Border.all(color: t.line),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: thumbTop,
+                    left: 6,
+                    right: 6,
+                    height: _kScrubberThumb,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: t.surface,
+                        borderRadius: BorderRadius.circular(100),
+                        border: Border.all(color: t.lineStrong),
+                        boxShadow: AppTokens.elevation(
+                          t.shadow,
+                          y: 4,
+                          blur: 12,
+                          opacity: 0.16,
+                        ),
+                      ),
+                    child: Center(
+                      child: Icon(
+                        Icons.unfold_more_rounded,
+                        size: 16,
+                        color: t.textMuted,
+                      ),
+                    ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }
 

@@ -109,6 +109,7 @@ class _ImageItemState extends State<_ImageItem> {
   Uint8List? _bytes;
   Rect? _live; // in-progress drag/resize, content coordinates
   Rect? _gestureStart;
+  Offset? _dragOriginGlobal;
   bool _canvasOwnsPinch = false;
 
   double get _rotation => widget.previewRotation ?? widget.element.rotation;
@@ -149,25 +150,39 @@ class _ImageItemState extends State<_ImageItem> {
   }
 
   Future<void> _load() async {
-    final bytes = await widget.bytesFor(_data.assetId);
-    if (mounted) setState(() => _bytes = bytes);
+    final assetId = _data.assetId;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      final bytes = await widget.bytesFor(assetId);
+      if (!mounted || assetId != _data.assetId) return;
+      if (bytes != null) {
+        setState(() => _bytes = bytes);
+        return;
+      }
+      await Future<void>.delayed(Duration(milliseconds: 350 * (attempt + 1)));
+    }
   }
 
-  /// Screen-pixel delta -> content-unit delta.
-  Offset _toContent(Offset delta) =>
-      widget.dragScale <= 0 ? delta : delta / widget.dragScale;
+  /// Global/screen-pixel delta → content-unit delta.
+  Offset _toContent(Offset screenDelta) =>
+      widget.dragScale <= 0 ? screenDelta : screenDelta / widget.dragScale;
 
-  void _move(Offset screenDelta) {
-    final next = _rect.shift(_toContent(screenDelta));
+  void _moveTo(Offset global) {
+    final start = _gestureStart;
+    final origin = _dragOriginGlobal;
+    if (start == null || origin == null) return;
+    final next = start.shift(_toContent(global - origin));
     setState(() => _live = next);
     widget.onTransform(next);
   }
 
   /// Resizes from a corner, keeping the opposite corner anchored and the
   /// aspect ratio locked (the usual behaviour for photos).
-  void _resize(_Corner corner, Offset screenDelta) {
-    final d = _toContent(screenDelta);
-    final r = _rect;
+  void _resize(_Corner corner, Offset global) {
+    final start = _gestureStart;
+    final origin = _dragOriginGlobal;
+    if (start == null || origin == null) return;
+    final d = _toContent(global - origin);
+    final r = start;
     final aspect = r.height == 0 ? 1.0 : r.width / r.height;
 
     // Signed growth along x for this corner.
@@ -209,15 +224,22 @@ class _ImageItemState extends State<_ImageItem> {
     setState(() {
       _live = null;
       _gestureStart = null;
+      _dragOriginGlobal = null;
     });
     widget.onTransformEnd(r);
+  }
+
+  void _beginDrag(Offset global) {
+    widget.onSelect();
+    _gestureStart = _rect;
+    _dragOriginGlobal = global;
   }
 
   void _onScaleStart(ScaleStartDetails d) {
     widget.onSelect();
     _canvasOwnsPinch = d.pointerCount >= 2;
     if (_canvasOwnsPinch) return;
-    _gestureStart = _rect;
+    _beginDrag(d.focalPoint);
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
@@ -227,7 +249,7 @@ class _ImageItemState extends State<_ImageItem> {
       _canvasOwnsPinch = true;
       return;
     }
-    _move(d.focalPointDelta);
+    _moveTo(d.focalPoint);
   }
 
   void _onScaleEnd(ScaleEndDetails _) {
@@ -236,6 +258,7 @@ class _ImageItemState extends State<_ImageItem> {
       setState(() {
         _live = null;
         _gestureStart = null;
+        _dragOriginGlobal = null;
       });
       return;
     }
@@ -317,7 +340,8 @@ class _ImageItemState extends State<_ImageItem> {
               corner: corner,
               scale: s,
               chrome: chrome,
-              onDrag: (delta) => _resize(corner, delta),
+              onDragStart: (global) => _beginDrag(global),
+              onDrag: (global) => _resize(corner, global),
               onEnd: _commit,
             ),
         ],
@@ -349,6 +373,7 @@ class _Handle extends StatelessWidget {
     required this.corner,
     required this.scale,
     required this.chrome,
+    required this.onDragStart,
     required this.onDrag,
     required this.onEnd,
   });
@@ -356,6 +381,7 @@ class _Handle extends StatelessWidget {
   final _Corner corner;
   final double scale;
   final double chrome;
+  final ValueChanged<Offset> onDragStart;
   final ValueChanged<Offset> onDrag;
   final VoidCallback onEnd;
 
@@ -380,7 +406,8 @@ class _Handle extends StatelessWidget {
             : SystemMouseCursors.resizeUpRightDownLeft,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onPanUpdate: (d) => onDrag(d.delta),
+          onPanStart: (d) => onDragStart(d.globalPosition),
+          onPanUpdate: (d) => onDrag(d.globalPosition),
           onPanEnd: (_) => onEnd(),
           child: Container(
             decoration: BoxDecoration(

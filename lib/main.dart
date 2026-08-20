@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
@@ -20,6 +22,17 @@ void main() => runGuarded(bootstrap);
 /// truly cannot start without is SharedPreferences, and if that fails the guard
 /// shows why rather than letting the process vanish.
 Future<Widget> bootstrap() async {
+  // The quiz highlighter opens PDFs through pdfrx's document API rather than
+  // through one of its widgets, so the engine has to be started by hand.
+  pdfrxFlutterInitialize();
+
+  // Load .env before anything else so API keys are available.
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (e) {
+    debugPrint('Could not load .env (Gemini will be unavailable): $e');
+  }
+
   // Never fatal: if Firebase isn't configured the app runs local-only.
   await initFirebase();
 

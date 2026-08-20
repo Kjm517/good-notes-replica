@@ -2,10 +2,11 @@ import 'dart:ui' show Offset;
 import 'dart:ui' as ui;
 
 import 'package:drift/drift.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/db/database.dart';
+import '../../../core/db/sync_touch.dart';
 import '../../../core/models/enums.dart';
 import '../../../core/models/image_element.dart';
 import '../../../core/models/text_element.dart';
@@ -35,24 +36,20 @@ class ElementRepository {
 
   Future<Uint8List?> imageBytes(String assetId) => _assets.getBytes(assetId);
 
-  /// Prompts for an image file and places it on [pageId].
+  /// Opens the photo gallery and places the chosen image on [pageId].
   /// [maxWidth] caps the initial placement size in content points.
   Future<CanvasElement?> pickAndInsertImage({
     required String pageId,
     required double maxWidth,
     Offset? at,
   }) async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.image,
-      withData: true,
-    );
-    final file = result?.files.firstOrNull;
-    final bytes = file?.bytes;
-    if (bytes == null) return null;
+    final shot = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (shot == null) return null;
+    final bytes = Uint8List.fromList(await shot.readAsBytes());
     return insertImage(
       pageId: pageId,
-      bytes: Uint8List.fromList(bytes),
-      filename: file?.name ?? 'image',
+      bytes: bytes,
+      filename: shot.name,
       maxWidth: maxWidth,
       at: at,
     );
@@ -98,6 +95,7 @@ class ElementRepository {
             ),
           );
     });
+    await touchPageForSync(_db, pageId);
     return (await (_db.select(
       _db.canvasElements,
     )..where((e) => e.id.equals(elementId))).getSingle());
@@ -138,6 +136,7 @@ class ElementRepository {
             z: Value(z),
           ),
         );
+    await touchPageForSync(_db, pageId);
     return (_db.select(
       _db.canvasElements,
     )..where((e) => e.id.equals(elementId))).getSingle();
@@ -154,6 +153,7 @@ class ElementRepository {
         dirty: const Value(true),
       ),
     );
+    await _touchByElement(elementId);
   }
 
   Future<void> updateTransform(
@@ -179,6 +179,7 @@ class ElementRepository {
         dirty: const Value(true),
       ),
     );
+    await _touchByElement(elementId);
   }
 
   Future<CanvasElement?> getElement(String elementId) {
@@ -259,6 +260,7 @@ class ElementRepository {
         where: (e) => e.id.equals(other.id),
       );
     });
+    await touchPageForSync(_db, element.pageId);
   }
 
   Future<void> updateData(String elementId, ImageElementData data) async {
@@ -271,9 +273,13 @@ class ElementRepository {
         dirty: const Value(true),
       ),
     );
+    await _touchByElement(elementId);
   }
 
   Future<void> deleteElement(String elementId) async {
+    final existing = await (_db.select(_db.canvasElements)
+          ..where((e) => e.id.equals(elementId)))
+        .getSingleOrNull();
     final now = DateTime.now();
     await (_db.update(
       _db.canvasElements,
@@ -284,6 +290,14 @@ class ElementRepository {
         dirty: const Value(true),
       ),
     );
+    if (existing != null) await touchPageForSync(_db, existing.pageId);
+  }
+
+  Future<void> _touchByElement(String elementId) async {
+    final row = await (_db.select(_db.canvasElements)
+          ..where((e) => e.id.equals(elementId)))
+        .getSingleOrNull();
+    if (row != null) await touchPageForSync(_db, row.pageId);
   }
 
   Future<ui.Size> _decodeSize(Uint8List bytes) async {

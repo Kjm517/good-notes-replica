@@ -14,6 +14,12 @@ enum SyncPhase {
   /// Local changes are waiting for connectivity or the next run.
   pending,
 
+  /// Signed in, but Wi-Fi and mobile data are both off.
+  offline,
+
+  /// The user paused account sync from the cloud menu.
+  paused,
+
   /// The last attempt failed; [SyncStatus.message] says why.
   error,
 }
@@ -43,6 +49,8 @@ class SyncStatus {
         SyncPhase.syncing => 'Syncing…',
         SyncPhase.pending =>
           pendingChanges > 0 ? '$pendingChanges pending' : 'Pending',
+        SyncPhase.offline => 'Offline',
+        SyncPhase.paused => 'Sync paused',
         SyncPhase.error => 'Sync error',
       };
 

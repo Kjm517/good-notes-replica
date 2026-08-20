@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:notably/core/sync/sync_fields.dart';
+import 'package:notably/core/sync/sync_state.dart';
 
 void main() {
   group('remoteWins (last-write-wins with tombstones)', () {
@@ -62,5 +63,12 @@ void main() {
         isFalse,
       );
     });
+  });
+
+  test('SyncStatus labels cover offline and paused', () {
+    expect(const SyncStatus(phase: SyncPhase.offline).label, 'Offline');
+    expect(const SyncStatus(phase: SyncPhase.paused).label, 'Sync paused');
+    expect(const SyncStatus(phase: SyncPhase.syncing).isBusy, isTrue);
+    expect(const SyncStatus(phase: SyncPhase.offline).isBusy, isFalse);
   });
 }

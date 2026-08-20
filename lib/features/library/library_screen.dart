@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../app/design.dart';
+import '../../app/page_routes.dart';
 import '../../core/db/database.dart';
 import '../../core/models/enums.dart';
 import '../sync/sync_indicator.dart';
@@ -218,7 +219,7 @@ class _DesktopHeader extends ConsumerWidget {
           children: [
             if (parentId != null) ...[
               IconButton(
-                icon: const Icon(Icons.arrow_back_rounded),
+                icon: Icon(notablyBackIcon),
                 tooltip: 'Back',
                 onPressed: () => context.pop(),
               ),
@@ -289,7 +290,7 @@ class _MobileHeader extends ConsumerWidget {
                 children: [
                   if (inFolder)
                     IconButton(
-                      icon: const Icon(Icons.arrow_back_rounded),
+                      icon: Icon(notablyBackIcon),
                       onPressed: () => context.pop(),
                     ),
                   Expanded(
@@ -1203,7 +1204,7 @@ class _LibrarySearchDelegate extends SearchDelegate<void> {
 
   @override
   Widget buildLeading(BuildContext context) => IconButton(
-    icon: const Icon(Icons.arrow_back),
+    icon: Icon(notablyBackIcon),
     onPressed: () => close(context, null),
   );
 

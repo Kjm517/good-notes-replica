@@ -10,6 +10,7 @@ import '../features/library/library_screen.dart';
 import '../features/library/trash_screen.dart';
 import '../features/settings/settings_screen.dart';
 import 'firebase_bootstrap.dart';
+import 'page_routes.dart';
 
 /// Top-level app routing, including the auth gate that keeps an
 /// unauthenticated user on the sign-in screen when Firebase is configured.
@@ -56,29 +57,46 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: '/sign-in',
-        builder: (context, state) => const SignInScreen(),
+        pageBuilder: (context, state) => notablyPage(
+          key: state.pageKey,
+          fullscreenDialog: true,
+          child: const SignInScreen(),
+        ),
       ),
       GoRoute(
         path: '/',
-        builder: (context, state) => const LibraryScreen(parentId: null),
+        pageBuilder: (context, state) => notablyPage(
+          key: state.pageKey,
+          child: const LibraryScreen(parentId: null),
+        ),
       ),
       GoRoute(
         path: '/folder/:id',
-        builder: (context, state) =>
-            LibraryScreen(parentId: state.pathParameters['id']),
+        pageBuilder: (context, state) => notablyPage(
+          key: state.pageKey,
+          child: LibraryScreen(parentId: state.pathParameters['id']),
+        ),
       ),
       GoRoute(
         path: '/doc/:id',
-        builder: (context, state) =>
-            EditorScreen(documentId: state.pathParameters['id']!),
+        pageBuilder: (context, state) => notablyPage(
+          key: state.pageKey,
+          child: EditorScreen(documentId: state.pathParameters['id']!),
+        ),
       ),
       GoRoute(
         path: '/trash',
-        builder: (context, state) => const TrashScreen(),
+        pageBuilder: (context, state) => notablyPage(
+          key: state.pageKey,
+          child: const TrashScreen(),
+        ),
       ),
       GoRoute(
         path: '/settings',
-        builder: (context, state) => const SettingsScreen(),
+        pageBuilder: (context, state) => notablyPage(
+          key: state.pageKey,
+          child: const SettingsScreen(),
+        ),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

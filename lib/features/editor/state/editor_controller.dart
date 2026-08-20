@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show Offset;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/sync/sync_providers.dart';
+import '../../../core/sync/sync_state.dart';
 import '../../../core/db/database.dart';
 import '../../../core/ink/ink_stroke.dart';
 import '../../../core/models/enums.dart';
@@ -43,6 +45,12 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     _pages = ref.read(pageRepositoryProvider);
     _strokes = ref.read(strokeRepositoryProvider);
     _uuid = ref.read(uuidProvider);
+    ref.listen(syncStatusProvider, (previous, next) {
+      if (previous?.phase == SyncPhase.syncing &&
+          next.phase != SyncPhase.syncing) {
+        unawaited(_reloadStrokesFromDb());
+      }
+    });
     _bootstrap(documentId);
     return EditorState(toolSettings: defaultToolSettings());
   }
@@ -70,6 +78,22 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     } finally {
       _loading.remove(pageId);
     }
+  }
+
+  /// Sync writes strokes into SQLite; the canvas paints from this in-memory
+  /// map, which is filled once per page. Reload after a pull so ink that
+  /// arrived while the editor was open actually shows up.
+  Future<void> _reloadStrokesFromDb() async {
+    final ids = state.strokesByPage.keys.toList();
+    if (ids.isEmpty) return;
+    final next = Map<String, List<InkStroke>>.from(state.strokesByPage);
+    for (final pageId in ids) {
+      final strokes = await _strokes.getStrokes(pageId);
+      _seqByPage[pageId] =
+          strokes.fold<int>(0, (m, s) => s.seq > m ? s.seq : m);
+      next[pageId] = strokes;
+    }
+    state = state.copyWith(strokesByPage: next);
   }
 
   /// Called when the pages list changes (add/delete/reorder).

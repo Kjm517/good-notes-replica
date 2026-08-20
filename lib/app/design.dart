@@ -26,6 +26,10 @@ class AppTokens extends ThemeExtension<AppTokens> {
     required this.textFaint,
     required this.pdfBadge,
     required this.star,
+    required this.premium,
+    required this.premiumText,
+    required this.premiumSoft,
+    required this.premiumOn,
     required this.shadow,
   });
 
@@ -66,6 +70,18 @@ class AppTokens extends ThemeExtension<AppTokens> {
   final Color pdfBadge;
   final Color star;
 
+  /// Gold used only on premium surfaces (quiz). The rest of the app stays indigo.
+  final Color premium;
+
+  /// Gold tuned for icons and labels on chrome (toolbar quiz glyph).
+  final Color premiumText;
+
+  /// Soft gold wash behind premium chips and selected length cards.
+  final Color premiumSoft;
+
+  /// Text/icons sitting on a [premium] fill.
+  final Color premiumOn;
+
   /// Base colour for the large soft drop shadows under cards and sheets.
   final Color shadow;
 
@@ -85,6 +101,10 @@ class AppTokens extends ThemeExtension<AppTokens> {
     textFaint: Color(0xFFA8ACBA),
     pdfBadge: Color(0xFFE0574F),
     star: Color(0xFFE7B34C),
+    premium: Color(0xFFD9A94E),
+    premiumText: Color(0xFF8A6A1B),
+    premiumSoft: Color(0xFFF8EFDA),
+    premiumOn: Color(0xFF3A2C07),
     shadow: Color(0xFF141632),
   );
 
@@ -104,6 +124,10 @@ class AppTokens extends ThemeExtension<AppTokens> {
     textFaint: Color(0xFF7B8090),
     pdfBadge: Color(0xFFE0574F),
     star: Color(0xFFE7B34C),
+    premium: Color(0xFFD9A94E),
+    premiumText: Color(0xFFE8C56A),
+    premiumSoft: Color(0xFF2A2416),
+    premiumOn: Color(0xFF3A2C07),
     shadow: Color(0xFF05060C),
   );
 
@@ -168,6 +192,10 @@ class AppTokens extends ThemeExtension<AppTokens> {
     Color? textFaint,
     Color? pdfBadge,
     Color? star,
+    Color? premium,
+    Color? premiumText,
+    Color? premiumSoft,
+    Color? premiumOn,
     Color? shadow,
   }) {
     return AppTokens(
@@ -186,6 +214,10 @@ class AppTokens extends ThemeExtension<AppTokens> {
       textFaint: textFaint ?? this.textFaint,
       pdfBadge: pdfBadge ?? this.pdfBadge,
       star: star ?? this.star,
+      premium: premium ?? this.premium,
+      premiumText: premiumText ?? this.premiumText,
+      premiumSoft: premiumSoft ?? this.premiumSoft,
+      premiumOn: premiumOn ?? this.premiumOn,
       shadow: shadow ?? this.shadow,
     );
   }
@@ -210,6 +242,10 @@ class AppTokens extends ThemeExtension<AppTokens> {
       textFaint: c(textFaint, other.textFaint),
       pdfBadge: c(pdfBadge, other.pdfBadge),
       star: c(star, other.star),
+      premium: c(premium, other.premium),
+      premiumText: c(premiumText, other.premiumText),
+      premiumSoft: c(premiumSoft, other.premiumSoft),
+      premiumOn: c(premiumOn, other.premiumOn),
       shadow: c(shadow, other.shadow),
     );
   }

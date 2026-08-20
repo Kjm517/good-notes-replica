@@ -1,12 +1,16 @@
 import 'dart:async';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 
 import '../db/database.dart';
 import '../ink/ink_page_codec.dart';
 import '../models/enums.dart';
+import '../models/image_element.dart';
 import '../models/margin_spec.dart';
+import '../network/network_status.dart';
+import '../storage/asset_store.dart';
 import 'file_sync.dart';
 import 'remote_store.dart';
 import 'sync_fields.dart';
@@ -28,9 +32,11 @@ class SyncEngine {
     required this.uid,
     FileSync? files,
     this.onStatus,
+    Future<bool> Function()? isOnline,
   })  : _db = db,
         _remote = remote,
-        _files = files;
+        _files = files,
+        _isOnline = isOnline;
 
   /// Account this engine syncs for. Pulled documents are tagged with it so
   /// they stay hidden from other accounts on the same device.
@@ -43,11 +49,15 @@ class SyncEngine {
   /// the big files stay on this device.
   final FileSync? _files;
   final void Function(SyncStatus status)? onStatus;
+  final Future<bool> Function()? _isOnline;
 
   DateTime? _lastSyncedAt;
   bool _running = false;
+  bool _paused = false;
   Timer? _debounce;
   StreamSubscription<void>? _watch;
+  StreamSubscription<void>? _remoteWatch;
+  StreamSubscription<List<ConnectivityResult>>? _net;
 
   /// True if something changed while a sync was already running, so the run
   /// that follows doesn't miss it.
@@ -55,7 +65,7 @@ class SyncEngine {
 
   /// How long to wait after the last change before syncing. Long enough that a
   /// burst of strokes becomes one upload, short enough to feel automatic.
-  static const Duration _quietPeriod = Duration(milliseconds: 1200);
+  static const Duration _quietPeriod = Duration(milliseconds: 500);
 
   /// Watches the database and syncs after any change, so callers never have to
   /// remember to trigger it.
@@ -79,10 +89,74 @@ class SyncEngine {
       }
       scheduleSync();
     });
+    // Another device's import never touches *this* SQLite, so local table
+    // watches alone leave the library empty until resume or a manual tap.
+    _remoteWatch ??= _remote.watchChanges().listen((_) {
+      if (_running) {
+        _missedUpdate = true;
+        return;
+      }
+      scheduleSync(delay: const Duration(milliseconds: 400));
+    });
+    _net ??= Connectivity().onConnectivityChanged.listen(_onConnectivity);
+    unawaited(_refreshConnectivity());
+  }
+
+  Future<bool> _online() async {
+    final check = _isOnline;
+    if (check != null) return check();
+    return true;
+  }
+
+  SyncStatus get _offlineStatus => SyncStatus(
+        phase: SyncPhase.offline,
+        message: kNoWifiOrMobileData,
+        lastSyncedAt: _lastSyncedAt,
+      );
+
+  SyncStatus get _pausedStatus => SyncStatus(
+        phase: SyncPhase.paused,
+        lastSyncedAt: _lastSyncedAt,
+      );
+
+  void _onConnectivity(List<ConnectivityResult> results) {
+    unawaited(_applyOnline(hasNetworkInterface(results)));
+  }
+
+  Future<void> _refreshConnectivity() async {
+    await _applyOnline(await _online());
+  }
+
+  Future<void> _applyOnline(bool online) async {
+    if (_paused) return;
+    if (online) {
+      if (_running) {
+        _missedUpdate = true;
+        return;
+      }
+      scheduleSync(delay: const Duration(milliseconds: 400));
+      return;
+    }
+    _debounce?.cancel();
+    if (!_running) _emit(_offlineStatus);
+  }
+
+  /// Stops automatic and manual sync until [resume].
+  void pause() {
+    _paused = true;
+    _debounce?.cancel();
+    _emit(_pausedStatus);
+  }
+
+  /// Turns auto-sync back on and runs when the network is up.
+  void resume() {
+    _paused = false;
+    unawaited(_refreshConnectivity());
   }
 
   /// Coalesces bursts of edits into one sync run.
   void scheduleSync({Duration? delay}) {
+    if (_paused) return;
     _debounce?.cancel();
     _debounce = Timer(delay ?? _quietPeriod, () => unawaited(syncNow()));
   }
@@ -90,33 +164,56 @@ class SyncEngine {
   void dispose() {
     _debounce?.cancel();
     unawaited(_watch?.cancel());
+    unawaited(_remoteWatch?.cancel());
+    unawaited(_net?.cancel());
   }
 
   /// Runs a full push + pull. Safe to call repeatedly; overlapping calls are
   /// ignored rather than queued.
   Future<void> syncNow() async {
     if (_running) return;
+    if (_paused) {
+      _emit(_pausedStatus);
+      return;
+    }
+    if (!await _online()) {
+      _emit(_offlineStatus);
+      return;
+    }
     _running = true;
     _emit(const SyncStatus(phase: SyncPhase.syncing));
+    // Stamp the cursor *before* talking to the cloud. Stamping afterwards
+    // skips anything that landed during a long pull — the other device's
+    // PDF import is the usual casualty.
+    final startedAt = DateTime.now();
     try {
       await _push();
       await _pull();
-      _lastSyncedAt = DateTime.now();
+      _lastSyncedAt = startedAt;
       _emit(SyncStatus(
         phase: SyncPhase.idle,
         lastSyncedAt: _lastSyncedAt,
       ));
     } catch (e) {
       debugPrint('Sync failed: $e');
-      _emit(SyncStatus(
-        phase: SyncPhase.error,
-        message: '$e',
-        lastSyncedAt: _lastSyncedAt,
-      ));
+      final online = await _online();
+      if (!online || isNetworkError(e)) {
+        _emit(_offlineStatus);
+      } else {
+        _emit(SyncStatus(
+          phase: SyncPhase.error,
+          message: '$e',
+          lastSyncedAt: _lastSyncedAt,
+        ));
+        scheduleSync(delay: const Duration(seconds: 8));
+      }
     } finally {
       _running = false;
-      // Edits made mid-run were skipped above; pick them up now.
-      if (_missedUpdate) {
+      if (_paused) {
+        _emit(_pausedStatus);
+      } else if (!await _online()) {
+        _emit(_offlineStatus);
+      } else if (_missedUpdate) {
         _missedUpdate = false;
         scheduleSync();
       }
@@ -128,43 +225,60 @@ class SyncEngine {
   // ---- Push ----------------------------------------------------------------
 
   Future<void> _push() async {
+    await _claimUnownedDocuments();
     await _pushDocuments();
     await _pushPages();
+    // Bytes and asset metadata first so a pulled image/sticker already has a
+    // remoteKey by the time its canvas element lands on the other device.
+    await _pushAssets();
     await _pushElements();
     await _pushInk();
-    await _pushAssets();
+  }
+
+  /// Notes created before sign-in (or during the auth-restore splash) have a
+  /// null [Documents.ownerUid] and would otherwise never leave this device —
+  /// [_pushDocuments] only uploads rows owned by [uid].
+  Future<void> _claimUnownedDocuments() async {
+    await (_db.update(_db.documents)..where((d) => d.ownerUid.isNull())).write(
+      DocumentsCompanion(
+        ownerUid: Value(uid),
+        dirty: const Value(true),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
   }
 
   /// Records assets in the cloud and uploads any bytes not there yet.
   Future<void> _pushAssets() async {
+    // Bytes first so the metadata upsert includes remoteKey. The previous
+    // order wrote remoteKey locally *after* clearing dirty, so Firestore kept
+    // a null key and the other device had nothing to download.
+    await _files?.uploadPending();
+
     final rows =
         await (_db.select(_db.assets)..where((a) => a.dirty.equals(true)))
             .get();
-    if (rows.isNotEmpty) {
-      await _remote.upsert(
-        RemoteCollection.assets,
-        [
-          for (final a in rows)
-            RemoteRecord(
-              id: a.id,
-              updatedAt: a.updatedAt,
-              deletedAt: a.deletedAt,
-              data: {
-                'kind': a.kind,
-                'path': a.path,
-                'mime': a.mime,
-                'sha256': a.sha256,
-                'sizeBytes': a.sizeBytes,
-                'remoteKey': a.remoteKey,
-              },
-            ),
-        ],
-      );
-      await _clearDirty(_db.assets, rows.map((a) => a.id));
-    }
-    // Upload bytes after the metadata, so a failed upload still leaves a
-    // record the next run can retry.
-    await _files?.uploadPending();
+    if (rows.isEmpty) return;
+    await _remote.upsert(
+      RemoteCollection.assets,
+      [
+        for (final a in rows)
+          RemoteRecord(
+            id: a.id,
+            updatedAt: a.updatedAt,
+            deletedAt: a.deletedAt,
+            data: {
+              'kind': a.kind,
+              'path': a.path,
+              'mime': a.mime,
+              'sha256': a.sha256,
+              'sizeBytes': a.sizeBytes,
+              'remoteKey': a.remoteKey,
+            },
+          ),
+      ],
+    );
+    await _clearDirty(_db.assets, rows.map((a) => a.id));
   }
 
   Future<void> _pushDocuments() async {
@@ -285,15 +399,21 @@ class SyncEngine {
     if (dirtyStrokes.isEmpty) return;
 
     final pageIds = dirtyStrokes.map((s) => s.pageId).toSet();
+    final uploadedIds = <String>{};
     for (final pageId in pageIds) {
       final strokes = await (_db.select(_db.strokes)
             ..where((s) => s.pageId.equals(pageId) & s.deletedAt.isNull())
             ..orderBy([(s) => OrderingTerm.asc(s.seq)]))
           .get();
       final blob = encodeInkPage(strokes);
-      await _remote.putInk(pageId, blob, DateTime.now());
+      final ok = await _remote.putInk(pageId, blob, DateTime.now());
+      if (ok) {
+        uploadedIds.addAll(
+          dirtyStrokes.where((s) => s.pageId == pageId).map((s) => s.id),
+        );
+      }
     }
-    await _clearDirty(_db.strokes, dirtyStrokes.map((s) => s.id));
+    await _clearDirty(_db.strokes, uploadedIds);
   }
 
   Future<void> _clearDirty(TableInfo table, Iterable<String> ids) async {
@@ -314,8 +434,12 @@ class SyncEngine {
   // ---- Pull ----------------------------------------------------------------
 
   Future<void> _pull() async {
-    final since = _lastSyncedAt;
+    // Inclusive overlap: the cursor is a live DateTime while SQLite stores
+    // milliseconds, so a strict "after last sync" misses edits from the same
+    // tick — drawings and stickers added right after a sync are the usual miss.
+    final since = _lastSyncedAt?.subtract(const Duration(seconds: 2));
     await _pullDocuments(since);
+    await _pullElements(since: since);
   }
 
   Future<void> _pullDocuments(DateTime? since) async {
@@ -333,7 +457,14 @@ class SyncEngine {
             remoteUpdatedAt: record.updatedAt,
             remoteDeletedAt: record.deletedAt,
           )) {
-        continue; // local copy is newer
+        // The notebook row itself lost last-write-wins (title, cover, …) but
+        // drawings and stickers live on pages — still walk children.
+        final pageCount = await _livePageCount(record.id);
+        await _pullPages(
+          record.id,
+          pageCount == 0 ? null : since,
+        );
+        continue;
       }
 
       // A thumb absent from the payload leaves the column alone rather than
@@ -366,9 +497,27 @@ class SyncEngine {
       );
       await _db.into(_db.documents).insertOnConflictUpdate(companion);
 
-      // Pull that document's pages and ink.
-      await _pullPages(record.id, since);
+      // A document this device has never seen (or one whose pages never
+      // arrived) must fetch the full page list. Incremental `since` skips
+      // pages older than the last cursor — that's how a PDF card can land
+      // with no pages, or never land if we only look at changed documents
+      // after a gapped cursor.
+      final pageCount = await _livePageCount(record.id);
+      await _pullPages(
+        record.id,
+        local == null || pageCount == 0 ? null : since,
+      );
     }
+  }
+
+  Future<int> _livePageCount(String documentId) async {
+    final count = _db.notePages.id.count();
+    final query = _db.selectOnly(_db.notePages)
+      ..addColumns([count])
+      ..where(_db.notePages.documentId.equals(documentId) &
+          _db.notePages.deletedAt.isNull());
+    final row = await query.getSingle();
+    return row.read(count) ?? 0;
   }
 
   Future<void> _pullPages(String documentId, DateTime? since) async {
@@ -389,6 +538,17 @@ class SyncEngine {
             remoteUpdatedAt: record.updatedAt,
             remoteDeletedAt: record.deletedAt,
           )) {
+        if (!record.isDeleted) {
+          await _pullInk(record.id);
+          final skippedPdf = record.data['pdfAssetId'] as String?;
+          final skippedBg = record.data['bgAssetId'] as String?;
+          if (skippedPdf != null && ensuredAssets.add(skippedPdf)) {
+            await _ensureAsset(skippedPdf);
+          }
+          if (skippedBg != null && ensuredAssets.add(skippedBg)) {
+            await _ensureAsset(skippedBg);
+          }
+        }
         continue;
       }
 
@@ -432,6 +592,76 @@ class SyncEngine {
     }
   }
 
+  /// Hydrates canvas objects (images, text, stickers). Pushed for years;
+  /// never pulled — so a photo added on the phone never appeared elsewhere.
+  Future<void> _pullElements({DateTime? since, String? pageId}) async {
+    final records = await _remote.fetchChanged(
+      RemoteCollection.elements,
+      since: since,
+      parentId: pageId,
+    );
+    for (final record in records) {
+      final local = await (_db.select(_db.canvasElements)
+            ..where((e) => e.id.equals(record.id)))
+          .getSingleOrNull();
+      if (local != null &&
+          !remoteWins(
+            localUpdatedAt: local.updatedAt,
+            remoteUpdatedAt: record.updatedAt,
+            remoteDeletedAt: record.deletedAt,
+          )) {
+        if (!record.isDeleted) await _ensureElementAsset(record);
+        continue;
+      }
+
+      final resolvedPageId =
+          record.data['pageId'] as String? ?? pageId ?? local?.pageId;
+      if (resolvedPageId == null) continue;
+
+      // Bytes before the row so the first canvas paint is not an empty frame.
+      if (!record.isDeleted) await _ensureElementAsset(record);
+
+      try {
+        await _db.into(_db.canvasElements).insertOnConflictUpdate(
+              CanvasElementsCompanion.insert(
+                id: record.id,
+                pageId: resolvedPageId,
+                type: _enumAt(ElementType.values,
+                    (record.data['type'] as num?)?.toInt() ?? 0),
+                data: record.data['data'] as String? ?? '{}',
+                x: Value((record.data['x'] as num?)?.toDouble() ?? 0),
+                y: Value((record.data['y'] as num?)?.toDouble() ?? 0),
+                width: Value((record.data['width'] as num?)?.toDouble() ?? 100),
+                height: Value((record.data['height'] as num?)?.toDouble() ?? 40),
+                scale: Value((record.data['scale'] as num?)?.toDouble() ?? 1),
+                rotation:
+                    Value((record.data['rotation'] as num?)?.toDouble() ?? 0),
+                z: Value((record.data['z'] as num?)?.toInt() ?? 0),
+                updatedAt: Value(record.updatedAt),
+                deletedAt: Value(record.deletedAt),
+                dirty: const Value(false),
+                remoteUpdatedAt: Value(record.updatedAt),
+              ),
+            );
+      } catch (e) {
+        // Page row may not have landed yet; the next run retries.
+        debugPrint('Skip element ${record.id}: $e');
+        continue;
+      }
+    }
+  }
+
+  Future<void> _ensureElementAsset(RemoteRecord record) async {
+    final typeIndex = (record.data['type'] as num?)?.toInt() ?? 0;
+    if (typeIndex != ElementType.image.index) return;
+    final raw = record.data['data'] as String?;
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final assetId = ImageElementData.fromJson(raw).assetId;
+      if (assetId.isNotEmpty) await _ensureAsset(assetId);
+    } catch (_) {}
+  }
+
   /// Hydrates an asset row from the cloud and downloads its bytes when R2 is
   /// configured. Safe to call repeatedly — already-local content is a no-op.
   Future<void> _ensureAsset(String assetId) async {
@@ -439,8 +669,10 @@ class SyncEngine {
           ..where((a) => a.id.equals(assetId)))
         .getSingleOrNull();
     final hasBytes = local != null &&
-        (local.localPath != null ||
-            (local.data != null && local.data!.isNotEmpty));
+        await assetExists(
+          localPath: local.localPath,
+          hasInlineData: local.data != null && local.data!.isNotEmpty,
+        );
     if (hasBytes) return;
 
     if (local == null || local.remoteKey == null) {
@@ -481,6 +713,21 @@ class SyncEngine {
         if (p.bgAssetId != null) p.bgAssetId!,
       ],
     };
+    final pageIds = [for (final p in pages) p.id];
+    if (pageIds.isNotEmpty) {
+      final elements = await (_db.select(_db.canvasElements)
+            ..where((e) =>
+                e.pageId.isIn(pageIds) &
+                e.deletedAt.isNull() &
+                e.type.equals(ElementType.image.index)))
+          .get();
+      for (final element in elements) {
+        try {
+          final assetId = ImageElementData.fromJson(element.data).assetId;
+          if (assetId.isNotEmpty) ids.add(assetId);
+        } catch (_) {}
+      }
+    }
     for (final id in ids) {
       await _ensureAsset(id);
     }
@@ -489,6 +736,12 @@ class SyncEngine {
   /// Replaces a page's strokes with the cloud copy. Whole-page granularity is
   /// deliberate: it matches how ink is pushed.
   Future<void> _pullInk(String pageId) async {
+    final dirty = await (_db.select(_db.strokes)
+          ..where((s) => s.pageId.equals(pageId) & s.dirty.equals(true))
+          ..limit(1))
+        .get();
+    if (dirty.isNotEmpty) return;
+
     final blob = await _remote.fetchInk(pageId);
     if (blob == null || blob.isEmpty) return;
     final strokes = decodeInkPage(blob);
@@ -526,6 +779,9 @@ class SyncEngine {
   DateTime? _millis(Object? value) => value is num
       ? DateTime.fromMillisecondsSinceEpoch(value.toInt())
       : null;
+
+  T _enumAt<T>(List<T> values, int index) =>
+      values[index.clamp(0, values.length - 1)];
 
   MarginSpec _margins(Object? value) {
     if (value is String && value.isNotEmpty) {

@@ -49,7 +49,9 @@ abstract class RemoteStore {
   /// bills per write.
   Future<Uint8List?> fetchInk(String pageId);
 
-  Future<void> putInk(String pageId, Uint8List bytes, DateTime updatedAt);
+  /// Returns false when the blob was not stored (e.g. over Firestore's size
+  /// cap) so the engine can leave the local strokes dirty and retry.
+  Future<bool> putInk(String pageId, Uint8List bytes, DateTime updatedAt);
 
   /// A single record by id, or null if it doesn't exist. Used to hydrate asset
   /// metadata when a pulled page points at a PDF that this device has never
@@ -59,4 +61,10 @@ abstract class RemoteStore {
     String id, {
     String? parentId,
   });
+
+  /// Fires when another device may have changed this account's library.
+  ///
+  /// The local engine listens so a tablet picks up a phone import without
+  /// waiting for a resume, a tap on the cloud icon, or a local edit.
+  Stream<void> watchChanges() => const Stream<void>.empty();
 }

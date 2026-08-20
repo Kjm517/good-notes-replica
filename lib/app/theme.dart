@@ -87,6 +87,13 @@ class AppTheme {
       canvasColor: t.surface,
       dividerColor: t.line,
       hintColor: t.textMuted,
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+        },
+      ),
       dividerTheme: DividerThemeData(color: t.line, thickness: 1, space: 1),
       cardTheme: CardThemeData(
         elevation: 0,

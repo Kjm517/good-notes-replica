@@ -9,6 +9,8 @@ import '../../../core/models/enums.dart';
 import '../../../core/models/outline_entry.dart';
 import '../../../core/storage/asset_store.dart';
 import '../../library/data/asset_repository.dart';
+import 'native_pdf_text.dart';
+import 'outline_heading_detector.dart';
 
 /// One hit from "find in document".
 class SearchHit {
@@ -41,8 +43,17 @@ class DocumentTextService {
   final AppDatabase _db;
   final AssetRepository _assets;
 
-  /// Documents currently being indexed, so two callers don't duplicate work.
-  final Set<String> _indexing = {};
+  /// In-flight text jobs, chained per document so a quiz extract and Find
+  /// don't parse the same PDF at once — and a second caller waits instead of
+  /// assuming the first run finished.
+  final Map<String, Future<void>> _indexJobs = {};
+
+  /// In-flight outline jobs, so editor-open and Find don't parse the PDF twice.
+  final Map<String, Future<void>> _outlineJobs = {};
+
+  /// Empty outlines cached before native file extract existed. Retry once
+  /// per process so a 150 MB textbook can still get its bookmarks.
+  final Set<String> _outlineNativeRetry = {};
 
   /// True once every page of [documentId] has been through extraction.
   Future<bool> isIndexed(String documentId) async {
@@ -59,25 +70,49 @@ class DocumentTextService {
     return pending.isEmpty;
   }
 
-  /// Extracts text for every page that doesn't have it yet.
+  /// Extracts text for pages that don't have it yet.
   ///
-  /// [onProgress] reports 0..1. Safe to call repeatedly; already-indexed pages
-  /// are skipped, so an interrupted run resumes where it left off.
+  /// [pageIndices] limits the pass to those note-page indexes (quiz only
+  /// needs a sample). [onProgress] reports 0..1. Safe to call repeatedly;
+  /// already-indexed pages are skipped, so an interrupted run resumes.
   Future<void> index(
     String documentId, {
     void Function(double progress)? onProgress,
-  }) async {
-    if (_indexing.contains(documentId)) return;
-    _indexing.add(documentId);
-    try {
-      final doc = await (_db.select(
-        _db.documents,
-      )..where((d) => d.id.equals(documentId))).getSingleOrNull();
-      // The outline is extracted the first time only: null means "never tried".
-      final needsOutline =
-          doc != null && doc.type == DocumentType.pdf && doc.outline == null;
+    Set<int>? pageIndices,
+  }) {
+    final previous = _indexJobs[documentId];
+    late final Future<void> job;
+    job = () async {
+      if (previous != null) {
+        try {
+          await previous;
+        } catch (_) {}
+      }
+      await _indexBody(
+        documentId,
+        onProgress: onProgress,
+        pageIndices: pageIndices,
+      );
+    }();
+    _indexJobs[documentId] = job;
+    return job.whenComplete(() {
+      if (identical(_indexJobs[documentId], job)) {
+        _indexJobs.remove(documentId);
+      }
+    });
+  }
 
-      final pages =
+  Future<void> _indexBody(
+    String documentId, {
+    void Function(double progress)? onProgress,
+    Set<int>? pageIndices,
+  }) async {
+    try {
+      // Bookmarks (and heading fallback) must not wait on a 943-page text
+      // pass — the sidebar needs the TOC as soon as the file is open.
+      await ensureOutline(documentId);
+
+      var pages =
           await (_db.select(_db.notePages)
                 ..where(
                   (p) =>
@@ -87,39 +122,49 @@ class DocumentTextService {
                 )
                 ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)]))
               .get();
-      if (pages.isEmpty && !needsOutline) return;
+      if (pageIndices != null) {
+        pages = [
+          for (final page in pages)
+            if (pageIndices.contains(page.pageIndex)) page,
+        ];
+      }
+      if (pages.isEmpty) return;
 
-      // Any PDF-backed page tells us which asset to open; when text is already
-      // indexed we still need one to reach the file for the outline.
-      final assetId = pages.isNotEmpty
-          ? pages.first.pdfAssetId
-          : (await (_db.select(_db.notePages)
-                      ..where(
-                        (p) =>
-                            p.documentId.equals(documentId) &
-                            p.pdfAssetId.isNotNull(),
-                      )
-                      ..limit(1))
-                    .getSingleOrNull())
-                ?.pdfAssetId;
+      // Any PDF-backed page tells us which asset to open.
+      final assetId = pages.first.pdfAssetId;
       if (assetId == null) {
         // Image-only document: nothing to extract, but mark it done so we
         // don't try again on every search.
-        if (pages.isNotEmpty) await _markEmpty(pages);
-        if (needsOutline) await _storeOutline(documentId, const []);
+        await _markEmpty(pages);
         return;
       }
 
-      // The extractor only accepts a whole document in memory, and parsing it
+      final path = await _assets.localPathOf(assetId);
+      if (NativePdfText.isSupported && path != null) {
+        final session = await NativePdfText.open(path);
+        if (session != null) {
+          try {
+            await _extractPages(
+              pages,
+              onProgress: onProgress,
+              read: session.extractPage,
+            );
+            return;
+          } finally {
+            await session.close();
+          }
+        }
+      }
+
+      // Syncfusion only accepts a whole document in memory, and parsing it
       // costs several times the file on top. Past a certain size that is more
       // than the platform allows, and the process is killed with no error —
-      // so a very large PDF stays unindexed and Find falls back to page
-      // numbers rather than taking the app down with it.
+      // so a very large PDF stays unindexed rather than taking the app down.
       final size = await _assets.sizeOf(assetId);
       if (size != null && size > kMaxInMemoryAssetBytes) {
         debugPrint(
-          'Skipping text extraction for $documentId: '
-          '${(size / 1e6).round()} MB exceeds the in-memory limit',
+          'Skipping in-memory text extraction for $documentId: '
+          '${(size / 1e6).round()} MB exceeds the Dart heap limit',
         );
         return;
       }
@@ -130,46 +175,207 @@ class DocumentTextService {
       final document = sf.PdfDocument(inputBytes: bytes);
       final extractor = sf.PdfTextExtractor(document);
       try {
-        if (needsOutline) {
-          await _storeOutline(documentId, _readOutline(document));
-        }
-        for (var i = 0; i < pages.length; i++) {
-          final page = pages[i];
-          final pdfIndex = page.pdfPageIndex;
-          if (pdfIndex == null) continue;
-          String text;
-          try {
-            text = extractor.extractText(
-              startPageIndex: pdfIndex,
-              endPageIndex: pdfIndex,
-            );
-          } catch (_) {
-            text = '';
-          }
-          await (_db.update(
-            _db.notePages,
-          )..where((p) => p.id.equals(page.id))).write(
-            NotePagesCompanion(
-              searchText: Value(text.toLowerCase()),
-              // Extraction is a derived cache, not user content — don't dirty
-              // the row or every page would be re-uploaded to the cloud.
-              dirty: const Value(false),
-            ),
-          );
-          if (i % 10 == 0 || i == pages.length - 1) {
-            onProgress?.call((i + 1) / pages.length);
-            // Let the UI breathe between chunks.
-            await Future<void>.delayed(Duration.zero);
-          }
-        }
+        await _extractPages(
+          pages,
+          onProgress: onProgress,
+          read: (pdfIndex) => extractor.extractText(
+            startPageIndex: pdfIndex,
+            endPageIndex: pdfIndex,
+          ),
+        );
       } finally {
         document.dispose();
       }
     } catch (e) {
       debugPrint('Text extraction failed for $documentId: $e');
-    } finally {
-      _indexing.remove(documentId);
     }
+  }
+
+  Future<void> _extractPages(
+    List<NotePage> pages, {
+    void Function(double progress)? onProgress,
+    required FutureOr<String> Function(int pdfPageIndex) read,
+  }) async {
+    for (var i = 0; i < pages.length; i++) {
+      final page = pages[i];
+      final pdfIndex = page.pdfPageIndex;
+      if (pdfIndex == null) continue;
+      String text;
+      try {
+        text = await read(pdfIndex);
+      } catch (_) {
+        text = '';
+      }
+      await (_db.update(
+        _db.notePages,
+      )..where((p) => p.id.equals(page.id))).write(
+        NotePagesCompanion(
+          searchText: Value(text.toLowerCase()),
+          // Extraction is a derived cache, not user content — don't dirty
+          // the row or every page would be re-uploaded to the cloud.
+          dirty: const Value(false),
+        ),
+      );
+      if (i % 4 == 0 || i == pages.length - 1) {
+        onProgress?.call((i + 1) / pages.length);
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+  }
+
+  /// True when any of [pageIndices] (or the whole document) still has no
+  /// extraction attempt stored. Distinguishes "parser skipped" from "scan".
+  Future<bool> hasUnextractedPages(
+    String documentId, {
+    Set<int>? pageIndices,
+  }) async {
+    final pages =
+        await (_db.select(_db.notePages)
+              ..where(
+                (p) =>
+                    p.documentId.equals(documentId) &
+                    p.deletedAt.isNull() &
+                    p.searchText.isNull(),
+              )
+              ..limit(pageIndices == null ? 1 : 4000))
+            .get();
+    if (pageIndices == null) return pages.isNotEmpty;
+    return pages.any((p) => pageIndices.contains(p.pageIndex));
+  }
+
+  /// Loads the PDF's table of contents (embedded bookmarks first, heading
+  /// heuristics only if there are none). Cached on [Documents.outline].
+  ///
+  /// Safe to call from the editor on open: bookmarks are a handful of catalog
+  /// objects, not a 943-page text extract. OCR is not attempted; a scanned
+  /// file with neither bookmarks nor text stores an empty list so we don't
+  /// retry. A later OCR pass can overwrite that column.
+  Future<void> ensureOutline(String documentId) {
+    return _outlineJobs.putIfAbsent(documentId, () async {
+      try {
+        await _ensureOutline(documentId);
+      } finally {
+        _outlineJobs.remove(documentId);
+      }
+    });
+  }
+
+  Future<void> _ensureOutline(String documentId) async {
+    final doc = await (_db.select(
+      _db.documents,
+    )..where((d) => d.id.equals(documentId))).getSingleOrNull();
+    if (doc == null) return;
+    if (doc.type != DocumentType.pdf) {
+      if (doc.outline == null) await _storeOutline(documentId, const []);
+      return;
+    }
+
+    final cached = OutlineEntry.decode(doc.outline);
+    if (cached.isNotEmpty) return;
+    // `[]` means we already tried. Retry with the native file parser once
+    // per process — older builds skipped 150 MB textbooks entirely.
+    if (doc.outline != null && !_outlineNativeRetry.add(documentId)) return;
+
+    final page = await (_db.select(_db.notePages)
+          ..where(
+            (p) =>
+                p.documentId.equals(documentId) & p.pdfAssetId.isNotNull(),
+          )
+          ..limit(1))
+        .getSingleOrNull();
+    final assetId = page?.pdfAssetId;
+    if (assetId == null) {
+      if (doc.outline == null) await _storeOutline(documentId, const []);
+      return;
+    }
+
+    final nativeEntries = await _outlineFromNative(assetId);
+    if (nativeEntries != null && nativeEntries.isNotEmpty) {
+      await _storeOutline(documentId, nativeEntries);
+      return;
+    }
+    if (doc.outline != null) return;
+
+    final size = await _assets.sizeOf(assetId);
+    if (size != null && size > kMaxInMemoryAssetBytes) {
+      debugPrint(
+        'Skipping in-memory outline for $documentId: '
+        '${(size / 1e6).round()} MB exceeds the Dart heap limit',
+      );
+      await _storeOutline(documentId, nativeEntries ?? const []);
+      return;
+    }
+
+    final bytes = await _assets.getBytes(assetId);
+    if (bytes == null) return;
+
+    final document = sf.PdfDocument(inputBytes: bytes);
+    try {
+      var entries = _readOutline(document);
+      if (entries.isEmpty) {
+        entries = await _headingsFromDocument(document);
+      }
+      await _storeOutline(documentId, entries);
+    } catch (e) {
+      debugPrint('Outline extract failed for $documentId: $e');
+      await _storeOutline(documentId, const []);
+    } finally {
+      document.dispose();
+    }
+  }
+
+  Future<List<OutlineEntry>?> _outlineFromNative(String assetId) async {
+    if (!NativePdfText.isSupported) return null;
+    final path = await _assets.localPathOf(assetId);
+    if (path == null) return null;
+    final session = await NativePdfText.open(path);
+    if (session == null) return null;
+    try {
+      return await session.outline();
+    } finally {
+      await session.close();
+    }
+  }
+
+  /// Heading fallback when [document.bookmarks] is empty. Yields to the
+  /// event loop every few pages so a 943-page scan doesn't freeze the UI.
+  ///
+  /// A future OCR pass belongs here: if extractTextLines returns nothing,
+  /// we currently store an empty outline rather than rasterising pages.
+  Future<List<OutlineEntry>> _headingsFromDocument(sf.PdfDocument document) async {
+    final extractor = sf.PdfTextExtractor(document);
+    final lines = <HeadingLine>[];
+    final count = document.pages.count;
+    for (var i = 0; i < count; i++) {
+      List<sf.TextLine> pageLines;
+      try {
+        pageLines = extractor.extractTextLines(
+          startPageIndex: i,
+          endPageIndex: i,
+        );
+      } catch (_) {
+        continue;
+      }
+      for (final line in pageLines) {
+        final text = line.text.trim();
+        if (text.isEmpty) continue;
+        lines.add(HeadingLine(
+          text: text,
+          pageIndex: i,
+          fontSize: line.fontSize,
+          bold: line.fontStyle.contains(sf.PdfFontStyle.bold),
+        ));
+      }
+      if (i % 4 == 0) await Future<void>.delayed(Duration.zero);
+    }
+    return [
+      for (final hit in OutlineHeadingDetector.detect(lines))
+        OutlineEntry(
+          title: hit.title,
+          pageIndex: hit.pageIndex,
+          depth: hit.depth,
+        ),
+    ];
   }
 
   Future<void> _markEmpty(List<NotePage> pages) async {
@@ -243,6 +449,22 @@ class DocumentTextService {
     )..where((d) => d.id.equals(documentId))).write(
       DocumentsCompanion(outline: Value(OutlineEntry.encode(entries))),
     );
+  }
+
+  /// Extracted page text for quiz generation. Empty pages (scans, pictures)
+  /// are omitted; the caller should index first so [searchText] is populated.
+  Future<List<({int pageIndex, String text})>> pageTexts(String documentId) async {
+    final pages = await (_db.select(_db.notePages)
+          ..where(
+            (p) => p.documentId.equals(documentId) & p.deletedAt.isNull(),
+          )
+          ..orderBy([(p) => OrderingTerm.asc(p.pageIndex)]))
+        .get();
+    return [
+      for (final page in pages)
+        if ((page.searchText ?? '').trim().isNotEmpty)
+          (pageIndex: page.pageIndex, text: page.searchText!),
+    ];
   }
 
   /// Finds [query] across the document's extracted text.

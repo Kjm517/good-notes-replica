@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:drift/drift.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -67,7 +66,14 @@ class FileSync {
         final key = _keyFor(asset);
         await _put(key, bytes, asset.mime ?? 'application/octet-stream');
         await (_db.update(_db.assets)..where((a) => a.id.equals(asset.id)))
-            .write(AssetsCompanion(remoteKey: Value(key)));
+            .write(AssetsCompanion(
+          remoteKey: Value(key),
+          // Metadata was often pushed *before* this write, with remoteKey
+          // still null, then marked clean — other devices could never
+          // download. Keep the row dirty so the next upsert ships the key.
+          dirty: const Value(true),
+          updatedAt: Value(DateTime.now()),
+        ));
         onProgress?.call(asset.id, 1);
       } catch (e) {
         debugPrint('Upload failed for ${asset.id}: $e');

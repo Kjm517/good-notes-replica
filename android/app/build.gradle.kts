@@ -45,3 +45,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // File-backed text extract for textbooks too large to parse in Dart.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+}

@@ -26,6 +26,7 @@ EditorTopBar _bar(EditorBarLayout layout) {
     onOpenPageSettings: () {},
     layout: layout,
     onFind: () {},
+    onQuiz: () {},
     onBack: () {},
   );
 }

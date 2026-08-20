@@ -1,11 +1,17 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/design.dart';
 import '../../app/firebase_bootstrap.dart';
 import '../../app/providers.dart';
+import '../../core/ai/ai_providers.dart';
 import '../auth/providers.dart';
+
+const kBugReportEmail = 'kajama517@gmail.com';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -31,6 +37,10 @@ class SettingsScreen extends ConsumerWidget {
               const SettingsSection(
                 label: 'Account',
                 children: [_AccountTile()],
+              ),
+              SettingsSection(
+                label: 'AI Features',
+                children: [_PremiumTile()],
               ),
               SettingsSection(
                 label: 'Appearance',
@@ -69,6 +79,7 @@ class SettingsScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  const _BugReportTile(),
                 ],
               ),
             ],
@@ -224,6 +235,141 @@ class _AccountTile extends ConsumerWidget {
         },
         child: const Text('Sign out'),
       ),
+    );
+  }
+}
+
+/// Premium / AI features toggle.
+///
+/// In a real app this would gate behind IAP (RevenueCat, Google Play Billing).
+/// For now it's a simple SharedPreferences flag so the quiz-from-document
+/// flow can be tested end to end.
+class _PremiumTile extends ConsumerWidget {
+  const _PremiumTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
+    final isPremium = ref.watch(isPremiumProvider);
+    final aiReady = ref.watch(aiAvailableProvider);
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: isPremium ? t.accentSoft : t.fill,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          isPremium ? Icons.auto_awesome : Icons.auto_awesome_outlined,
+          size: 21,
+          color: isPremium ? t.accentText : t.textMuted,
+        ),
+      ),
+      title: Text(
+        isPremium ? 'AI Premium' : 'Free Plan',
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(
+        aiReady
+            ? (isPremium
+                ? 'AI-powered quizzes from your documents'
+                : 'Upgrade for AI quiz generation')
+            : 'Add GEMINI_API_KEY to .env and rebuild',
+        style: TextStyle(fontSize: 12.5, color: t.textMuted),
+      ),
+      trailing: Switch.adaptive(
+        value: isPremium,
+        activeTrackColor: t.accentText,
+        onChanged: (value) async {
+          final prefs = ref.read(sharedPrefsProvider);
+          await prefs.setBool('is_premium', value);
+          // Force rebuild of the provider.
+          ref.invalidate(isPremiumProvider);
+        },
+      ),
+    );
+  }
+}
+
+class _BugReportTile extends StatelessWidget {
+  const _BugReportTile();
+
+  static String get _deviceLabel {
+    if (kIsWeb) return 'Web';
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android => 'Android',
+      TargetPlatform.iOS => 'iOS',
+      TargetPlatform.macOS => 'macOS',
+      TargetPlatform.windows => 'Windows',
+      TargetPlatform.linux => 'Linux',
+      TargetPlatform.fuchsia => 'Fuchsia',
+    };
+  }
+
+  Future<void> _report(BuildContext context) async {
+    final uri = Uri(
+      scheme: 'mailto',
+      path: kBugReportEmail,
+      query: [
+        'subject=${Uri.encodeComponent('Notably bug report')}',
+        'body=${Uri.encodeComponent(
+          'What happened?\n\n'
+          '\n'
+          'Steps to reproduce:\n'
+          '1. \n'
+          '2. \n'
+          '\n'
+          '—\n'
+          'Notably 1.0.0 · $_deviceLabel\n',
+        )}',
+      ].join('&'),
+    );
+
+    try {
+      final opened = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (opened || !context.mounted) return;
+    } catch (_) {
+      // Fall through to clipboard.
+    }
+    await Clipboard.setData(const ClipboardData(text: kBugReportEmail));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('No mail app found. Copied $kBugReportEmail'),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: t.fill,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(Icons.bug_report_outlined, size: 21, color: t.textMuted),
+      ),
+      title: const Text(
+        'Report a bug',
+        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(
+        'Email $kBugReportEmail',
+        style: TextStyle(fontSize: 12.5, color: t.textMuted),
+      ),
+      trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
+      onTap: () => _report(context),
     );
   }
 }

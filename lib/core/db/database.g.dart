@@ -4908,6 +4908,745 @@ class AssetsCompanion extends UpdateCompanion<Asset> {
   }
 }
 
+class $QuizAttemptsTable extends QuizAttempts
+    with TableInfo<$QuizAttemptsTable, QuizAttempt> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $QuizAttemptsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _documentIdMeta = const VerificationMeta(
+    'documentId',
+  );
+  @override
+  late final GeneratedColumn<String> documentId = GeneratedColumn<String>(
+    'document_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES documents (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _familyIdMeta = const VerificationMeta(
+    'familyId',
+  );
+  @override
+  late final GeneratedColumn<String> familyId = GeneratedColumn<String>(
+    'family_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceLabelMeta = const VerificationMeta(
+    'sourceLabel',
+  );
+  @override
+  late final GeneratedColumn<String> sourceLabel = GeneratedColumn<String>(
+    'source_label',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _questionCountMeta = const VerificationMeta(
+    'questionCount',
+  );
+  @override
+  late final GeneratedColumn<int> questionCount = GeneratedColumn<int>(
+    'question_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _correctCountMeta = const VerificationMeta(
+    'correctCount',
+  );
+  @override
+  late final GeneratedColumn<int> correctCount = GeneratedColumn<int>(
+    'correct_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _durationMsMeta = const VerificationMeta(
+    'durationMs',
+  );
+  @override
+  late final GeneratedColumn<int> durationMs = GeneratedColumn<int>(
+    'duration_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _questionsJsonMeta = const VerificationMeta(
+    'questionsJson',
+  );
+  @override
+  late final GeneratedColumn<String> questionsJson = GeneratedColumn<String>(
+    'questions_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _answersJsonMeta = const VerificationMeta(
+    'answersJson',
+  );
+  @override
+  late final GeneratedColumn<String> answersJson = GeneratedColumn<String>(
+    'answers_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _completedAtMeta = const VerificationMeta(
+    'completedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> completedAt = GeneratedColumn<DateTime>(
+    'completed_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _completedMeta = const VerificationMeta(
+    'completed',
+  );
+  @override
+  late final GeneratedColumn<bool> completed = GeneratedColumn<bool>(
+    'completed',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("completed" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    documentId,
+    familyId,
+    title,
+    sourceLabel,
+    questionCount,
+    correctCount,
+    durationMs,
+    questionsJson,
+    answersJson,
+    completedAt,
+    completed,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'quiz_attempts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<QuizAttempt> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('document_id')) {
+      context.handle(
+        _documentIdMeta,
+        documentId.isAcceptableOrUnknown(data['document_id']!, _documentIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_documentIdMeta);
+    }
+    if (data.containsKey('family_id')) {
+      context.handle(
+        _familyIdMeta,
+        familyId.isAcceptableOrUnknown(data['family_id']!, _familyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_familyIdMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('source_label')) {
+      context.handle(
+        _sourceLabelMeta,
+        sourceLabel.isAcceptableOrUnknown(
+          data['source_label']!,
+          _sourceLabelMeta,
+        ),
+      );
+    }
+    if (data.containsKey('question_count')) {
+      context.handle(
+        _questionCountMeta,
+        questionCount.isAcceptableOrUnknown(
+          data['question_count']!,
+          _questionCountMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_questionCountMeta);
+    }
+    if (data.containsKey('correct_count')) {
+      context.handle(
+        _correctCountMeta,
+        correctCount.isAcceptableOrUnknown(
+          data['correct_count']!,
+          _correctCountMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_correctCountMeta);
+    }
+    if (data.containsKey('duration_ms')) {
+      context.handle(
+        _durationMsMeta,
+        durationMs.isAcceptableOrUnknown(data['duration_ms']!, _durationMsMeta),
+      );
+    }
+    if (data.containsKey('questions_json')) {
+      context.handle(
+        _questionsJsonMeta,
+        questionsJson.isAcceptableOrUnknown(
+          data['questions_json']!,
+          _questionsJsonMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_questionsJsonMeta);
+    }
+    if (data.containsKey('answers_json')) {
+      context.handle(
+        _answersJsonMeta,
+        answersJson.isAcceptableOrUnknown(
+          data['answers_json']!,
+          _answersJsonMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_answersJsonMeta);
+    }
+    if (data.containsKey('completed_at')) {
+      context.handle(
+        _completedAtMeta,
+        completedAt.isAcceptableOrUnknown(
+          data['completed_at']!,
+          _completedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('completed')) {
+      context.handle(
+        _completedMeta,
+        completed.isAcceptableOrUnknown(data['completed']!, _completedMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  QuizAttempt map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return QuizAttempt(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      documentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}document_id'],
+      )!,
+      familyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}family_id'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      sourceLabel: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_label'],
+      )!,
+      questionCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}question_count'],
+      )!,
+      correctCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}correct_count'],
+      )!,
+      durationMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}duration_ms'],
+      )!,
+      questionsJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}questions_json'],
+      )!,
+      answersJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}answers_json'],
+      )!,
+      completedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}completed_at'],
+      )!,
+      completed: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}completed'],
+      )!,
+    );
+  }
+
+  @override
+  $QuizAttemptsTable createAlias(String alias) {
+    return $QuizAttemptsTable(attachedDatabase, alias);
+  }
+}
+
+class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
+  final String id;
+  final String documentId;
+
+  /// Shared across retakes of the same generated question set.
+  final String familyId;
+  final String title;
+  final String sourceLabel;
+  final int questionCount;
+  final int correctCount;
+  final int durationMs;
+  final String questionsJson;
+  final String answersJson;
+  final DateTime completedAt;
+
+  /// False until the user finishes (or times out of) this generated set.
+  /// Existing rows were only written on finish, so they default to true.
+  final bool completed;
+  const QuizAttempt({
+    required this.id,
+    required this.documentId,
+    required this.familyId,
+    required this.title,
+    required this.sourceLabel,
+    required this.questionCount,
+    required this.correctCount,
+    required this.durationMs,
+    required this.questionsJson,
+    required this.answersJson,
+    required this.completedAt,
+    required this.completed,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['document_id'] = Variable<String>(documentId);
+    map['family_id'] = Variable<String>(familyId);
+    map['title'] = Variable<String>(title);
+    map['source_label'] = Variable<String>(sourceLabel);
+    map['question_count'] = Variable<int>(questionCount);
+    map['correct_count'] = Variable<int>(correctCount);
+    map['duration_ms'] = Variable<int>(durationMs);
+    map['questions_json'] = Variable<String>(questionsJson);
+    map['answers_json'] = Variable<String>(answersJson);
+    map['completed_at'] = Variable<DateTime>(completedAt);
+    map['completed'] = Variable<bool>(completed);
+    return map;
+  }
+
+  QuizAttemptsCompanion toCompanion(bool nullToAbsent) {
+    return QuizAttemptsCompanion(
+      id: Value(id),
+      documentId: Value(documentId),
+      familyId: Value(familyId),
+      title: Value(title),
+      sourceLabel: Value(sourceLabel),
+      questionCount: Value(questionCount),
+      correctCount: Value(correctCount),
+      durationMs: Value(durationMs),
+      questionsJson: Value(questionsJson),
+      answersJson: Value(answersJson),
+      completedAt: Value(completedAt),
+      completed: Value(completed),
+    );
+  }
+
+  factory QuizAttempt.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return QuizAttempt(
+      id: serializer.fromJson<String>(json['id']),
+      documentId: serializer.fromJson<String>(json['documentId']),
+      familyId: serializer.fromJson<String>(json['familyId']),
+      title: serializer.fromJson<String>(json['title']),
+      sourceLabel: serializer.fromJson<String>(json['sourceLabel']),
+      questionCount: serializer.fromJson<int>(json['questionCount']),
+      correctCount: serializer.fromJson<int>(json['correctCount']),
+      durationMs: serializer.fromJson<int>(json['durationMs']),
+      questionsJson: serializer.fromJson<String>(json['questionsJson']),
+      answersJson: serializer.fromJson<String>(json['answersJson']),
+      completedAt: serializer.fromJson<DateTime>(json['completedAt']),
+      completed: serializer.fromJson<bool>(json['completed']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'documentId': serializer.toJson<String>(documentId),
+      'familyId': serializer.toJson<String>(familyId),
+      'title': serializer.toJson<String>(title),
+      'sourceLabel': serializer.toJson<String>(sourceLabel),
+      'questionCount': serializer.toJson<int>(questionCount),
+      'correctCount': serializer.toJson<int>(correctCount),
+      'durationMs': serializer.toJson<int>(durationMs),
+      'questionsJson': serializer.toJson<String>(questionsJson),
+      'answersJson': serializer.toJson<String>(answersJson),
+      'completedAt': serializer.toJson<DateTime>(completedAt),
+      'completed': serializer.toJson<bool>(completed),
+    };
+  }
+
+  QuizAttempt copyWith({
+    String? id,
+    String? documentId,
+    String? familyId,
+    String? title,
+    String? sourceLabel,
+    int? questionCount,
+    int? correctCount,
+    int? durationMs,
+    String? questionsJson,
+    String? answersJson,
+    DateTime? completedAt,
+    bool? completed,
+  }) => QuizAttempt(
+    id: id ?? this.id,
+    documentId: documentId ?? this.documentId,
+    familyId: familyId ?? this.familyId,
+    title: title ?? this.title,
+    sourceLabel: sourceLabel ?? this.sourceLabel,
+    questionCount: questionCount ?? this.questionCount,
+    correctCount: correctCount ?? this.correctCount,
+    durationMs: durationMs ?? this.durationMs,
+    questionsJson: questionsJson ?? this.questionsJson,
+    answersJson: answersJson ?? this.answersJson,
+    completedAt: completedAt ?? this.completedAt,
+    completed: completed ?? this.completed,
+  );
+  QuizAttempt copyWithCompanion(QuizAttemptsCompanion data) {
+    return QuizAttempt(
+      id: data.id.present ? data.id.value : this.id,
+      documentId: data.documentId.present
+          ? data.documentId.value
+          : this.documentId,
+      familyId: data.familyId.present ? data.familyId.value : this.familyId,
+      title: data.title.present ? data.title.value : this.title,
+      sourceLabel: data.sourceLabel.present
+          ? data.sourceLabel.value
+          : this.sourceLabel,
+      questionCount: data.questionCount.present
+          ? data.questionCount.value
+          : this.questionCount,
+      correctCount: data.correctCount.present
+          ? data.correctCount.value
+          : this.correctCount,
+      durationMs: data.durationMs.present
+          ? data.durationMs.value
+          : this.durationMs,
+      questionsJson: data.questionsJson.present
+          ? data.questionsJson.value
+          : this.questionsJson,
+      answersJson: data.answersJson.present
+          ? data.answersJson.value
+          : this.answersJson,
+      completedAt: data.completedAt.present
+          ? data.completedAt.value
+          : this.completedAt,
+      completed: data.completed.present ? data.completed.value : this.completed,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('QuizAttempt(')
+          ..write('id: $id, ')
+          ..write('documentId: $documentId, ')
+          ..write('familyId: $familyId, ')
+          ..write('title: $title, ')
+          ..write('sourceLabel: $sourceLabel, ')
+          ..write('questionCount: $questionCount, ')
+          ..write('correctCount: $correctCount, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('questionsJson: $questionsJson, ')
+          ..write('answersJson: $answersJson, ')
+          ..write('completedAt: $completedAt, ')
+          ..write('completed: $completed')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    documentId,
+    familyId,
+    title,
+    sourceLabel,
+    questionCount,
+    correctCount,
+    durationMs,
+    questionsJson,
+    answersJson,
+    completedAt,
+    completed,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is QuizAttempt &&
+          other.id == this.id &&
+          other.documentId == this.documentId &&
+          other.familyId == this.familyId &&
+          other.title == this.title &&
+          other.sourceLabel == this.sourceLabel &&
+          other.questionCount == this.questionCount &&
+          other.correctCount == this.correctCount &&
+          other.durationMs == this.durationMs &&
+          other.questionsJson == this.questionsJson &&
+          other.answersJson == this.answersJson &&
+          other.completedAt == this.completedAt &&
+          other.completed == this.completed);
+}
+
+class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
+  final Value<String> id;
+  final Value<String> documentId;
+  final Value<String> familyId;
+  final Value<String> title;
+  final Value<String> sourceLabel;
+  final Value<int> questionCount;
+  final Value<int> correctCount;
+  final Value<int> durationMs;
+  final Value<String> questionsJson;
+  final Value<String> answersJson;
+  final Value<DateTime> completedAt;
+  final Value<bool> completed;
+  final Value<int> rowid;
+  const QuizAttemptsCompanion({
+    this.id = const Value.absent(),
+    this.documentId = const Value.absent(),
+    this.familyId = const Value.absent(),
+    this.title = const Value.absent(),
+    this.sourceLabel = const Value.absent(),
+    this.questionCount = const Value.absent(),
+    this.correctCount = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.questionsJson = const Value.absent(),
+    this.answersJson = const Value.absent(),
+    this.completedAt = const Value.absent(),
+    this.completed = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  QuizAttemptsCompanion.insert({
+    required String id,
+    required String documentId,
+    required String familyId,
+    required String title,
+    this.sourceLabel = const Value.absent(),
+    required int questionCount,
+    required int correctCount,
+    this.durationMs = const Value.absent(),
+    required String questionsJson,
+    required String answersJson,
+    this.completedAt = const Value.absent(),
+    this.completed = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       documentId = Value(documentId),
+       familyId = Value(familyId),
+       title = Value(title),
+       questionCount = Value(questionCount),
+       correctCount = Value(correctCount),
+       questionsJson = Value(questionsJson),
+       answersJson = Value(answersJson);
+  static Insertable<QuizAttempt> custom({
+    Expression<String>? id,
+    Expression<String>? documentId,
+    Expression<String>? familyId,
+    Expression<String>? title,
+    Expression<String>? sourceLabel,
+    Expression<int>? questionCount,
+    Expression<int>? correctCount,
+    Expression<int>? durationMs,
+    Expression<String>? questionsJson,
+    Expression<String>? answersJson,
+    Expression<DateTime>? completedAt,
+    Expression<bool>? completed,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (documentId != null) 'document_id': documentId,
+      if (familyId != null) 'family_id': familyId,
+      if (title != null) 'title': title,
+      if (sourceLabel != null) 'source_label': sourceLabel,
+      if (questionCount != null) 'question_count': questionCount,
+      if (correctCount != null) 'correct_count': correctCount,
+      if (durationMs != null) 'duration_ms': durationMs,
+      if (questionsJson != null) 'questions_json': questionsJson,
+      if (answersJson != null) 'answers_json': answersJson,
+      if (completedAt != null) 'completed_at': completedAt,
+      if (completed != null) 'completed': completed,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  QuizAttemptsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? documentId,
+    Value<String>? familyId,
+    Value<String>? title,
+    Value<String>? sourceLabel,
+    Value<int>? questionCount,
+    Value<int>? correctCount,
+    Value<int>? durationMs,
+    Value<String>? questionsJson,
+    Value<String>? answersJson,
+    Value<DateTime>? completedAt,
+    Value<bool>? completed,
+    Value<int>? rowid,
+  }) {
+    return QuizAttemptsCompanion(
+      id: id ?? this.id,
+      documentId: documentId ?? this.documentId,
+      familyId: familyId ?? this.familyId,
+      title: title ?? this.title,
+      sourceLabel: sourceLabel ?? this.sourceLabel,
+      questionCount: questionCount ?? this.questionCount,
+      correctCount: correctCount ?? this.correctCount,
+      durationMs: durationMs ?? this.durationMs,
+      questionsJson: questionsJson ?? this.questionsJson,
+      answersJson: answersJson ?? this.answersJson,
+      completedAt: completedAt ?? this.completedAt,
+      completed: completed ?? this.completed,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (documentId.present) {
+      map['document_id'] = Variable<String>(documentId.value);
+    }
+    if (familyId.present) {
+      map['family_id'] = Variable<String>(familyId.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (sourceLabel.present) {
+      map['source_label'] = Variable<String>(sourceLabel.value);
+    }
+    if (questionCount.present) {
+      map['question_count'] = Variable<int>(questionCount.value);
+    }
+    if (correctCount.present) {
+      map['correct_count'] = Variable<int>(correctCount.value);
+    }
+    if (durationMs.present) {
+      map['duration_ms'] = Variable<int>(durationMs.value);
+    }
+    if (questionsJson.present) {
+      map['questions_json'] = Variable<String>(questionsJson.value);
+    }
+    if (answersJson.present) {
+      map['answers_json'] = Variable<String>(answersJson.value);
+    }
+    if (completedAt.present) {
+      map['completed_at'] = Variable<DateTime>(completedAt.value);
+    }
+    if (completed.present) {
+      map['completed'] = Variable<bool>(completed.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('QuizAttemptsCompanion(')
+          ..write('id: $id, ')
+          ..write('documentId: $documentId, ')
+          ..write('familyId: $familyId, ')
+          ..write('title: $title, ')
+          ..write('sourceLabel: $sourceLabel, ')
+          ..write('questionCount: $questionCount, ')
+          ..write('correctCount: $correctCount, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('questionsJson: $questionsJson, ')
+          ..write('answersJson: $answersJson, ')
+          ..write('completedAt: $completedAt, ')
+          ..write('completed: $completed, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -4916,6 +5655,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $StrokesTable strokes = $StrokesTable(this);
   late final $CanvasElementsTable canvasElements = $CanvasElementsTable(this);
   late final $AssetsTable assets = $AssetsTable(this);
+  late final $QuizAttemptsTable quizAttempts = $QuizAttemptsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4926,6 +5666,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     strokes,
     canvasElements,
     assets,
+    quizAttempts,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -4949,6 +5690,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('canvas_elements', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'documents',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('quiz_attempts', kind: UpdateKind.delete)],
     ),
   ]);
 }
@@ -5017,6 +5765,24 @@ final class $$DocumentsTableReferences
     ).filter((f) => f.documentId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_notePagesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$QuizAttemptsTable, List<QuizAttempt>>
+  _quizAttemptsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.quizAttempts,
+    aliasName: 'documents__id__quiz_attempts__document_id',
+  );
+
+  $$QuizAttemptsTableProcessedTableManager get quizAttemptsRefs {
+    final manager = $$QuizAttemptsTableTableManager(
+      $_db,
+      $_db.quizAttempts,
+    ).filter((f) => f.documentId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_quizAttemptsRefsTable($_db));
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -5146,6 +5912,31 @@ class $$DocumentsTableFilterComposer
           }) => $$NotePagesTableFilterComposer(
             $db: $db,
             $table: $db.notePages,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> quizAttemptsRefs(
+    Expression<bool> Function($$QuizAttemptsTableFilterComposer f) f,
+  ) {
+    final $$QuizAttemptsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.quizAttempts,
+      getReferencedColumn: (t) => t.documentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$QuizAttemptsTableFilterComposer(
+            $db: $db,
+            $table: $db.quizAttempts,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -5362,6 +6153,31 @@ class $$DocumentsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> quizAttemptsRefs<T extends Object>(
+    Expression<T> Function($$QuizAttemptsTableAnnotationComposer a) f,
+  ) {
+    final $$QuizAttemptsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.quizAttempts,
+      getReferencedColumn: (t) => t.documentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$QuizAttemptsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.quizAttempts,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$DocumentsTableTableManager
@@ -5377,7 +6193,7 @@ class $$DocumentsTableTableManager
           $$DocumentsTableUpdateCompanionBuilder,
           (Document, $$DocumentsTableReferences),
           Document,
-          PrefetchHooks Function({bool notePagesRefs})
+          PrefetchHooks Function({bool notePagesRefs, bool quizAttemptsRefs})
         > {
   $$DocumentsTableTableManager(_$AppDatabase db, $DocumentsTable table)
     : super(
@@ -5486,36 +6302,63 @@ class $$DocumentsTableTableManager
                 ),
               )
               .toList(),
-          prefetchHooksCallback: ({notePagesRefs = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [if (notePagesRefs) db.notePages],
-              addJoins: null,
-              getPrefetchedDataCallback: (items) async {
-                return [
-                  if (notePagesRefs)
-                    await $_getPrefetchedData<
-                      Document,
-                      $DocumentsTable,
-                      NotePage
-                    >(
-                      currentTable: table,
-                      referencedTable: $$DocumentsTableReferences
-                          ._notePagesRefsTable(db),
-                      managerFromTypedResult: (p0) =>
-                          $$DocumentsTableReferences(
-                            db,
-                            table,
-                            p0,
-                          ).notePagesRefs,
-                      referencedItemsForCurrentItem: (item, referencedItems) =>
-                          referencedItems.where((e) => e.documentId == item.id),
-                      typedResults: items,
-                    ),
-                ];
+          prefetchHooksCallback:
+              ({notePagesRefs = false, quizAttemptsRefs = false}) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [
+                    if (notePagesRefs) db.notePages,
+                    if (quizAttemptsRefs) db.quizAttempts,
+                  ],
+                  addJoins: null,
+                  getPrefetchedDataCallback: (items) async {
+                    return [
+                      if (notePagesRefs)
+                        await $_getPrefetchedData<
+                          Document,
+                          $DocumentsTable,
+                          NotePage
+                        >(
+                          currentTable: table,
+                          referencedTable: $$DocumentsTableReferences
+                              ._notePagesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$DocumentsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).notePagesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.documentId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (quizAttemptsRefs)
+                        await $_getPrefetchedData<
+                          Document,
+                          $DocumentsTable,
+                          QuizAttempt
+                        >(
+                          currentTable: table,
+                          referencedTable: $$DocumentsTableReferences
+                              ._quizAttemptsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$DocumentsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).quizAttemptsRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.documentId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                    ];
+                  },
+                );
               },
-            );
-          },
         ),
       );
 }
@@ -5532,7 +6375,7 @@ typedef $$DocumentsTableProcessedTableManager =
       $$DocumentsTableUpdateCompanionBuilder,
       (Document, $$DocumentsTableReferences),
       Document,
-      PrefetchHooks Function({bool notePagesRefs})
+      PrefetchHooks Function({bool notePagesRefs, bool quizAttemptsRefs})
     >;
 typedef $$NotePagesTableCreateCompanionBuilder =
     NotePagesCompanion Function({
@@ -7823,6 +8666,470 @@ typedef $$AssetsTableProcessedTableManager =
       Asset,
       PrefetchHooks Function()
     >;
+typedef $$QuizAttemptsTableCreateCompanionBuilder =
+    QuizAttemptsCompanion Function({
+      required String id,
+      required String documentId,
+      required String familyId,
+      required String title,
+      Value<String> sourceLabel,
+      required int questionCount,
+      required int correctCount,
+      Value<int> durationMs,
+      required String questionsJson,
+      required String answersJson,
+      Value<DateTime> completedAt,
+      Value<bool> completed,
+      Value<int> rowid,
+    });
+typedef $$QuizAttemptsTableUpdateCompanionBuilder =
+    QuizAttemptsCompanion Function({
+      Value<String> id,
+      Value<String> documentId,
+      Value<String> familyId,
+      Value<String> title,
+      Value<String> sourceLabel,
+      Value<int> questionCount,
+      Value<int> correctCount,
+      Value<int> durationMs,
+      Value<String> questionsJson,
+      Value<String> answersJson,
+      Value<DateTime> completedAt,
+      Value<bool> completed,
+      Value<int> rowid,
+    });
+
+final class $$QuizAttemptsTableReferences
+    extends BaseReferences<_$AppDatabase, $QuizAttemptsTable, QuizAttempt> {
+  $$QuizAttemptsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $DocumentsTable _documentIdTable(_$AppDatabase db) =>
+      db.documents.createAlias('quiz_attempts__document_id__documents__id');
+
+  $$DocumentsTableProcessedTableManager get documentId {
+    final $_column = $_itemColumn<String>('document_id')!;
+
+    final manager = $$DocumentsTableTableManager(
+      $_db,
+      $_db.documents,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_documentIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$QuizAttemptsTableFilterComposer
+    extends Composer<_$AppDatabase, $QuizAttemptsTable> {
+  $$QuizAttemptsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get familyId => $composableBuilder(
+    column: $table.familyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceLabel => $composableBuilder(
+    column: $table.sourceLabel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get questionCount => $composableBuilder(
+    column: $table.questionCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get correctCount => $composableBuilder(
+    column: $table.correctCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get questionsJson => $composableBuilder(
+    column: $table.questionsJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get answersJson => $composableBuilder(
+    column: $table.answersJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get completed => $composableBuilder(
+    column: $table.completed,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$DocumentsTableFilterComposer get documentId {
+    final $$DocumentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableFilterComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$QuizAttemptsTableOrderingComposer
+    extends Composer<_$AppDatabase, $QuizAttemptsTable> {
+  $$QuizAttemptsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get familyId => $composableBuilder(
+    column: $table.familyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceLabel => $composableBuilder(
+    column: $table.sourceLabel,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get questionCount => $composableBuilder(
+    column: $table.questionCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get correctCount => $composableBuilder(
+    column: $table.correctCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get questionsJson => $composableBuilder(
+    column: $table.questionsJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get answersJson => $composableBuilder(
+    column: $table.answersJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get completed => $composableBuilder(
+    column: $table.completed,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$DocumentsTableOrderingComposer get documentId {
+    final $$DocumentsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableOrderingComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$QuizAttemptsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $QuizAttemptsTable> {
+  $$QuizAttemptsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get familyId =>
+      $composableBuilder(column: $table.familyId, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get sourceLabel => $composableBuilder(
+    column: $table.sourceLabel,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get questionCount => $composableBuilder(
+    column: $table.questionCount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get correctCount => $composableBuilder(
+    column: $table.correctCount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get questionsJson => $composableBuilder(
+    column: $table.questionsJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get answersJson => $composableBuilder(
+    column: $table.answersJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get completed =>
+      $composableBuilder(column: $table.completed, builder: (column) => column);
+
+  $$DocumentsTableAnnotationComposer get documentId {
+    final $$DocumentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$QuizAttemptsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $QuizAttemptsTable,
+          QuizAttempt,
+          $$QuizAttemptsTableFilterComposer,
+          $$QuizAttemptsTableOrderingComposer,
+          $$QuizAttemptsTableAnnotationComposer,
+          $$QuizAttemptsTableCreateCompanionBuilder,
+          $$QuizAttemptsTableUpdateCompanionBuilder,
+          (QuizAttempt, $$QuizAttemptsTableReferences),
+          QuizAttempt,
+          PrefetchHooks Function({bool documentId})
+        > {
+  $$QuizAttemptsTableTableManager(_$AppDatabase db, $QuizAttemptsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$QuizAttemptsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$QuizAttemptsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$QuizAttemptsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> documentId = const Value.absent(),
+                Value<String> familyId = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String> sourceLabel = const Value.absent(),
+                Value<int> questionCount = const Value.absent(),
+                Value<int> correctCount = const Value.absent(),
+                Value<int> durationMs = const Value.absent(),
+                Value<String> questionsJson = const Value.absent(),
+                Value<String> answersJson = const Value.absent(),
+                Value<DateTime> completedAt = const Value.absent(),
+                Value<bool> completed = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => QuizAttemptsCompanion(
+                id: id,
+                documentId: documentId,
+                familyId: familyId,
+                title: title,
+                sourceLabel: sourceLabel,
+                questionCount: questionCount,
+                correctCount: correctCount,
+                durationMs: durationMs,
+                questionsJson: questionsJson,
+                answersJson: answersJson,
+                completedAt: completedAt,
+                completed: completed,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String documentId,
+                required String familyId,
+                required String title,
+                Value<String> sourceLabel = const Value.absent(),
+                required int questionCount,
+                required int correctCount,
+                Value<int> durationMs = const Value.absent(),
+                required String questionsJson,
+                required String answersJson,
+                Value<DateTime> completedAt = const Value.absent(),
+                Value<bool> completed = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => QuizAttemptsCompanion.insert(
+                id: id,
+                documentId: documentId,
+                familyId: familyId,
+                title: title,
+                sourceLabel: sourceLabel,
+                questionCount: questionCount,
+                correctCount: correctCount,
+                durationMs: durationMs,
+                questionsJson: questionsJson,
+                answersJson: answersJson,
+                completedAt: completedAt,
+                completed: completed,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$QuizAttemptsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({documentId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (documentId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.documentId,
+                                referencedTable: $$QuizAttemptsTableReferences
+                                    ._documentIdTable(db),
+                                referencedColumn: $$QuizAttemptsTableReferences
+                                    ._documentIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$QuizAttemptsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $QuizAttemptsTable,
+      QuizAttempt,
+      $$QuizAttemptsTableFilterComposer,
+      $$QuizAttemptsTableOrderingComposer,
+      $$QuizAttemptsTableAnnotationComposer,
+      $$QuizAttemptsTableCreateCompanionBuilder,
+      $$QuizAttemptsTableUpdateCompanionBuilder,
+      (QuizAttempt, $$QuizAttemptsTableReferences),
+      QuizAttempt,
+      PrefetchHooks Function({bool documentId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -7837,4 +9144,6 @@ class $AppDatabaseManager {
       $$CanvasElementsTableTableManager(_db, _db.canvasElements);
   $$AssetsTableTableManager get assets =>
       $$AssetsTableTableManager(_db, _db.assets);
+  $$QuizAttemptsTableTableManager get quizAttempts =>
+      $$QuizAttemptsTableTableManager(_db, _db.quizAttempts);
 }

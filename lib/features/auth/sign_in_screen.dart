@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/design.dart';
 import '../../app/firebase_bootstrap.dart';
+import '../../app/page_routes.dart';
 import 'data/auth_repository.dart';
 import 'providers.dart';
 
@@ -120,7 +121,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: IconButton(
-                        icon: const Icon(Icons.arrow_back_rounded),
+                        icon: Icon(notablyBackIcon),
                         onPressed: () => Navigator.of(context).maybePop(),
                       ),
                     )

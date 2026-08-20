@@ -35,7 +35,7 @@ class ConvertToPdfDialog extends StatelessWidget {
           children: [
             Text(
               '“${failure.filename}” is a ${failure.appName} $kind. '
-              'To annotate it here it needs to be a PDF.',
+              'Import it as a PDF to annotate and to generate quizzes from it.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 14),

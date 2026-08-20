@@ -8,13 +8,15 @@ import 'tables.dart';
 
 part 'database.g.dart';
 
-@DriftDatabase(tables: [Documents, NotePages, Strokes, CanvasElements, Assets])
+@DriftDatabase(
+  tables: [Documents, NotePages, Strokes, CanvasElements, Assets, QuizAttempts],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor])
       : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -97,6 +99,23 @@ class AppDatabase extends _$AppDatabase {
             // background indexer will extract it the next time each document
             // is opened.
             await m.addColumn(documents, documents.outline);
+          }
+          if (from < 12) {
+            // Older clients uploaded PDFs to R2 then cleared dirty *before*
+            // remoteKey was written, so Firestore still has a null key and
+            // other devices cannot download. Re-push any asset that has a
+            // key so the next sync publishes it.
+            await (update(assets)..where((a) => a.remoteKey.isNotNull()))
+                .write(AssetsCompanion(
+              dirty: const Value(true),
+              updatedAt: Value(DateTime.now()),
+            ));
+          }
+          if (from < 13) {
+            await m.createTable(quizAttempts);
+          }
+          if (from < 14) {
+            await m.addColumn(quizAttempts, quizAttempts.completed);
           }
         },
         beforeOpen: (details) async {
