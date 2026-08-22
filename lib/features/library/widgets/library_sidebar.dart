@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/design.dart';
 import '../../../core/db/database.dart';
 import '../../../core/models/enums.dart';
+import '../../../core/storage/storage_quota.dart';
 import '../providers.dart';
 
 /// Width the sidebar occupies when shown. The library only mounts it above
@@ -227,14 +228,7 @@ class _NavRow extends StatelessWidget {
   }
 }
 
-/// Nominal storage allowance the meter fills against.
-///
-/// There is no server-side quota yet, so this is a display allowance rather
-/// than an enforced limit — the bar gives a sense of scale, and the real
-/// used figure beside it stays honest.
-const int _kStorageQuotaBytes = 15 * 1024 * 1024 * 1024; // 15 GB
-
-/// How much disk the imported files take, shown against [_kStorageQuotaBytes].
+/// Sidebar meter: active-library bytes vs [kStorageQuotaBytes] (enforced on import).
 class _StorageMeter extends ConsumerWidget {
   const _StorageMeter();
 
@@ -242,8 +236,8 @@ class _StorageMeter extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final bytes = ref.watch(libraryStorageProvider).asData?.value ?? 0;
-    final fraction = (bytes / _kStorageQuotaBytes).clamp(0.0, 1.0);
-    // Match the quota's unit (GB) even when tiny, so it reads "0.1 / 15 GB"
+    final fraction = (bytes / kStorageQuotaBytes).clamp(0.0, 1.0);
+    // Match the quota's unit (GB) even when tiny, so it reads "0.1 / 5 GB"
     // rather than jumping between MB and GB as files are added.
     final usedGb = bytes / (1024 * 1024 * 1024);
 
@@ -263,7 +257,7 @@ class _StorageMeter extends ConsumerWidget {
                 style: TextStyle(fontSize: 12, color: t.textMuted),
               ),
               Text(
-                '${usedGb.toStringAsFixed(1)} / 15 GB',
+                '${usedGb.toStringAsFixed(1)} / 5 GB',
                 style: AppTokens.mono(size: 12, color: t.textSecondary),
               ),
             ],
@@ -285,15 +279,4 @@ class _StorageMeter extends ConsumerWidget {
 }
 
 /// Human-readable byte count (1 decimal place from MB up).
-String formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  var value = bytes / 1024;
-  var unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  final digits = unit == 0 ? 0 : 1;
-  return '${value.toStringAsFixed(digits)} ${units[unit]}';
-}
+String formatBytes(int bytes) => formatStorageBytes(bytes);

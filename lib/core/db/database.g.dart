@@ -4914,6 +4914,54 @@ class $QuizAttemptsTable extends QuizAttempts
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $QuizAttemptsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _remoteUpdatedAtMeta = const VerificationMeta(
+    'remoteUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> remoteUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'remote_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -5054,6 +5102,10 @@ class $QuizAttemptsTable extends QuizAttempts
   );
   @override
   List<GeneratedColumn> get $columns => [
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     documentId,
     familyId,
@@ -5079,6 +5131,33 @@ class $QuizAttemptsTable extends QuizAttempts
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    if (data.containsKey('remote_updated_at')) {
+      context.handle(
+        _remoteUpdatedAtMeta,
+        remoteUpdatedAt.isAcceptableOrUnknown(
+          data['remote_updated_at']!,
+          _remoteUpdatedAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -5191,6 +5270,22 @@ class $QuizAttemptsTable extends QuizAttempts
   QuizAttempt map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return QuizAttempt(
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+      remoteUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}remote_updated_at'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -5249,6 +5344,10 @@ class $QuizAttemptsTable extends QuizAttempts
 }
 
 class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final bool dirty;
+  final DateTime? remoteUpdatedAt;
   final String id;
   final String documentId;
 
@@ -5267,6 +5366,10 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
   /// Existing rows were only written on finish, so they default to true.
   final bool completed;
   const QuizAttempt({
+    required this.updatedAt,
+    this.deletedAt,
+    required this.dirty,
+    this.remoteUpdatedAt,
     required this.id,
     required this.documentId,
     required this.familyId,
@@ -5283,6 +5386,14 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['dirty'] = Variable<bool>(dirty);
+    if (!nullToAbsent || remoteUpdatedAt != null) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt);
+    }
     map['id'] = Variable<String>(id);
     map['document_id'] = Variable<String>(documentId);
     map['family_id'] = Variable<String>(familyId);
@@ -5300,6 +5411,14 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
 
   QuizAttemptsCompanion toCompanion(bool nullToAbsent) {
     return QuizAttemptsCompanion(
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      dirty: Value(dirty),
+      remoteUpdatedAt: remoteUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteUpdatedAt),
       id: Value(id),
       documentId: Value(documentId),
       familyId: Value(familyId),
@@ -5321,6 +5440,10 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return QuizAttempt(
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+      remoteUpdatedAt: serializer.fromJson<DateTime?>(json['remoteUpdatedAt']),
       id: serializer.fromJson<String>(json['id']),
       documentId: serializer.fromJson<String>(json['documentId']),
       familyId: serializer.fromJson<String>(json['familyId']),
@@ -5339,6 +5462,10 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'dirty': serializer.toJson<bool>(dirty),
+      'remoteUpdatedAt': serializer.toJson<DateTime?>(remoteUpdatedAt),
       'id': serializer.toJson<String>(id),
       'documentId': serializer.toJson<String>(documentId),
       'familyId': serializer.toJson<String>(familyId),
@@ -5355,6 +5482,10 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
   }
 
   QuizAttempt copyWith({
+    DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    bool? dirty,
+    Value<DateTime?> remoteUpdatedAt = const Value.absent(),
     String? id,
     String? documentId,
     String? familyId,
@@ -5368,6 +5499,12 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
     DateTime? completedAt,
     bool? completed,
   }) => QuizAttempt(
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    dirty: dirty ?? this.dirty,
+    remoteUpdatedAt: remoteUpdatedAt.present
+        ? remoteUpdatedAt.value
+        : this.remoteUpdatedAt,
     id: id ?? this.id,
     documentId: documentId ?? this.documentId,
     familyId: familyId ?? this.familyId,
@@ -5383,6 +5520,12 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
   );
   QuizAttempt copyWithCompanion(QuizAttemptsCompanion data) {
     return QuizAttempt(
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+      remoteUpdatedAt: data.remoteUpdatedAt.present
+          ? data.remoteUpdatedAt.value
+          : this.remoteUpdatedAt,
       id: data.id.present ? data.id.value : this.id,
       documentId: data.documentId.present
           ? data.documentId.value
@@ -5417,6 +5560,10 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
   @override
   String toString() {
     return (StringBuffer('QuizAttempt(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('documentId: $documentId, ')
           ..write('familyId: $familyId, ')
@@ -5435,6 +5582,10 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
 
   @override
   int get hashCode => Object.hash(
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
     id,
     documentId,
     familyId,
@@ -5452,6 +5603,10 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is QuizAttempt &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.dirty == this.dirty &&
+          other.remoteUpdatedAt == this.remoteUpdatedAt &&
           other.id == this.id &&
           other.documentId == this.documentId &&
           other.familyId == this.familyId &&
@@ -5467,6 +5622,10 @@ class QuizAttempt extends DataClass implements Insertable<QuizAttempt> {
 }
 
 class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<bool> dirty;
+  final Value<DateTime?> remoteUpdatedAt;
   final Value<String> id;
   final Value<String> documentId;
   final Value<String> familyId;
@@ -5481,6 +5640,10 @@ class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
   final Value<bool> completed;
   final Value<int> rowid;
   const QuizAttemptsCompanion({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     this.id = const Value.absent(),
     this.documentId = const Value.absent(),
     this.familyId = const Value.absent(),
@@ -5496,6 +5659,10 @@ class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
     this.rowid = const Value.absent(),
   });
   QuizAttemptsCompanion.insert({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
     required String id,
     required String documentId,
     required String familyId,
@@ -5518,6 +5685,10 @@ class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
        questionsJson = Value(questionsJson),
        answersJson = Value(answersJson);
   static Insertable<QuizAttempt> custom({
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<bool>? dirty,
+    Expression<DateTime>? remoteUpdatedAt,
     Expression<String>? id,
     Expression<String>? documentId,
     Expression<String>? familyId,
@@ -5533,6 +5704,10 @@ class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (dirty != null) 'dirty': dirty,
+      if (remoteUpdatedAt != null) 'remote_updated_at': remoteUpdatedAt,
       if (id != null) 'id': id,
       if (documentId != null) 'document_id': documentId,
       if (familyId != null) 'family_id': familyId,
@@ -5550,6 +5725,10 @@ class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
   }
 
   QuizAttemptsCompanion copyWith({
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<bool>? dirty,
+    Value<DateTime?>? remoteUpdatedAt,
     Value<String>? id,
     Value<String>? documentId,
     Value<String>? familyId,
@@ -5565,6 +5744,10 @@ class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
     Value<int>? rowid,
   }) {
     return QuizAttemptsCompanion(
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      dirty: dirty ?? this.dirty,
+      remoteUpdatedAt: remoteUpdatedAt ?? this.remoteUpdatedAt,
       id: id ?? this.id,
       documentId: documentId ?? this.documentId,
       familyId: familyId ?? this.familyId,
@@ -5584,6 +5767,18 @@ class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (remoteUpdatedAt.present) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -5629,6 +5824,10 @@ class QuizAttemptsCompanion extends UpdateCompanion<QuizAttempt> {
   @override
   String toString() {
     return (StringBuffer('QuizAttemptsCompanion(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
           ..write('id: $id, ')
           ..write('documentId: $documentId, ')
           ..write('familyId: $familyId, ')
@@ -8668,6 +8867,10 @@ typedef $$AssetsTableProcessedTableManager =
     >;
 typedef $$QuizAttemptsTableCreateCompanionBuilder =
     QuizAttemptsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       required String id,
       required String documentId,
       required String familyId,
@@ -8684,6 +8887,10 @@ typedef $$QuizAttemptsTableCreateCompanionBuilder =
     });
 typedef $$QuizAttemptsTableUpdateCompanionBuilder =
     QuizAttemptsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
       Value<String> id,
       Value<String> documentId,
       Value<String> familyId,
@@ -8730,6 +8937,26 @@ class $$QuizAttemptsTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -8818,6 +9045,26 @@ class $$QuizAttemptsTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -8906,6 +9153,20 @@ class $$QuizAttemptsTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -9005,6 +9266,10 @@ class $$QuizAttemptsTableTableManager
               $$QuizAttemptsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String> documentId = const Value.absent(),
                 Value<String> familyId = const Value.absent(),
@@ -9019,6 +9284,10 @@ class $$QuizAttemptsTableTableManager
                 Value<bool> completed = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => QuizAttemptsCompanion(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 documentId: documentId,
                 familyId: familyId,
@@ -9035,6 +9304,10 @@ class $$QuizAttemptsTableTableManager
               ),
           createCompanionCallback:
               ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
                 required String id,
                 required String documentId,
                 required String familyId,
@@ -9049,6 +9322,10 @@ class $$QuizAttemptsTableTableManager
                 Value<bool> completed = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => QuizAttemptsCompanion.insert(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
                 id: id,
                 documentId: documentId,
                 familyId: familyId,

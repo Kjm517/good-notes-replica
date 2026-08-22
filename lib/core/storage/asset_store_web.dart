@@ -15,6 +15,27 @@ Future<StoredAsset> writeAsset(
 
 /// Unreachable on web: there is no file path to copy from, so imports there
 /// go through the in-memory route instead.
+/// No filesystem on web, so the stream is collected and stored inline. Large
+/// files are skipped before reaching here.
+Future<StoredAsset> writeAssetStream(
+  String id,
+  Stream<List<int>> bytes, {
+  String extension = 'bin',
+}) async {
+  final builder = BytesBuilder(copy: false);
+  await for (final chunk in bytes) {
+    builder.add(chunk);
+  }
+  return writeAsset(id, builder.takeBytes(), extension: extension);
+}
+
+/// No filesystem on web, so nothing to measure.
+Future<int?> assetFileSize(String localPath) async => null;
+
+/// Web assets live in the database, not on disk, so there is no file to slice.
+Stream<List<int>> readAssetSlice(String localPath, int start, int end) =>
+    const Stream<List<int>>.empty();
+
 Future<CopiedAsset> copyAssetFromFile(
   String id,
   String sourcePath, {

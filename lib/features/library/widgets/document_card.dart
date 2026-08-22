@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 import '../../../app/design.dart';
 import '../../../core/db/database.dart';
 import '../../../core/models/enums.dart';
+import '../../../core/sync/sync_providers.dart';
+import '../document_transfer.dart';
 import '../providers.dart';
 import 'cover_styles.dart';
 
@@ -40,86 +42,153 @@ class DocumentCard extends ConsumerWidget {
     final pageCount = _isFolder
         ? null
         : ref.watch(documentPageCountProvider(document.id)).asData?.value;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(Radii.card),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(Radii.card),
-            border: Border.all(color: t.line),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _isFolder
-                        ? _FolderThumb(document: document)
-                        : _CoverThumb(document: document),
-                    if (onStarTap != null)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: _StarButton(
-                          starred: document.starred,
-                          onTap: onStarTap!,
+    final pendingUpload =
+        ref.watch(pendingUploadDocumentsProvider).asData?.value ?? const {};
+    final missingLocal =
+        ref.watch(missingLocalFileDocumentsProvider).asData?.value ?? const {};
+    final paused = ref.watch(syncPausedProvider);
+    final status = ref.watch(syncStatusProvider);
+    final transfer = documentTransferState(
+      documentId: document.id,
+      pendingUpload: pendingUpload,
+      missingLocal: missingLocal,
+      status: status,
+      paused: paused,
+    );
+    final locked = transfer.locked;
+    final badgeLabel = transfer.badgeLabel(status);
+    final transferIcon = switch (transfer.kind) {
+      DocumentTransferKind.downloading => Icons.cloud_download_outlined,
+      DocumentTransferKind.uploading => Icons.cloud_upload_outlined,
+      DocumentTransferKind.none => null,
+    };
+
+    return Opacity(
+      opacity: locked ? 0.45 : 1,
+      child: Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(Radii.card),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: locked ? null : onTap,
+          onLongPress: onLongPress,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(Radii.card),
+              border: Border.all(color: t.line),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _isFolder
+                          ? _FolderThumb(document: document)
+                          : _CoverThumb(document: document),
+                      if (onStarTap != null && !locked)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: _StarButton(
+                            starred: document.starred,
+                            onTap: onStarTap!,
+                          ),
                         ),
-                      ),
-                    if (document.type == DocumentType.pdf)
-                      const Positioned(left: 8, bottom: 8, child: _PdfBadge()),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 6, 11),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            document.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w600,
-                              color: t.text,
+                      if (document.type == DocumentType.pdf)
+                        const Positioned(
+                            left: 8, bottom: 8, child: _PdfBadge()),
+                      if (badgeLabel != null)
+                        ColoredBox(
+                          color: locked
+                              ? t.canvas.withValues(alpha: 0.35)
+                              : Colors.transparent,
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: t.surface.withValues(alpha: 0.92),
+                                  borderRadius:
+                                      BorderRadius.circular(Radii.inner),
+                                  border: Border.all(color: t.line),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      transferIcon ?? Icons.cloud_outlined,
+                                      size: 14,
+                                      color: t.textSecondary,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      badgeLabel,
+                                      style: AppTokens.mono(
+                                        size: 11,
+                                        color: t.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _subtitle(document, pageCount),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTokens.mono(
-                                size: 11, color: t.textFaint),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (onMore != null)
-                      InkWell(
-                        borderRadius: BorderRadius.circular(20),
-                        onTap: onMore,
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Icon(Icons.more_horiz_rounded,
-                              size: 19, color: t.textFaint),
+                        ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 6, 11),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              document.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                                color: t.text,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              badgeLabel ?? _subtitle(document, pageCount),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTokens.mono(
+                                  size: 11, color: t.textFaint),
+                            ),
+                          ],
                         ),
                       ),
-                  ],
+                      if (onMore != null)
+                        InkWell(
+                          borderRadius: BorderRadius.circular(20),
+                          onTap: onMore,
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(Icons.more_horiz_rounded,
+                                size: 19, color: t.textFaint),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

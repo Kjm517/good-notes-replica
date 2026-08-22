@@ -31,6 +31,9 @@ class SyncStatus {
     this.message,
     this.lastSyncedAt,
     this.pendingChanges = 0,
+    this.progress,
+    this.progressMessage,
+    this.activeAssetId,
   });
 
   final SyncPhase phase;
@@ -39,6 +42,16 @@ class SyncStatus {
 
   /// How many local records are waiting to be pushed.
   final int pendingChanges;
+
+  /// Progress from 0.0 to 1.0 during [SyncPhase.syncing], null otherwise.
+  final double? progress;
+
+  /// Human-readable description of the current sync step, e.g.
+  /// "Uploading documents…".
+  final String? progressMessage;
+
+  /// Asset currently uploading to R2, if any — used to gray the library card.
+  final String? activeAssetId;
 
   bool get isBusy => phase == SyncPhase.syncing;
 
@@ -59,12 +72,21 @@ class SyncStatus {
     String? message,
     DateTime? lastSyncedAt,
     int? pendingChanges,
+    double? progress,
+    String? progressMessage,
+    String? activeAssetId,
     bool clearMessage = false,
+    bool clearProgress = false,
   }) =>
       SyncStatus(
         phase: phase ?? this.phase,
         message: clearMessage ? null : (message ?? this.message),
         lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
         pendingChanges: pendingChanges ?? this.pendingChanges,
+        progress: clearProgress ? null : (progress ?? this.progress),
+        progressMessage:
+            clearProgress ? null : (progressMessage ?? this.progressMessage),
+        activeAssetId:
+            clearProgress ? null : (activeAssetId ?? this.activeAssetId),
       );
 }

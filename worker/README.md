@@ -31,12 +31,13 @@ still sync normally.
 
 All require `Authorization: Bearer <firebase id token>` and a `?key=` param.
 
-| Method | Path      | Purpose                   |
-| ------ | --------- | ------------------------- |
-| PUT    | `/file`   | Upload (body = raw bytes) |
-| GET    | `/file`   | Download                  |
-| GET    | `/head`   | Existence + size check    |
-| POST   | `/delete` | Remove an object          |
+| Method | Path            | Purpose                          |
+| ------ | --------------- | -------------------------------- |
+| PUT    | `/file`         | Upload (body = raw bytes)        |
+| GET    | `/file`         | Download                         |
+| GET    | `/head`         | Existence + size check           |
+| POST   | `/delete`       | Remove an object                 |
+| POST   | `/multipart/*`  | Large uploads, a part at a time  |
 
 ## Costs
 

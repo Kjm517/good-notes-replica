@@ -42,6 +42,22 @@ bool get supportsFileStorage => impl.supportsFileStorage;
 /// file instead, or skipped where the API in question only accepts bytes.
 const int kMaxInMemoryAssetBytes = 64 * 1024 * 1024;
 
+/// Streams [bytes] straight to storage, so a 150 MB textbook never has to be
+/// held in one allocation. Web has no filesystem and buffers instead.
+Future<StoredAsset> writeAssetStream(
+  String id,
+  Stream<List<int>> bytes, {
+  String extension = 'bin',
+}) =>
+    impl.writeAssetStream(id, bytes, extension: extension);
+
+/// Size of a file on disk, or null where there is no filesystem.
+Future<int?> assetFileSize(String localPath) => impl.assetFileSize(localPath);
+
+/// A byte range of a stored file, for uploading it a part at a time.
+Stream<List<int>> readAssetSlice(String localPath, int start, int end) =>
+    impl.readAssetSlice(localPath, start, end);
+
 /// Whether an asset's bytes can actually be retrieved, *without* reading them.
 ///
 /// Asking [readAsset] this question costs the size of the file, which is the

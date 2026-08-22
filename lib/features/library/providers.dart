@@ -14,6 +14,7 @@ final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {
   return LibraryRepository(
     ref.watch(databaseProvider),
     ref.watch(uuidProvider),
+    ref.watch(assetRepositoryProvider),
     ownerUid: user?.uid,
   );
 });

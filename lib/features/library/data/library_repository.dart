@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../../../core/db/database.dart';
 import '../../../core/models/enums.dart';
 import '../../../core/models/margin_spec.dart';
+import 'asset_repository.dart';
 
 /// How library grids can be ordered.
 enum LibrarySort { nameAsc, nameDesc, modifiedDesc, createdDesc }
@@ -15,10 +16,16 @@ enum LibrarySort { nameAsc, nameDesc, modifiedDesc, createdDesc }
 /// else, so signing out doesn't leave one person's notes on screen for the
 /// next user of the device.
 class LibraryRepository {
-  LibraryRepository(this._db, this._uuid, {this.ownerUid});
+  LibraryRepository(
+    this._db,
+    this._uuid,
+    this._assets, {
+    this.ownerUid,
+  });
 
   final AppDatabase _db;
   final Uuid _uuid;
+  final AssetRepository _assets;
 
   /// Firebase uid of the signed-in account, or null when signed out.
   final String? ownerUid;
@@ -101,6 +108,10 @@ class LibraryRepository {
         .get();
     return rows.length;
   }
+
+  /// On-disk bytes for this document's PDF/image assets (deduped by asset id).
+  Future<int> storageBytesFor(String documentId) =>
+      _assets.bytesForDocument(documentId);
 
   /// Live count of a document's live (non-tombstoned) pages, for the library
   /// card meta line. A count query rather than fetching rows so a 348-page PDF
@@ -266,6 +277,7 @@ class LibraryRepository {
         dirty: const Value(true),
       ),
     );
+    await _assets.releaseOrphanedAssets();
   }
 
   /// Assigns any unowned local documents to [uid].
@@ -292,5 +304,6 @@ class LibraryRepository {
           updatedAt: Value(now),
           dirty: const Value(true),
         ));
+    await _assets.releaseOrphanedAssets();
   }
 }

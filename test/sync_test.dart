@@ -71,4 +71,32 @@ void main() {
     expect(const SyncStatus(phase: SyncPhase.syncing).isBusy, isTrue);
     expect(const SyncStatus(phase: SyncPhase.offline).isBusy, isFalse);
   });
+
+  test('SyncStatus progress defaults to null', () {
+    const s = SyncStatus();
+    expect(s.progress, isNull);
+    expect(s.progressMessage, isNull);
+  });
+
+  test('SyncStatus progress is carried through copyWith', () {
+    const s = SyncStatus(
+      phase: SyncPhase.syncing,
+      progress: 0.5,
+      progressMessage: 'Uploading…',
+    );
+    final s2 = s.copyWith(progress: 0.75, progressMessage: 'Downloading…');
+    expect(s2.progress, 0.75);
+    expect(s2.progressMessage, 'Downloading…');
+  });
+
+  test('SyncStatus clearProgress resets progress and message', () {
+    const s = SyncStatus(
+      phase: SyncPhase.syncing,
+      progress: 0.5,
+      progressMessage: 'Uploading…',
+    );
+    final s2 = s.copyWith(clearProgress: true);
+    expect(s2.progress, isNull);
+    expect(s2.progressMessage, isNull);
+  });
 }

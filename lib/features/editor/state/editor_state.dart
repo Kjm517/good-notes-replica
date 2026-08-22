@@ -7,6 +7,9 @@ import '../../../core/models/margin_spec.dart';
 import 'lasso_selection.dart';
 import 'tool_settings.dart';
 
+/// Tool selected whenever a document is opened (pan/zoom, not ink).
+const kDefaultEditorTool = ToolType.hand;
+
 /// Immutable snapshot of the editor for the current document.
 @immutable
 class EditorState {
@@ -14,7 +17,7 @@ class EditorState {
     this.pages = const [],
     this.currentIndex = 0,
     this.strokesByPage = const {},
-    this.tool = ToolType.hand,
+    this.tool = kDefaultEditorTool,
     this.eraserMode = EraserMode.stroke,
     required this.toolSettings,
     this.loading = true,

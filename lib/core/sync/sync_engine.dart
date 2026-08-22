@@ -53,6 +53,10 @@ class SyncEngine {
 
   DateTime? _lastSyncedAt;
   bool _running = false;
+
+  /// Why the last file upload failed, if it did. Surfaced in the sync status
+  /// so a stuck upload explains itself rather than looking merely slow.
+  String? _lastUploadError;
   bool _paused = false;
   Timer? _debounce;
   StreamSubscription<void>? _watch;
@@ -62,6 +66,9 @@ class SyncEngine {
   /// True if something changed while a sync was already running, so the run
   /// that follows doesn't miss it.
   bool _missedUpdate = false;
+
+  /// Last progress fraction emitted — reused when tagging a file download.
+  double _lastProgress = 0;
 
   /// How long to wait after the last change before syncing. Long enough that a
   /// burst of strokes becomes one upload, short enough to feel automatic.
@@ -81,6 +88,7 @@ class SyncEngine {
           _db.strokes,
           _db.canvasElements,
           _db.assets,
+          _db.quizAttempts,
         ]))
         .listen((_) {
       if (_running) {
@@ -168,9 +176,25 @@ class SyncEngine {
     unawaited(_net?.cancel());
   }
 
+  /// Re-reads the whole account from the cloud, ignoring the incremental
+  /// cursor, then pushes anything local.
+  ///
+  /// This is what the refresh button runs. Incremental pulls ask only for
+  /// records newer than the last run, which is fast but trusts that every
+  /// device's clock agrees: `updatedAt` is stamped by whichever device made
+  /// the change, so a tablet running a few minutes behind writes records that
+  /// look older than this device's cursor and are skipped indefinitely. A
+  /// delete is the case where that is most obvious and least acceptable — the
+  /// file simply stays. Refresh drops the cursor so the answer is always the
+  /// cloud's current truth.
+  Future<void> refreshNow() => syncNow(full: true);
+
   /// Runs a full push + pull. Safe to call repeatedly; overlapping calls are
   /// ignored rather than queued.
-  Future<void> syncNow() async {
+  ///
+  /// [full] pulls every record rather than only those newer than the last
+  /// sync. Slower, so it is reserved for an explicit refresh.
+  Future<void> syncNow({bool full = false}) async {
     if (_running) return;
     if (_paused) {
       _emit(_pausedStatus);
@@ -181,19 +205,39 @@ class SyncEngine {
       return;
     }
     _running = true;
-    _emit(const SyncStatus(phase: SyncPhase.syncing));
+    _emitProgress(0.0, 'Syncing…');
     // Stamp the cursor *before* talking to the cloud. Stamping afterwards
     // skips anything that landed during a long pull — the other device's
     // PDF import is the usual casualty.
     final startedAt = DateTime.now();
     try {
       await _push();
-      await _pull();
+      await _pull(full: full);
       _lastSyncedAt = startedAt;
-      _emit(SyncStatus(
-        phase: SyncPhase.idle,
-        lastSyncedAt: _lastSyncedAt,
-      ));
+      final pendingFiles = await _pendingFileUploadCount();
+      if (pendingFiles > 0) {
+        // Notes may be idle while a large PDF is still waiting on R2 — don't
+        // claim "fully synced" or the library card stays stuck on Uploading.
+        _emit(SyncStatus(
+          phase: SyncPhase.pending,
+          pendingChanges: pendingFiles,
+          lastSyncedAt: _lastSyncedAt,
+          // A repeatedly failing upload used to look identical to a slow
+          // one: both sat on "still uploading" with the reason only in the
+          // debug console. Say what went wrong instead.
+          message: _lastUploadError != null
+              ? 'Upload failed: $_lastUploadError'
+              : pendingFiles == 1
+                  ? '1 file still uploading'
+                  : '$pendingFiles files still uploading',
+        ));
+        scheduleSync(delay: const Duration(seconds: 12));
+      } else {
+        _emit(SyncStatus(
+          phase: SyncPhase.idle,
+          lastSyncedAt: _lastSyncedAt,
+        ));
+      }
     } catch (e) {
       debugPrint('Sync failed: $e');
       final online = await _online();
@@ -222,17 +266,76 @@ class SyncEngine {
 
   void _emit(SyncStatus status) => onStatus?.call(status);
 
+  void _emitProgress(
+    double progress,
+    String message, {
+    String? activeAssetId,
+  }) {
+    _lastProgress = progress.clamp(0.0, 1.0);
+    _emit(SyncStatus(
+      phase: SyncPhase.syncing,
+      progress: _lastProgress,
+      progressMessage: message,
+      activeAssetId: activeAssetId,
+    ));
+  }
+
   // ---- Push ----------------------------------------------------------------
 
   Future<void> _push() async {
+    _emitProgress(0.05, 'Claiming documents…');
     await _claimUnownedDocuments();
+    _emitProgress(0.15, 'Uploading documents…');
     await _pushDocuments();
+    _emitProgress(0.25, 'Uploading pages…');
     await _pushPages();
-    // Bytes and asset metadata first so a pulled image/sticker already has a
-    // remoteKey by the time its canvas element lands on the other device.
+    _emitProgress(0.35, 'Uploading assets…');
     await _pushAssets();
+    _emitProgress(0.45, 'Uploading elements…');
     await _pushElements();
+    _emitProgress(0.50, 'Uploading quizzes…');
+    await _pushQuizzes();
+    _emitProgress(0.55, 'Uploading ink…');
     await _pushInk();
+  }
+
+  /// Quiz history: what was generated, what was answered, and how it scored.
+  ///
+  /// The questions and answers already travel as JSON on the row, so the whole
+  /// attempt replicates as one record — including the highlight each answer
+  /// resolved to, which is why a synced quiz opens on the marked page without
+  /// re-reading the PDF.
+  Future<void> _pushQuizzes() async {
+    final rows = await (_db.select(_db.quizAttempts)
+          ..where((q) => q.dirty.equals(true)))
+        .get();
+    if (rows.isEmpty) return;
+
+    await _remote.upsert(
+      RemoteCollection.quizzes,
+      [
+        for (final q in rows)
+          RemoteRecord(
+            id: q.id,
+            updatedAt: q.updatedAt,
+            deletedAt: q.deletedAt,
+            data: {
+              'documentId': q.documentId,
+              'familyId': q.familyId,
+              'title': q.title,
+              'sourceLabel': q.sourceLabel,
+              'questionCount': q.questionCount,
+              'correctCount': q.correctCount,
+              'durationMs': q.durationMs,
+              'questionsJson': q.questionsJson,
+              'answersJson': q.answersJson,
+              'completedAt': q.completedAt.toIso8601String(),
+              'completed': q.completed,
+            },
+          ),
+      ],
+    );
+    await _clearDirty(_db.quizAttempts, rows.map((q) => q.id));
   }
 
   /// Notes created before sign-in (or during the auth-restore splash) have a
@@ -248,12 +351,44 @@ class SyncEngine {
     );
   }
 
+  /// Files this device still owes the cloud.
+  ///
+  /// Notes finish long before a textbook does, so a run that has pushed every
+  /// row can still leave the PDF uploading. Reporting that as idle is what
+  /// made the library card sit on "Uploading" with nothing apparently
+  /// happening.
+  ///
+  /// The local-bytes clause is what stops the opposite mistake. An asset that
+  /// arrived here as metadata only — synced from the device that imported it,
+  /// before that device finished uploading — also has no remoteKey, but this
+  /// device has nothing to send and never will. Counting those meant a second
+  /// device sat on "6 files still uploading" forever, re-running a sync every
+  /// 12 seconds for work that was never its to do.
+  Future<int> _pendingFileUploadCount() async {
+    if (_files == null || !_files.enabled) return 0;
+    final count = _db.assets.id.count();
+    final query = _db.selectOnly(_db.assets)
+      ..addColumns([count])
+      ..where(_db.assets.remoteKey.isNull() &
+          _db.assets.deletedAt.isNull() &
+          (_db.assets.localPath.isNotNull() | _db.assets.data.isNotNull()));
+    return (await query.getSingle()).read(count) ?? 0;
+  }
+
   /// Records assets in the cloud and uploads any bytes not there yet.
   Future<void> _pushAssets() async {
     // Bytes first so the metadata upsert includes remoteKey. The previous
     // order wrote remoteKey locally *after* clearing dirty, so Firestore kept
     // a null key and the other device had nothing to download.
-    await _files?.uploadPending();
+    _lastUploadError = await _files?.uploadPending(
+      onProgress: (assetId, fraction) {
+        _emitProgress(
+          fraction,
+          'Uploading file…',
+          activeAssetId: assetId,
+        );
+      },
+    );
 
     final rows =
         await (_db.select(_db.assets)..where((a) => a.dirty.equals(true)))
@@ -433,13 +568,32 @@ class SyncEngine {
 
   // ---- Pull ----------------------------------------------------------------
 
-  Future<void> _pull() async {
+  Future<void> _pull({bool full = false}) async {
     // Inclusive overlap: the cursor is a live DateTime while SQLite stores
     // milliseconds, so a strict "after last sync" misses edits from the same
     // tick — drawings and stickers added right after a sync are the usual miss.
-    final since = _lastSyncedAt?.subtract(const Duration(seconds: 2));
+    //
+    // The window is minutes rather than seconds because `updatedAt` comes from
+    // the clock of whichever device made the change. Two phones are routinely
+    // tens of seconds apart, and an emulator can be further out still; a
+    // two-second overlap silently drops anything written by a device running
+    // behind this one. Re-examining a few minutes of records each pull is
+    // cheap — they are compared by last-write-wins and mostly discarded — and
+    // it is the difference between a delete arriving and never arriving.
+    final since = full
+        ? null
+        : _lastSyncedAt?.subtract(const Duration(minutes: 5));
+    // Documents (and their pages) must land before ink/elements — strokes and
+    // canvas rows FK to note_pages, and inserting first throws SqliteException
+    // 787 and aborts the whole sync.
+    _emitProgress(0.60, 'Downloading documents…');
     await _pullDocuments(since);
+    _emitProgress(0.75, 'Downloading elements…');
     await _pullElements(since: since);
+    _emitProgress(0.85, 'Downloading drawings…');
+    await _pullInkChanged(since);
+    _emitProgress(0.95, 'Downloading quizzes…');
+    await _pullQuizzes(since);
   }
 
   Future<void> _pullDocuments(DateTime? since) async {
@@ -539,7 +693,6 @@ class SyncEngine {
             remoteDeletedAt: record.deletedAt,
           )) {
         if (!record.isDeleted) {
-          await _pullInk(record.id);
           final skippedPdf = record.data['pdfAssetId'] as String?;
           final skippedBg = record.data['bgAssetId'] as String?;
           if (skippedPdf != null && ensuredAssets.add(skippedPdf)) {
@@ -576,8 +729,6 @@ class SyncEngine {
             ),
           );
 
-      if (!record.isDeleted) await _pullInk(record.id);
-
       // PDF / image pages point at an asset; make sure its metadata (and, when
       // possible, its bytes) land on this device — otherwise the editor paints
       // blank pages and logs "Missing PDF asset".
@@ -589,6 +740,62 @@ class SyncEngine {
       if (bgId != null && ensuredAssets.add(bgId)) {
         await _ensureAsset(bgId);
       }
+    }
+  }
+
+  /// Brings quiz history down from the cloud.
+  ///
+  /// An attempt belongs to a document, so one that arrives before its
+  /// notebook does is skipped rather than inserted against a missing row —
+  /// the next pull, with the document present, takes it.
+  Future<void> _pullQuizzes(DateTime? since) async {
+    final records =
+        await _remote.fetchChanged(RemoteCollection.quizzes, since: since);
+    for (final record in records) {
+      final documentId = record.data['documentId'] as String?;
+      if (documentId == null) continue;
+
+      final local = await (_db.select(_db.quizAttempts)
+            ..where((q) => q.id.equals(record.id)))
+          .getSingleOrNull();
+      if (local != null &&
+          !remoteWins(
+            localUpdatedAt: local.updatedAt,
+            remoteUpdatedAt: record.updatedAt,
+            remoteDeletedAt: record.deletedAt,
+          )) {
+        continue;
+      }
+
+      final owner = await (_db.select(_db.documents)
+            ..where((d) => d.id.equals(documentId)))
+          .getSingleOrNull();
+      if (owner == null) continue;
+
+      await _db.into(_db.quizAttempts).insertOnConflictUpdate(
+            QuizAttemptsCompanion.insert(
+              id: record.id,
+              documentId: documentId,
+              familyId: record.data['familyId'] as String? ?? '',
+              title: record.data['title'] as String? ?? '',
+              sourceLabel: Value(record.data['sourceLabel'] as String? ?? ''),
+              questionCount:
+                  (record.data['questionCount'] as num?)?.toInt() ?? 0,
+              correctCount: (record.data['correctCount'] as num?)?.toInt() ?? 0,
+              durationMs: Value((record.data['durationMs'] as num?)?.toInt() ?? 0),
+              questionsJson: record.data['questionsJson'] as String? ?? '[]',
+              answersJson: record.data['answersJson'] as String? ?? '{}',
+              completedAt: Value(
+                DateTime.tryParse(record.data['completedAt'] as String? ?? '') ??
+                    record.updatedAt,
+              ),
+              completed: Value(record.data['completed'] as bool? ?? true),
+              updatedAt: Value(record.updatedAt),
+              deletedAt: Value(record.deletedAt),
+              dirty: const Value(false),
+              remoteUpdatedAt: Value(record.updatedAt),
+            ),
+          );
     }
   }
 
@@ -696,6 +903,11 @@ class SyncEngine {
           );
     }
 
+    _emitProgress(
+      _lastProgress,
+      'Downloading file…',
+      activeAssetId: assetId,
+    );
     await _files?.download(assetId);
   }
 
@@ -735,45 +947,82 @@ class SyncEngine {
 
   /// Replaces a page's strokes with the cloud copy. Whole-page granularity is
   /// deliberate: it matches how ink is pushed.
-  Future<void> _pullInk(String pageId) async {
+  /// Pulls every page of ink that changed, in pages of [_inkBatch].
+  ///
+  /// The old shape asked the cloud about each page in turn, so a pull of a
+  /// 900-page textbook made 900 sequential round trips to discover that
+  /// almost none of them had been drawn on. One query per batch replaces the
+  /// lot; a device that has never synced walks through the backlog a batch at
+  /// a time across runs rather than stalling on one.
+  static const int _inkBatch = 50;
+  static const int _inkRounds = 40;
+
+  Future<void> _pullInkChanged(DateTime? since) async {
+    var cursor = since;
+    for (var round = 0; round < _inkRounds; round++) {
+      final batch = await _remote.fetchInkChanged(since: cursor, limit: _inkBatch);
+      if (batch.isEmpty) return;
+      for (final ink in batch) {
+        await _applyInk(ink.pageId, ink.bytes);
+      }
+      if (batch.length < _inkBatch) return;
+      // Ties on the same millisecond are re-applied next round; applying ink
+      // twice is harmless, skipping a page is not.
+      cursor = batch.last.updatedAt;
+    }
+  }
+
+  /// Replaces a page's strokes with the cloud's copy, unless this device has
+  /// unsent edits of its own — those win until they are pushed.
+  Future<void> _applyInk(String pageId, Uint8List blob) async {
+    if (blob.isEmpty) return;
+    final page = await (_db.select(_db.notePages)
+          ..where((p) => p.id.equals(pageId)))
+        .getSingleOrNull();
+    if (page == null) {
+      // Orphan ink (page not pulled yet, or already deleted). Retry next run
+      // once the page row exists — never FK-crash the whole sync for it.
+      return;
+    }
     final dirty = await (_db.select(_db.strokes)
           ..where((s) => s.pageId.equals(pageId) & s.dirty.equals(true))
           ..limit(1))
         .get();
     if (dirty.isNotEmpty) return;
-
-    final blob = await _remote.fetchInk(pageId);
-    if (blob == null || blob.isEmpty) return;
     final strokes = decodeInkPage(blob);
 
-    await _db.transaction(() async {
-      await (_db.delete(_db.strokes)..where((s) => s.pageId.equals(pageId)))
-          .go();
-      for (final stroke in strokes) {
-        final bounds = stroke.bounds;
-        await _db.into(_db.strokes).insert(
-              StrokesCompanion.insert(
-                id: stroke.id,
-                pageId: pageId,
-                tool: stroke.tool,
-                color: stroke.color,
-                width: stroke.width,
-                opacity: Value(stroke.opacity),
-                points: stroke.packPoints(),
-                style: Value(stroke.style),
-                filled: Value(stroke.filled),
-                tip: Value(stroke.tip),
-                bboxL: bounds.left,
-                bboxT: bounds.top,
-                bboxR: bounds.right,
-                bboxB: bounds.bottom,
-                seq: stroke.seq,
-                dirty: const Value(false),
-              ),
-              mode: InsertMode.insertOrReplace,
-            );
-      }
-    });
+    try {
+      await _db.transaction(() async {
+        await (_db.delete(_db.strokes)..where((s) => s.pageId.equals(pageId)))
+            .go();
+        for (final stroke in strokes) {
+          final bounds = stroke.bounds;
+          await _db.into(_db.strokes).insert(
+                StrokesCompanion.insert(
+                  id: stroke.id,
+                  pageId: pageId,
+                  tool: stroke.tool,
+                  color: stroke.color,
+                  width: stroke.width,
+                  opacity: Value(stroke.opacity),
+                  points: stroke.packPoints(),
+                  style: Value(stroke.style),
+                  filled: Value(stroke.filled),
+                  tip: Value(stroke.tip),
+                  bboxL: bounds.left,
+                  bboxT: bounds.top,
+                  bboxR: bounds.right,
+                  bboxB: bounds.bottom,
+                  seq: stroke.seq,
+                  dirty: const Value(false),
+                ),
+                mode: InsertMode.insertOrReplace,
+              );
+        }
+      });
+    } catch (e) {
+      debugPrint('Skip ink for $pageId: $e');
+    }
   }
 
   DateTime? _millis(Object? value) => value is num

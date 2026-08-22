@@ -15,7 +15,7 @@ class QuizHistoryRepository {
 
   Stream<List<QuizHistoryRecord>> watchForDocument(String documentId) {
     final q = _db.select(_db.quizAttempts)
-      ..where((t) => t.documentId.equals(documentId))
+      ..where((t) => t.documentId.equals(documentId) & t.deletedAt.isNull())
       ..orderBy([(t) => OrderingTerm.desc(t.completedAt)]);
     return q.watch().map((rows) => [for (final row in rows) _fromRow(row)]);
   }
@@ -107,28 +107,46 @@ class QuizHistoryRepository {
         answersJson: Value(jsonEncode([for (final a in filled) a.toJson()])),
         completed: const Value(true),
         completedAt: Value(DateTime.now()),
+        // Without these the finished attempt stays on this device: it was
+        // marked clean by whatever sync ran while the quiz was being taken.
+        updatedAt: Value(DateTime.now()),
+        dirty: const Value(true),
       ),
     );
   }
 
   /// Removes every attempt of one generated question set.
+  ///
+  /// A tombstone rather than a hard delete: sync would otherwise pull the row
+  /// straight back from another device that had not heard about the deletion.
   Future<int> deleteFamily({
     required String documentId,
     required String familyId,
   }) {
-    return (_db.delete(_db.quizAttempts)
+    return (_db.update(_db.quizAttempts)
           ..where(
             (t) =>
-                t.documentId.equals(documentId) & t.familyId.equals(familyId),
+                t.documentId.equals(documentId) &
+                t.familyId.equals(familyId) &
+                t.deletedAt.isNull(),
           ))
-        .go();
+        .write(_tombstone());
   }
 
   /// Removes every saved quiz for [documentId].
   Future<int> deleteAllForDocument(String documentId) {
-    return (_db.delete(_db.quizAttempts)
-          ..where((t) => t.documentId.equals(documentId)))
-        .go();
+    return (_db.update(_db.quizAttempts)
+          ..where((t) => t.documentId.equals(documentId) & t.deletedAt.isNull()))
+        .write(_tombstone());
+  }
+
+  QuizAttemptsCompanion _tombstone() {
+    final now = DateTime.now();
+    return QuizAttemptsCompanion(
+      deletedAt: Value(now),
+      updatedAt: Value(now),
+      dirty: const Value(true),
+    );
   }
 
   QuizHistoryRecord _fromRow(QuizAttempt row) {

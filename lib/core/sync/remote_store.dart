@@ -20,9 +20,22 @@ class RemoteRecord {
   bool get isDeleted => deletedAt != null;
 }
 
+/// One page's ink, as it travels back from the cloud.
+class RemoteInk {
+  const RemoteInk({
+    required this.pageId,
+    required this.bytes,
+    required this.updatedAt,
+  });
+
+  final String pageId;
+  final Uint8List bytes;
+  final DateTime updatedAt;
+}
+
 /// Which collection a record belongs to. Kept small and explicit so the
 /// Firestore paths stay in one place.
-enum RemoteCollection { documents, pages, elements, assets }
+enum RemoteCollection { documents, pages, elements, assets, quizzes }
 
 /// The cloud side of sync. Implemented by Firestore in production and by a
 /// fake in tests.
@@ -48,6 +61,16 @@ abstract class RemoteStore {
   /// document per stroke — a page can hold hundreds of strokes and Firestore
   /// bills per write.
   Future<Uint8List?> fetchInk(String pageId);
+
+  /// Ink changed since [since], oldest first, at most [limit] per call.
+  ///
+  /// Asking page by page costs one round trip per page, so opening a 900-page
+  /// textbook on a second device spent minutes asking about pages that had
+  /// never been drawn on. This asks once for whatever actually changed.
+  Future<List<RemoteInk>> fetchInkChanged({
+    DateTime? since,
+    int limit = 50,
+  });
 
   /// Returns false when the blob was not stored (e.g. over Firestore's size
   /// cap) so the engine can leave the local strokes dirty and retry.

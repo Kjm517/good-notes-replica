@@ -114,7 +114,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   }
 
   Future<void> _queueCurrent() async {
-    await ref.read(quizQueueProvider.notifier).enqueue(
+    await ref
+        .read(quizQueueProvider.notifier)
+        .enqueue(
           QueuedQuizJob(
             documentId: widget.documentId,
             title: widget.title,
@@ -195,9 +197,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
         if (pagesToExtract.contains(page.pageIndex))
           SourcePassage(pageIndex: page.pageIndex, sentence: page.text),
     ];
-    final notePages = await ref.read(pageRepositoryProvider).getPages(
-          widget.documentId,
-        );
+    final notePages = await ref
+        .read(pageRepositoryProvider)
+        .getPages(widget.documentId);
     final selectedPages = [
       for (final page in notePages)
         if (pagesToExtract.contains(page.pageIndex)) page,
@@ -208,12 +210,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     var attemptedImages = false;
     if (canRender) {
       attemptedImages = true;
-      images.addAll(
-        await _pageImagesForQuiz(
-          selectedPages,
-          backgrounds,
-        ),
-      );
+      images.addAll(await _pageImagesForQuiz(selectedPages, backgrounds));
     }
     if (!mounted) return;
     setState(() {
@@ -243,9 +240,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
         );
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_aiFailureMessage(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_aiFailureMessage(e))));
       return;
     }
     if (!mounted) return;
@@ -284,7 +281,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     final familyId = ref.read(uuidProvider).v4();
     String? draftId;
     try {
-      draftId = await ref.read(quizHistoryRepositoryProvider).saveGenerated(
+      draftId = await ref
+          .read(quizHistoryRepositoryProvider)
+          .saveGenerated(
             documentId: widget.documentId,
             familyId: familyId,
             title: _quizTitle(),
@@ -316,8 +315,11 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   }
 
   List<OutlineNode> get _outlineTree {
-    final json =
-        ref.read(documentStreamProvider(widget.documentId)).asData?.value?.outline;
+    final json = ref
+        .read(documentStreamProvider(widget.documentId))
+        .asData
+        ?.value
+        ?.outline;
     return OutlineNode.nest(OutlineEntry.decode(json));
   }
 
@@ -378,9 +380,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     if (passages.every((p) => p.sentence.trim().isEmpty)) {
       return pendingExtract
           ? 'Could not extract text from this file. Try a smaller page '
-              'range, then generate again.'
+                'range, then generate again.'
           : 'These pages have no selectable text. Generate again so Gemini '
-              'can read the page images.';
+                'can read the page images.';
     }
     return 'Not enough readable sentences on these pages to write a quiz. '
         'Try a wider page range.';
@@ -446,8 +448,10 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
               : question.copyWith(
                   pageIndex: location.pageIndex,
                   location: location,
-                  explanation:
-                      rewriteSeePage(question.explanation, location.pageIndex),
+                  explanation: rewriteSeePage(
+                    question.explanation,
+                    location.pageIndex,
+                  ),
                 ),
         );
       } catch (e) {
@@ -465,7 +469,8 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   /// and the one the question itself carries.
   List<int> _candidatePages(QuizQuestion question) {
     final last = math.max(0, widget.pageCount - 1);
-    final cited = firstCitedPageIndex(question.explanation) ?? question.pageIndex;
+    final cited =
+        firstCitedPageIndex(question.explanation) ?? question.pageIndex;
     return [
       cited.clamp(0, last),
       if (question.pageIndex != cited) question.pageIndex.clamp(0, last),
@@ -491,8 +496,8 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
           )
           .then((match) => _applySourceMatch(question.acceptedAnswer, match))
           .catchError((Object error) {
-        debugPrint('Quiz source prefetch failed: $error');
-      }),
+            debugPrint('Quiz source prefetch failed: $error');
+          }),
     );
   }
 
@@ -513,7 +518,10 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     next[index] = _questions[index].copyWith(
       pageIndex: location.pageIndex,
       location: location,
-      explanation: rewriteSeePage(_questions[index].explanation, location.pageIndex),
+      explanation: rewriteSeePage(
+        _questions[index].explanation,
+        location.pageIndex,
+      ),
     );
     setState(() => _questions = next);
   }
@@ -746,8 +754,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   }
 
   void _closeQuiz() {
-    if (_fromHistory &&
-        (_phase == _Phase.taking || _phase == _Phase.results)) {
+    if (_fromHistory && (_phase == _Phase.taking || _phase == _Phase.results)) {
       _timer?.cancel();
       setState(() {
         _fromHistory = false;
@@ -765,8 +772,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     Navigator.of(context).maybePop();
   }
 
-  int get _correctCount =>
-      _answers.values.where((a) => a.correct).length;
+  int get _correctCount => _answers.values.where((a) => a.correct).length;
 
   @override
   Widget build(BuildContext context) {
@@ -777,8 +783,12 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
         if (job.documentId == widget.documentId) job,
     ].firstOrNull;
     final hasHistory =
-        ref.watch(quizHistoryProvider(widget.documentId)).asData?.value.isNotEmpty ??
-            false;
+        ref
+            .watch(quizHistoryProvider(widget.documentId))
+            .asData
+            ?.value
+            .isNotEmpty ??
+        false;
     ref.listen<AsyncValue<bool>>(onlineProvider, (prev, next) {
       final wasOnline = prev?.asData?.value;
       final isOnline = next.asData?.value ?? false;
@@ -789,8 +799,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
         return;
       }
       if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
-      final job =
-          ref.read(quizQueueProvider.notifier).forDocument(widget.documentId);
+      final job = ref
+          .read(quizQueueProvider.notifier)
+          .forDocument(widget.documentId);
       if (job == null) return;
       _launchingQueued = true;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -805,60 +816,69 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     });
     final t = context.tokens;
     return PopScope(
-      canPop: !(_fromHistory &&
-          (_phase == _Phase.taking || _phase == _Phase.results)),
+      canPop:
+          !(_fromHistory &&
+              (_phase == _Phase.taking || _phase == _Phase.results)),
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _closeQuiz();
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-      value: Theme.of(context).brightness == Brightness.dark
-          ? SystemUiOverlayStyle.light
-          : SystemUiOverlayStyle.dark,
-      child: Scaffold(
-        backgroundColor: t.canvas,
-        appBar: AppBar(
-          backgroundColor: t.surfaceAlt,
-          surfaceTintColor: Colors.transparent,
-          leading: IconButton(
-            tooltip: _fromHistory &&
-                    (_phase == _Phase.taking || _phase == _Phase.results)
-                ? 'Quiz history'
-                : 'Close quiz',
-            icon: const Icon(Icons.close_rounded),
-            onPressed: _closeQuiz,
-          ),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                switch (_phase) {
-                  _Phase.setup || _Phase.generating => 'New quiz',
-                  _Phase.taking => '${widget.title} quiz',
-                  _Phase.results => 'Quiz results',
-                },
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-              ),
-              Text(
-                switch (_phase) {
-                  _Phase.setup || _Phase.generating => widget.title,
-                  _Phase.taking =>
-                    'Question ${_index + 1} of ${_questions.length}',
-                  _Phase.results =>
-                    '$_correctCount / ${_questions.length} correct',
-                },
-                style: AppTokens.mono(size: 11, color: t.textFaint),
+        value: Theme.of(context).brightness == Brightness.dark
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
+        child: Scaffold(
+          backgroundColor: t.canvas,
+          appBar: AppBar(
+            backgroundColor: t.surfaceAlt,
+            surfaceTintColor: Colors.transparent,
+            leading: IconButton(
+              tooltip:
+                  _fromHistory &&
+                      (_phase == _Phase.taking || _phase == _Phase.results)
+                  ? 'Quiz history'
+                  : 'Close quiz',
+              icon: const Icon(Icons.close_rounded),
+              onPressed: _closeQuiz,
+            ),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  switch (_phase) {
+                    _Phase.setup || _Phase.generating => 'New quiz',
+                    _Phase.taking => '${widget.title} quiz',
+                    _Phase.results => 'Quiz results',
+                  },
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  switch (_phase) {
+                    _Phase.setup || _Phase.generating => widget.title,
+                    _Phase.taking =>
+                      'Question ${_index + 1} of ${_questions.length}',
+                    _Phase.results =>
+                      '$_correctCount / ${_questions.length} correct',
+                  },
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTokens.mono(size: 11, color: t.textFaint),
+                ),
+              ],
+            ),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: _PremiumChip(),
               ),
             ],
           ),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: _PremiumChip(),
-            ),
-          ],
-        ),
-        body: switch (_phase) {
-          _Phase.setup => _SetupView(
+          body: switch (_phase) {
+            _Phase.setup => _SetupView(
               title: widget.title,
               config: _config,
               sourceLabel: _config.source.label(
@@ -873,16 +893,14 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
               onPickSource: _pickSource,
               onOpenHistory: _openHistory,
               onCancelQueue: () => unawaited(
-                ref
-                    .read(quizQueueProvider.notifier)
-                    .remove(widget.documentId),
+                ref.read(quizQueueProvider.notifier).remove(widget.documentId),
               ),
             ),
-          _Phase.generating => _GeneratingView(
+            _Phase.generating => _GeneratingView(
               progress: _progress,
               status: _status,
             ),
-          _Phase.taking => _TakingView(
+            _Phase.taking => _TakingView(
               question: _current,
               index: _index,
               total: _questions.length,
@@ -897,7 +915,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
               onNext: _next,
               onOpenPage: _openSourcePage,
             ),
-          _Phase.results => _ResultsView(
+            _Phase.results => _ResultsView(
               questions: _questions,
               answers: _answers,
               onNewQuiz: () => setState(() {
@@ -914,9 +932,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
               ),
               onOpenPage: _openSourcePage,
             ),
-        },
+          },
+        ),
       ),
-    ),
     );
   }
 }
@@ -1032,7 +1050,11 @@ class _SetupView extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               'Notably writes a practice exam for you',
-              style: TextStyle(fontSize: 13.5, height: 1.45, color: t.textSecondary),
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.45,
+                color: t.textSecondary,
+              ),
             ),
             _OfflineQuizBanner(
               online: online,
@@ -1042,7 +1064,10 @@ class _SetupView extends StatelessWidget {
               onCancelQueue: onCancelQueue,
             ),
             const SizedBox(height: 22),
-            Text('NUMBER OF QUESTIONS', style: AppTokens.sectionLabel(t.textFaint)),
+            Text(
+              'NUMBER OF QUESTIONS',
+              style: AppTokens.sectionLabel(t.textFaint),
+            ),
             const SizedBox(height: 10),
             Wrap(
               spacing: 10,
@@ -1052,7 +1077,8 @@ class _SetupView extends StatelessWidget {
                   _LengthCard(
                     length: length,
                     selected: config.count == length.count,
-                    onTap: () => onChanged(config.copyWith(count: length.count)),
+                    onTap: () =>
+                        onChanged(config.copyWith(count: length.count)),
                   ),
               ],
             ),
@@ -1062,7 +1088,8 @@ class _SetupView extends StatelessWidget {
             _TypeTile(
               label: 'Multiple choice',
               selected: config.kinds.contains(QuizKind.multipleChoice),
-              onTap: () => onChanged(_toggleKind(config, QuizKind.multipleChoice)),
+              onTap: () =>
+                  onChanged(_toggleKind(config, QuizKind.multipleChoice)),
             ),
             _TypeTile(
               label: 'True / false',
@@ -1096,7 +1123,10 @@ class _SetupView extends StatelessWidget {
               onTap: onPickSource,
             ),
             const SizedBox(height: 8),
-            Text('TIMER PER QUESTION', style: AppTokens.sectionLabel(t.textFaint)),
+            Text(
+              'TIMER PER QUESTION',
+              style: AppTokens.sectionLabel(t.textFaint),
+            ),
             const SizedBox(height: 10),
             _Segmented<QuizTimerMode>(
               value: config.timer,
@@ -1111,7 +1141,8 @@ class _SetupView extends StatelessWidget {
             ),
             const SizedBox(height: 28),
             FilledButton.icon(
-              onPressed: config.kinds.isEmpty ||
+              onPressed:
+                  config.kinds.isEmpty ||
                       (config.source.mode == QuizSourceMode.sections &&
                           config.source.sectionIds.isEmpty)
                   ? null
@@ -1125,9 +1156,7 @@ class _SetupView extends StatelessWidget {
                 ),
               ),
               icon: Icon(
-                online
-                    ? Icons.auto_awesome_rounded
-                    : Icons.schedule_rounded,
+                online ? Icons.auto_awesome_rounded : Icons.schedule_rounded,
               ),
               label: Text(
                 online
@@ -1171,22 +1200,22 @@ class _OfflineQuizBanner extends StatelessWidget {
     final offline = !online;
     final (icon, title, body) = switch ((online, queued)) {
       (false, false) => (
-          Icons.wifi_off_rounded,
-          kNetworkErrorTitle,
-          hasHistory
-              ? '$kNoWifiOrMobileData Queue this one, or retake a quiz you already took.'
-              : '$kNoWifiOrMobileData Queue this one and it will generate when you are back online.',
-        ),
+        Icons.wifi_off_rounded,
+        kNetworkErrorTitle,
+        hasHistory
+            ? '$kNoWifiOrMobileData Queue this one, or retake a quiz you already took.'
+            : '$kNoWifiOrMobileData Queue this one and it will generate when you are back online.',
+      ),
       (false, true) => (
-          Icons.schedule_rounded,
-          kNetworkErrorTitle,
-          'No Wi-Fi or mobile data. This quiz is queued and will start automatically when you are back online.',
-        ),
+        Icons.schedule_rounded,
+        kNetworkErrorTitle,
+        'No Wi-Fi or mobile data. This quiz is queued and will start automatically when you are back online.',
+      ),
       _ => (
-          Icons.cloud_done_rounded,
-          'Ready to generate',
-          'This quiz was queued while you were offline. Generate now, or remove it.',
-        ),
+        Icons.cloud_done_rounded,
+        'Ready to generate',
+        'This quiz was queued while you were offline. Generate now, or remove it.',
+      ),
     };
     final accent = offline ? scheme.error : t.premiumText;
     final fill = offline ? scheme.errorContainer : t.premiumSoft;
@@ -1305,11 +1334,18 @@ class _LengthCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   if (selected)
-                    Icon(Icons.check_circle_rounded, size: 18, color: t.premium),
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 18,
+                      color: t.premium,
+                    ),
                 ],
               ),
               const SizedBox(height: 4),
-              Text(length.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(
+                length.label,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
               Text(
                 length.hint,
                 style: AppTokens.mono(size: 11, color: t.textFaint),
@@ -1340,7 +1376,9 @@ class _TypeTile extends StatelessWidget {
       onTap: onTap,
       contentPadding: EdgeInsets.zero,
       leading: Icon(
-        selected ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+        selected
+            ? Icons.check_box_rounded
+            : Icons.check_box_outline_blank_rounded,
         color: selected ? t.premium : t.textMuted,
       ),
       title: Text(label),
@@ -1528,7 +1566,11 @@ class _TakingView extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (question.location != null) ...[
-                        Icon(Icons.brush_rounded, size: 13, color: t.premiumText),
+                        Icon(
+                          Icons.brush_rounded,
+                          size: 13,
+                          color: t.premiumText,
+                        ),
                         const SizedBox(width: 4),
                       ],
                       Text(
@@ -1541,14 +1583,21 @@ class _TakingView extends StatelessWidget {
                 if (showTimer) ...[
                   Icon(Icons.timer_outlined, size: 16, color: t.premiumText),
                   const SizedBox(width: 4),
-                  Text('$mm:$ss', style: AppTokens.mono(size: 13, color: t.premiumText)),
+                  Text(
+                    '$mm:$ss',
+                    style: AppTokens.mono(size: 13, color: t.premiumText),
+                  ),
                 ],
               ],
             ),
             const SizedBox(height: 8),
             Text(
               question.prompt,
-              style: const TextStyle(fontSize: 18, height: 1.35, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 18,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 18),
             if (question.choices.isNotEmpty)
@@ -1567,9 +1616,7 @@ class _TakingView extends StatelessWidget {
                 enabled: !revealed,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => onSubmitWritten(),
-                decoration: const InputDecoration(
-                  hintText: 'Type your answer',
-                ),
+                decoration: const InputDecoration(hintText: 'Type your answer'),
               ),
               const SizedBox(height: 10),
               if (!revealed)
@@ -1598,7 +1645,9 @@ class _TakingView extends StatelessWidget {
                           : 'Answer — ${question.acceptedAnswer}',
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
-                        color: (answer?.correct ?? false) ? t.premiumText : t.text,
+                        color: (answer?.correct ?? false)
+                            ? t.premiumText
+                            : t.text,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -1636,7 +1685,9 @@ class _TakingView extends StatelessWidget {
                         ? Icons.flag_rounded
                         : Icons.arrow_forward_rounded,
                   ),
-                  label: Text(index == total - 1 ? 'See results' : 'Next question'),
+                  label: Text(
+                    index == total - 1 ? 'See results' : 'Next question',
+                  ),
                 ),
               ],
             ),
@@ -1709,7 +1760,9 @@ class _ChoiceTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                Expanded(child: Text(label, style: const TextStyle(fontSize: 15))),
+                Expanded(
+                  child: Text(label, style: const TextStyle(fontSize: 15)),
+                ),
                 if (revealed && correct)
                   Icon(Icons.check_circle_rounded, color: t.premium),
               ],
@@ -1740,7 +1793,9 @@ class _ResultsView extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final correct = answers.values.where((a) => a.correct).length;
-    final pct = questions.isEmpty ? 0 : (correct * 100 / questions.length).round();
+    final pct = questions.isEmpty
+        ? 0
+        : (correct * 100 / questions.length).round();
     return Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
@@ -1791,7 +1846,9 @@ class _ResultsView extends StatelessWidget {
                   (answers[i]?.correct ?? false)
                       ? Icons.check_circle_rounded
                       : Icons.cancel_outlined,
-                  color: (answers[i]?.correct ?? false) ? t.premium : t.pdfBadge,
+                  color: (answers[i]?.correct ?? false)
+                      ? t.premium
+                      : t.pdfBadge,
                 ),
                 title: Text(
                   questions[i].prompt.split('\n').last,
@@ -1851,17 +1908,17 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
   }
 
   QuizSource _current() => switch (_mode) {
-        QuizSourceMode.all => const QuizSource(),
-        QuizSourceMode.sections => QuizSource(
-            mode: QuizSourceMode.sections,
-            sectionIds: _sectionIds,
-          ),
-        QuizSourceMode.pageRange => QuizSource(
-            mode: QuizSourceMode.pageRange,
-            startPage: math.min(_start, _end),
-            endPage: math.max(_start, _end),
-          ),
-      };
+    QuizSourceMode.all => const QuizSource(),
+    QuizSourceMode.sections => QuizSource(
+      mode: QuizSourceMode.sections,
+      sectionIds: _sectionIds,
+    ),
+    QuizSourceMode.pageRange => QuizSource(
+      mode: QuizSourceMode.pageRange,
+      startPage: math.min(_start, _end),
+      endPage: math.max(_start, _end),
+    ),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -1970,7 +2027,9 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
     final selected = _mode == mode;
     return ListTile(
       leading: Icon(
-        selected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+        selected
+            ? Icons.radio_button_checked_rounded
+            : Icons.radio_button_off_rounded,
         color: selected ? t.premiumText : t.textMuted,
       ),
       title: Text(title),
@@ -1995,8 +2054,8 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
             checked
                 ? Icons.check_box_rounded
                 : partial
-                    ? Icons.indeterminate_check_box_rounded
-                    : Icons.check_box_outline_blank_rounded,
+                ? Icons.indeterminate_check_box_rounded
+                : Icons.check_box_outline_blank_rounded,
             color: checked || partial ? t.premiumText : t.textMuted,
           ),
           title: Text(node.title, maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -2011,7 +2070,9 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
                     if (!_expanded.add(node.id)) _expanded.remove(node.id);
                   }),
                   icon: Icon(
-                    open ? Icons.expand_more_rounded : Icons.chevron_right_rounded,
+                    open
+                        ? Icons.expand_more_rounded
+                        : Icons.chevron_right_rounded,
                     color: t.textMuted,
                   ),
                 )
@@ -2026,4 +2087,3 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
     );
   }
 }
-

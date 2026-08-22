@@ -100,6 +100,9 @@ class _EditorState extends ConsumerState<_Editor> {
     super.initState();
     _canvasController.onJumpToPage = _recordPageJump;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref
+          .read(editorControllerProvider(widget.document.id).notifier)
+          .resetDefaultTool();
       unawaited(_prepareDocument());
     });
   }
@@ -146,17 +149,42 @@ class _EditorState extends ConsumerState<_Editor> {
         if (p.pdfAssetId != null) p.pdfAssetId!,
     };
     for (final id in assetIds) {
-      final present = await ref.read(assetRepositoryProvider).hasBytes(id);
-      if (present) continue;
+      final assets = ref.read(assetRepositoryProvider);
+      if (await assets.hasBytes(id)) continue;
       if (!mounted) return;
+
+      // The cloud holds the file, so this device fetches it rather than asking
+      // for it back. ensureDocumentAssets has already tried, so arriving here
+      // with a remote copy on record means the download has not finished —
+      // almost always because there is no connection.
+      final record = await assets.get(id);
+      if (!mounted) return;
+      if (record?.remoteKey != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'This PDF is saved to your account and will download on its '
+              'own. Check your connection and reopen the notebook.',
+            ),
+            duration: Duration(seconds: 6),
+          ),
+        );
+        _finishPrepare();
+        return;
+      }
+
+      // No copy in the cloud: it was imported before file sync reached it, or
+      // the device that imported it has not managed to upload yet. Only then
+      // is the original file worth asking for.
       final attached = await _attachMissingFile(id);
       if (!attached) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'This document’s PDF isn’t on this device. '
-                'Choose the original file when asked, or enable file sync.',
+                'This PDF has not reached your account yet. Open it on the '
+                'device you imported it on to finish uploading, or choose the '
+                'original file here.',
               ),
               duration: Duration(seconds: 6),
             ),
@@ -491,15 +519,8 @@ class _EditorState extends ConsumerState<_Editor> {
     // Default open on tablet/desktop; phones start closed so the PDF is full
     // width until the user taps Pages & outline.
     final sidebarOpen = _sidebarOpen ?? (tablet || (wideScreen && !tabletPortrait));
-    final spreadStart = (state.currentIndex ~/ 2) * 2;
-    final spreadEnd = spreadStart + 2 > state.pages.length
-        ? state.pages.length
-        : spreadStart + 2;
     final subtitle = state.pages.isEmpty
         ? 'No pages'
-        : layout.showsSideRail
-        ? 'Spread ${spreadStart ~/ 2 + 1} · pages '
-              '${spreadStart + 1}–$spreadEnd'
         : 'Page ${state.currentIndex + 1} of ${state.pages.length}';
 
     return PopScope(
@@ -677,7 +698,7 @@ class _EditorState extends ConsumerState<_Editor> {
                                 .updateTextData(id, data),
                             onEndEditText: _endEditElement,
                             palmRejection: ref.watch(palmRejectionProvider),
-                            twoPageSpread: layout.showsSideRail,
+                            twoPageSpread: false,
                             onScrollSettled: () => ref
                                 .read(pageBackgroundServiceProvider)
                                 .notifyScrollSettled(),

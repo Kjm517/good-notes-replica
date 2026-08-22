@@ -12,10 +12,7 @@ import 'quiz_models.dart';
 import 'quiz_source_preview.dart';
 
 class QuizHistoryAction {
-  const QuizHistoryAction({
-    required this.record,
-    this.missedOnly = false,
-  });
+  const QuizHistoryAction({required this.record, this.missedOnly = false});
 
   final QuizHistoryRecord record;
   final bool missedOnly;
@@ -75,6 +72,8 @@ class QuizHistoryPage extends ConsumerWidget {
         ),
         title: const Text(
           'Quiz history',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
         actions: [
@@ -105,8 +104,9 @@ class QuizHistoryPage extends ConsumerWidget {
                   const SizedBox(width: 4),
                   Text(
                     'PREMIUM',
-                    style: AppTokens.sectionLabel(t.premiumText)
-                        .copyWith(fontSize: 10),
+                    style: AppTokens.sectionLabel(
+                      t.premiumText,
+                    ).copyWith(fontSize: 10),
                   ),
                 ],
               ),
@@ -198,15 +198,13 @@ class QuizHistoryPage extends ConsumerWidget {
     final latest = group.latest;
     final extra = group.attempts.length > 1
         ? ' This also removes ${group.attempts.length - 1} retake'
-            '${group.attempts.length == 2 ? '' : 's'}.'
+              '${group.attempts.length == 2 ? '' : 's'}.'
         : '';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete quiz?'),
-        content: Text(
-          '“${latest.title}” will be removed from history.$extra',
-        ),
+        content: Text('“${latest.title}” will be removed from history.$extra'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -220,10 +218,9 @@ class QuizHistoryPage extends ConsumerWidget {
       ),
     );
     if (ok != true || !context.mounted) return;
-    await ref.read(quizHistoryRepositoryProvider).deleteFamily(
-          documentId: documentId,
-          familyId: latest.familyId,
-        );
+    await ref
+        .read(quizHistoryRepositoryProvider)
+        .deleteFamily(documentId: documentId, familyId: latest.familyId);
   }
 
   Future<void> _clearAll(BuildContext context, WidgetRef ref) async {
@@ -264,10 +261,7 @@ class _StatsRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: _StatTile(
-            value: '${stats.taken}',
-            label: 'Quizzes taken',
-          ),
+          child: _StatTile(value: '${stats.taken}', label: 'Quizzes taken'),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -278,10 +272,7 @@ class _StatsRow extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: _StatTile(
-            value: '${stats.dayStreak}',
-            label: 'Day streak',
-          ),
+          child: _StatTile(value: '${stats.dayStreak}', label: 'Day streak'),
         ),
       ],
     );
@@ -387,11 +378,12 @@ class _HistoryCard extends StatelessWidget {
       outline: outline,
       pageCount: pageCount,
     );
-    final showBook = headline.toLowerCase() != bookTitle.trim().toLowerCase() &&
+    final showBook =
+        headline.toLowerCase() != bookTitle.trim().toLowerCase() &&
         bookTitle.trim().isNotEmpty;
     final meta = taken
         ? '${latest.correctCount}/${latest.questionCount}'
-            ' · ${_relativeDay(latest.completedAt)}'
+              ' · ${_relativeDay(latest.completedAt)}'
         : '${latest.questionCount} questions · Not taken';
     return Material(
       color: t.surface,
@@ -484,8 +476,9 @@ class _HistoryCard extends StatelessWidget {
                   children: [
                     Text(
                       'Attempts',
-                      style: AppTokens.sectionLabel(t.textFaint)
-                          .copyWith(fontSize: 9),
+                      style: AppTokens.sectionLabel(
+                        t.textFaint,
+                      ).copyWith(fontSize: 9),
                     ),
                     const SizedBox(width: 8),
                     for (var i = 0; i < trail.length; i++) ...[
@@ -636,8 +629,7 @@ class _HistoryReviewPage extends StatelessWidget {
                 _ActionTile(
                   icon: Icons.tune_rounded,
                   title: 'Retake — missed only',
-                  subtitle:
-                      'Practise the ${missed.length} you got wrong',
+                  subtitle: 'Practise the ${missed.length} you got wrong',
                   onTap: () => Navigator.pop(
                     context,
                     QuizHistoryAction(record: latest, missedOnly: true),
@@ -647,10 +639,8 @@ class _HistoryReviewPage extends StatelessWidget {
                 icon: Icons.refresh_rounded,
                 title: 'Retake quiz',
                 subtitle: 'Same questions, new attempt',
-                onTap: () => Navigator.pop(
-                  context,
-                  QuizHistoryAction(record: latest),
-                ),
+                onTap: () =>
+                    Navigator.pop(context, QuizHistoryAction(record: latest)),
               ),
               const SizedBox(height: 12),
               for (var i = 0; i < latest.questions.length; i++)
@@ -703,7 +693,10 @@ class _ReviewStat extends StatelessWidget {
               weight: FontWeight.w700,
             ),
           ),
-          Text(label, style: AppTokens.sectionLabel(t.textFaint).copyWith(fontSize: 9)),
+          Text(
+            label,
+            style: AppTokens.sectionLabel(t.textFaint).copyWith(fontSize: 9),
+          ),
         ],
       ),
     );
@@ -734,7 +727,10 @@ class _ActionTile extends StatelessWidget {
         child: ListTile(
           onTap: onTap,
           leading: Icon(icon, color: t.premiumText),
-          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+          title: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
           subtitle: Text(subtitle, style: TextStyle(color: t.textMuted)),
           trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
           shape: RoundedRectangleBorder(

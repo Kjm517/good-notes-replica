@@ -52,7 +52,10 @@ class EditorController extends FamilyNotifier<EditorState, String> {
       }
     });
     _bootstrap(documentId);
-    return EditorState(toolSettings: defaultToolSettings());
+    return EditorState(
+      tool: kDefaultEditorTool,
+      toolSettings: defaultToolSettings(),
+    );
   }
 
   Future<void> _bootstrap(String documentId) async {
@@ -123,6 +126,10 @@ class EditorController extends FamilyNotifier<EditorState, String> {
   }
 
   // ---- Tool state ----------------------------------------------------------
+
+  /// Pan/zoom is the default every time a document is opened — not the last
+  /// ink tool the user had selected in a previous visit.
+  void resetDefaultTool() => setTool(kDefaultEditorTool);
 
   void setTool(ToolType tool) {
     if (tool == state.tool) return;

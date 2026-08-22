@@ -220,10 +220,8 @@ class Assets extends Table with SyncedTable {
   Set<Column> get primaryKey => {id};
 }
 
-/// A finished quiz run, kept locally so the history page can retake or review.
-///
-/// Not synced — each device records its own attempts.
-class QuizAttempts extends Table {
+/// A finished quiz run, kept locally and synced when signed in.
+class QuizAttempts extends Table with SyncedTable {
   TextColumn get id => text()();
   TextColumn get documentId =>
       text().references(Documents, #id, onDelete: KeyAction.cascade)();

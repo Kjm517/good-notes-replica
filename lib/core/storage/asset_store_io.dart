@@ -28,6 +28,33 @@ Future<StoredAsset> writeAsset(
   return StoredAsset(localPath: file.path);
 }
 
+/// Writes a stream to disk a chunk at a time. Nothing larger than one chunk
+/// is resident, which is what makes syncing a textbook possible at all.
+Future<StoredAsset> writeAssetStream(
+  String id,
+  Stream<List<int>> bytes, {
+  String extension = 'bin',
+}) async {
+  final dir = await _assetsDir();
+  final file = File(p.join(dir.path, '$id.$extension'));
+  final sink = file.openWrite();
+  try {
+    await sink.addStream(bytes);
+    await sink.flush();
+  } finally {
+    await sink.close();
+  }
+  return StoredAsset(localPath: file.path);
+}
+
+Stream<List<int>> readAssetSlice(String localPath, int start, int end) =>
+    File(localPath).openRead(start, end);
+
+Future<int?> assetFileSize(String localPath) async {
+  final file = File(localPath);
+  return file.existsSync() ? file.length() : null;
+}
+
 /// Hashes [sourcePath] while streaming it, so nothing larger than one chunk is
 /// ever resident. Returns the source's own path — nothing has been copied yet.
 Future<CopiedAsset> probeFile(String sourcePath) async {

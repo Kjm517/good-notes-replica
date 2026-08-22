@@ -4,4 +4,10 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Android 9+ blocks plain HTTP. Debug builds talk to services running on
+         the development machine over the LAN — the slide converter at
+         http://192.168.x.x:8080 — which have no certificate. This override
+         lives in the debug manifest only, so release builds stay strict. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

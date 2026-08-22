@@ -16,7 +16,7 @@ class AppDatabase extends _$AppDatabase {
       : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -116,6 +116,24 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 14) {
             await m.addColumn(quizAttempts, quizAttempts.completed);
+          }
+          if (from < 15) {
+            // Quiz history was local-only, so a device that signed in
+            // elsewhere started with an empty record of what it had studied.
+            //
+            // SQLite ALTER TABLE only allows constant defaults — not
+            // currentDateAndTime — so add updated_at manually, then backfill.
+            await customStatement(
+              'ALTER TABLE quiz_attempts '
+              'ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0',
+            );
+            await customStatement(
+              'UPDATE quiz_attempts SET updated_at = completed_at '
+              'WHERE updated_at = 0',
+            );
+            await m.addColumn(quizAttempts, quizAttempts.deletedAt);
+            await m.addColumn(quizAttempts, quizAttempts.dirty);
+            await m.addColumn(quizAttempts, quizAttempts.remoteUpdatedAt);
           }
         },
         beforeOpen: (details) async {

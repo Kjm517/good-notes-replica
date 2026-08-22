@@ -7,9 +7,12 @@ import '../../app/design.dart';
 import '../../app/page_routes.dart';
 import '../../core/db/database.dart';
 import '../../core/models/enums.dart';
+import '../../core/storage/storage_quota.dart';
+import '../../core/sync/sync_providers.dart';
 import '../sync/sync_indicator.dart';
 import 'data/import_service.dart';
 import 'data/library_repository.dart';
+import 'document_transfer.dart';
 import 'providers.dart';
 import 'widgets/convert_to_pdf_dialog.dart';
 import 'widgets/create_sheet.dart';
@@ -226,33 +229,47 @@ class _DesktopHeader extends ConsumerWidget {
               const SizedBox(width: 4),
             ],
             Expanded(child: _SearchField(ref: ref)),
-            const SizedBox(width: 16),
-            _Segmented(
-              options: const [
-                (Icons.grid_view_rounded, 'Grid'),
-                (Icons.view_list_rounded, 'List'),
-              ],
-              selected: gridMode ? 0 : 1,
-              onSelect: (i) =>
-                  ref.read(libraryGridModeProvider.notifier).state = i == 0,
-            ),
-            const SizedBox(width: 10),
-            _SortButton(ref: ref),
-            const SizedBox(width: 10),
-            const SyncIndicator(),
-            IconButton(
-              tooltip: 'Settings',
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () => context.push('/settings'),
-            ),
-            const SizedBox(width: 10),
-            FilledButton.icon(
-              onPressed: () => runCreateFlow(context, ref, parentId: parentId),
-              icon: const Icon(Icons.add_rounded, size: 19),
-              label: const Text('New'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                minimumSize: const Size(0, 40),
+            const SizedBox(width: 12),
+            Flexible(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                reverse: true,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _Segmented(
+                      options: const [
+                        (Icons.grid_view_rounded, 'Grid'),
+                        (Icons.view_list_rounded, 'List'),
+                      ],
+                      selected: gridMode ? 0 : 1,
+                      onSelect: (i) =>
+                          ref.read(libraryGridModeProvider.notifier).state =
+                              i == 0,
+                    ),
+                    const SizedBox(width: 10),
+                    _SortButton(ref: ref),
+                    const SizedBox(width: 10),
+                    const _RefreshButton(),
+                    const SyncIndicator(),
+                    IconButton(
+                      tooltip: 'Settings',
+                      icon: const Icon(Icons.settings_outlined),
+                      onPressed: () => context.push('/settings'),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed: () =>
+                          runCreateFlow(context, ref, parentId: parentId),
+                      icon: const Icon(Icons.add_rounded, size: 19),
+                      label: const Text('New'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        minimumSize: const Size(0, 40),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -306,6 +323,7 @@ class _MobileHeader extends ConsumerWidget {
                       ),
                     ),
                   ),
+                  const _RefreshButton(),
                   const SyncIndicator(),
                   IconButton(
                     tooltip: 'Search',
@@ -427,9 +445,13 @@ class _SearchField extends StatelessWidget {
           children: [
             Icon(Icons.search_rounded, size: 19, color: t.textMuted),
             const SizedBox(width: 10),
-            Text(
-              'Search documents…',
-              style: TextStyle(fontSize: 14, color: t.textMuted),
+            Expanded(
+              child: Text(
+                'Search documents…',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 14, color: t.textMuted),
+              ),
             ),
           ],
         ),
@@ -521,78 +543,95 @@ class _Body extends StatelessWidget {
     ).read(libraryGridModeProvider);
     final pad = wide ? 28.0 : 20.0;
 
-    return CustomScrollView(
-      slivers: [
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(pad, wide ? 24 : 10, pad, 12),
-          sliver: SliverToBoxAdapter(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(
-                          text: parentId == null ? section.label : 'Contents',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: t.text,
+    // Pull-to-refresh does exactly what the toolbar button does. On a tablet
+    // reaching for the toolbar is fine; on a phone, dragging the shelf down is
+    // the gesture people already try when they want to know whether something
+    // deleted elsewhere has really gone.
+    return RefreshIndicator(
+      onRefresh: () async {
+        final ref = ProviderScope.containerOf(context);
+        final engine = ref.read(syncEngineProvider);
+        if (engine != null && !ref.read(syncPausedProvider)) {
+          await engine.refreshNow();
+        }
+      },
+      child: CustomScrollView(
+        // Always scrollable, or a shelf with one card is too short to drag
+        // and the gesture silently does nothing.
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(pad, wide ? 24 : 10, pad, 12),
+            sliver: SliverToBoxAdapter(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: parentId == null ? section.label : 'Contents',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: t.text,
+                            ),
                           ),
-                        ),
-                        TextSpan(
-                          text: '  · ${docs.length}',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: t.textFaint,
+                          TextSpan(
+                            text: '  · ${docs.length}',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                              color: t.textFaint,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                if (wide)
-                  Text(
-                    _sortCaption(context),
-                    style: AppTokens.mono(size: 12, color: t.textFaint),
-                  ),
-              ],
+                  if (wide)
+                    Text(
+                      _sortCaption(context),
+                      style: AppTokens.mono(size: 12, color: t.textFaint),
+                    ),
+                ],
+              ),
             ),
           ),
-        ),
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(pad, 0, pad, 110),
-          sliver: gridMode || !wide
-              ? SliverGrid(
-                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                    // Wider tiles on desktop (4 across a 1160px pane), two
-                    // columns on a phone.
-                    maxCrossAxisExtent: wide ? 230 : 190,
-                    childAspectRatio: 0.68,
-                    crossAxisSpacing: wide ? 22 : 16,
-                    mainAxisSpacing: wide ? 22 : 18,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, i) => DocumentCard(
-                      document: docs[i],
-                      onTap: () => _open(context, docs[i]),
-                      onLongPress: () => showDocumentActions(context, docs[i]),
-                      onStarTap: () => _toggleStar(context, docs[i]),
-                      onMore: () => showDocumentActions(context, docs[i]),
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(pad, 0, pad, 110),
+            sliver: gridMode || !wide
+                ? SliverGrid(
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      // Wider tiles on desktop (4 across a 1160px pane), two
+                      // columns on a phone.
+                      maxCrossAxisExtent: wide ? 230 : 190,
+                      childAspectRatio: 0.68,
+                      crossAxisSpacing: wide ? 22 : 16,
+                      mainAxisSpacing: wide ? 22 : 18,
                     ),
-                    childCount: docs.length,
+                    delegate: SliverChildBuilderDelegate(
+                      (context, i) => DocumentCard(
+                        document: docs[i],
+                        onTap: () => _open(context, docs[i]),
+                        onLongPress: () =>
+                            showDocumentActions(context, docs[i]),
+                        onStarTap: () => _toggleStar(context, docs[i]),
+                        onMore: () => showDocumentActions(context, docs[i]),
+                      ),
+                      childCount: docs.length,
+                    ),
+                  )
+                : SliverList.separated(
+                    itemCount: docs.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 6),
+                    itemBuilder: (context, i) => _ListRow(doc: docs[i]),
                   ),
-                )
-              : SliverList.separated(
-                  itemCount: docs.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 6),
-                  itemBuilder: (context, i) => _ListRow(doc: docs[i]),
-                ),
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -607,78 +646,118 @@ class _Body extends StatelessWidget {
   }
 }
 
-class _ListRow extends StatelessWidget {
+class _ListRow extends ConsumerWidget {
   const _ListRow({required this.doc});
   final Document doc;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(Radii.control),
-      child: InkWell(
+    final pendingUpload =
+        ref.watch(pendingUploadDocumentsProvider).asData?.value ?? const {};
+    final missingLocal =
+        ref.watch(missingLocalFileDocumentsProvider).asData?.value ?? const {};
+    final paused = ref.watch(syncPausedProvider);
+    final status = ref.watch(syncStatusProvider);
+    final transfer = documentTransferState(
+      documentId: doc.id,
+      pendingUpload: pendingUpload,
+      missingLocal: missingLocal,
+      status: status,
+      paused: paused,
+    );
+    final locked = transfer.locked;
+    final badgeLabel = transfer.listBadgeLabel(status);
+    final showTransfer = transfer.kind != DocumentTransferKind.none;
+
+    return Opacity(
+      opacity: locked ? 0.45 : 1,
+      child: Material(
+        color: t.surface,
         borderRadius: BorderRadius.circular(Radii.control),
-        onTap: () => _open(context, doc),
-        onLongPress: () => showDocumentActions(context, doc),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(Radii.control),
-            border: Border.all(color: t.line),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: t.fill,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  switch (doc.type) {
-                    DocumentType.folder => Icons.folder_rounded,
-                    DocumentType.notebook => Icons.menu_book_rounded,
-                    DocumentType.pdf => Icons.picture_as_pdf_rounded,
-                  },
-                  size: 19,
-                  color: doc.type == DocumentType.pdf
-                      ? t.pdfBadge
-                      : t.textSecondary,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  doc.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: t.text,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(Radii.control),
+          onTap: locked ? null : () => _open(context, doc),
+          onLongPress: () => showDocumentActions(context, doc),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(Radii.control),
+              border: Border.all(color: t.line),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: t.fill,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    showTransfer
+                        ? (transfer.kind == DocumentTransferKind.downloading
+                            ? Icons.cloud_download_outlined
+                            : Icons.cloud_upload_outlined)
+                        : switch (doc.type) {
+                            DocumentType.folder => Icons.folder_rounded,
+                            DocumentType.notebook => Icons.menu_book_rounded,
+                            DocumentType.pdf => Icons.picture_as_pdf_rounded,
+                          },
+                    size: 19,
+                    color: showTransfer
+                        ? t.textSecondary
+                        : doc.type == DocumentType.pdf
+                            ? t.pdfBadge
+                            : t.textSecondary,
                   ),
                 ),
-              ),
-              Text(
-                DateFormat.MMMd().format(doc.updatedAt),
-                style: AppTokens.mono(size: 11, color: t.textFaint),
-              ),
-              IconButton(
-                icon: Icon(
-                  doc.starred ? Icons.star_rounded : Icons.star_border_rounded,
-                  size: 19,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        doc.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: t.text,
+                        ),
+                      ),
+                      if (badgeLabel != null)
+                        Text(
+                          badgeLabel,
+                          style: AppTokens.mono(size: 11, color: t.textFaint),
+                        ),
+                    ],
+                  ),
                 ),
-                color: doc.starred ? t.star : t.textFaint,
-                onPressed: () => _toggleStar(context, doc),
-              ),
-              IconButton(
-                icon: const Icon(Icons.more_horiz_rounded, size: 20),
-                color: t.textMuted,
-                onPressed: () => showDocumentActions(context, doc),
-              ),
-            ],
+                if (!showTransfer)
+                  Text(
+                    DateFormat.MMMd().format(doc.updatedAt),
+                    style: AppTokens.mono(size: 11, color: t.textFaint),
+                  ),
+                if (!locked)
+                  IconButton(
+                    icon: Icon(
+                      doc.starred
+                          ? Icons.star_rounded
+                          : Icons.star_border_rounded,
+                      size: 19,
+                    ),
+                    color: doc.starred ? t.star : t.textFaint,
+                    onPressed: () => _toggleStar(context, doc),
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.more_horiz_rounded, size: 20),
+                  color: t.textMuted,
+                  onPressed: () => showDocumentActions(context, doc),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -688,6 +767,33 @@ class _ListRow extends StatelessWidget {
 
 void _open(BuildContext context, Document d) {
   final container = ProviderScope.containerOf(context);
+  final pendingUpload =
+      container.read(pendingUploadDocumentsProvider).asData?.value ?? const {};
+  final missingLocal =
+      container.read(missingLocalFileDocumentsProvider).asData?.value ??
+          const {};
+  final paused = container.read(syncPausedProvider);
+  final status = container.read(syncStatusProvider);
+  final transfer = documentTransferState(
+    documentId: d.id,
+    pendingUpload: pendingUpload,
+    missingLocal: missingLocal,
+    status: status,
+    paused: paused,
+  );
+  if (transfer.locked) {
+    final pct = transfer.percent(status);
+    final pctLabel = pct != null ? ' ($pct%)' : '';
+    final verb = transfer.kind == DocumentTransferKind.downloading
+        ? 'downloading'
+        : 'uploading';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Still $verb$pctLabel — try again when sync finishes.'),
+      ),
+    );
+    return;
+  }
   if (d.type == DocumentType.folder) {
     context.push('/folder/${d.id}');
   } else {
@@ -792,6 +898,8 @@ Future<void> _showDetails(
   Document d,
 ) async {
   final pages = d.type == DocumentType.folder ? 0 : await repo.pageCount(d.id);
+  final fileBytes =
+      d.type == DocumentType.folder ? null : await repo.storageBytesFor(d.id);
   final fmt = DateFormat.yMMMd().add_jm();
   if (!context.mounted) return;
   await showDialog<void>(
@@ -809,6 +917,8 @@ Future<void> _showDetails(
           }),
           if (d.type != DocumentType.folder)
             _detailRow(context, 'Pages', '$pages'),
+          if (fileBytes != null && fileBytes > 0)
+            _detailRow(context, 'File size', formatStorageBytes(fileBytes)),
           _detailRow(context, 'Created', fmt.format(d.createdAt)),
           _detailRow(context, 'Modified', fmt.format(d.updatedAt)),
           if (d.starred) _detailRow(context, 'Starred', 'Yes'),
@@ -893,12 +1003,52 @@ Future<void> runCreateFlow(
             .createFolder(parentId: parentId, title: name);
       }
     case CreateAction.importPdf:
+      if (!await _ensureStorageAvailable(context, ref)) return;
+      if (!context.mounted) return;
       await _import(context, ref, isPdf: true, parentId: parentId);
     case CreateAction.importImages:
+      if (!await _ensureStorageAvailable(context, ref)) return;
+      if (!context.mounted) return;
       await _import(context, ref, isPdf: false, parentId: parentId);
     case CreateAction.scan:
+      if (!await _ensureStorageAvailable(context, ref)) return;
+      if (!context.mounted) return;
       await _scan(context, ref, parentId: parentId);
   }
+}
+
+/// Blocks PDF/image/scan imports when the 5 GB allowance is already full.
+Future<bool> _ensureStorageAvailable(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final used = await ref.read(assetRepositoryProvider).totalBytes();
+  if (used < kStorageQuotaBytes) return true;
+  if (!context.mounted) return false;
+  await showStorageQuotaDialog(
+    context,
+    StorageQuotaExceeded(usedBytes: used, neededBytes: 1),
+  );
+  return false;
+}
+
+Future<void> showStorageQuotaDialog(
+  BuildContext context,
+  StorageQuotaExceeded error,
+) {
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(error.title),
+      content: Text(error.message),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Captures pages from the camera one at a time — asking "add another page?"
@@ -956,6 +1106,10 @@ Future<void> _scan(
       ref.read(libraryRepositoryProvider).touchOpened(id);
       router.push('/doc/$id');
     }
+  } on StorageQuotaExceeded catch (error) {
+    if (dialogOpen && context.mounted) Navigator.of(context).pop();
+    dialogOpen = false;
+    if (context.mounted) await showStorageQuotaDialog(context, error);
   } catch (e) {
     if (dialogOpen && context.mounted) Navigator.of(context).pop();
     messenger.showSnackBar(SnackBar(content: Text('Scan failed: $e')));
@@ -1043,6 +1197,10 @@ Future<void> _import(
     if (dialogOpen && context.mounted) Navigator.of(context).pop();
     dialogOpen = false;
     if (context.mounted) await ConvertToPdfDialog.show(context, failure);
+  } on StorageQuotaExceeded catch (error) {
+    if (dialogOpen && context.mounted) Navigator.of(context).pop();
+    dialogOpen = false;
+    if (context.mounted) await showStorageQuotaDialog(context, error);
   } catch (e) {
     if (dialogOpen && context.mounted) Navigator.of(context).pop();
     messenger.showSnackBar(SnackBar(content: Text('Import failed: $e')));
@@ -1099,6 +1257,74 @@ class _ImportProgressDialog extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Pulls the account down again from scratch.
+///
+/// Sync is already automatic — local edits and Firestore snapshots both
+/// trigger it — so this exists for the case automation cannot cover: being
+/// sure. A delete made on another device is the one change where "it will
+/// turn up eventually" is not good enough, and unlike the routine pull this
+/// ignores the incremental cursor, so it cannot be defeated by two devices
+/// disagreeing about the time.
+class _RefreshButton extends ConsumerStatefulWidget {
+  const _RefreshButton();
+
+  @override
+  ConsumerState<_RefreshButton> createState() => _RefreshButtonState();
+}
+
+class _RefreshButtonState extends ConsumerState<_RefreshButton> {
+  bool _spinning = false;
+
+  Future<void> _refresh() async {
+    setState(() => _spinning = true);
+    try {
+      await refreshLibrary(context, ref);
+    } finally {
+      // The widget can be gone by now — a refresh outlives a rotation.
+      if (mounted) setState(() => _spinning = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final engine = ref.watch(syncEngineProvider);
+    if (engine == null) return const SizedBox.shrink();
+
+    return IconButton(
+      tooltip: 'Refresh from the cloud',
+      onPressed: _spinning ? null : _refresh,
+      icon: _spinning
+          ? const SizedBox(
+              width: 19,
+              height: 19,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.refresh_rounded),
+    );
+  }
+}
+
+/// Shared by the toolbar button and pull-to-refresh so both behave the same.
+Future<void> refreshLibrary(BuildContext context, WidgetRef ref) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final engine = ref.read(syncEngineProvider);
+  if (engine == null) {
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Sign in to sync with your other devices.')),
+    );
+    return;
+  }
+  if (ref.read(syncPausedProvider)) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Sync is paused — resume it from the cloud menu.'),
+      ),
+    );
+    return;
+  }
+  await engine.refreshNow();
 }
 
 class _SortButton extends StatelessWidget {

@@ -24,9 +24,10 @@ typedef ImagePayload = ({Uint8List bytes, String name, String? ext});
 /// Raised when the user picks a document we can't render directly.
 ///
 /// PowerPoint and Word files are zipped OOXML, not page images — rendering
-/// them faithfully means implementing most of Office. GoodNotes has the same
-/// limitation and solves it by converting to PDF on import (using Apple's
-/// system converter, which isn't available to us). So we ask for a PDF.
+/// them faithfully means implementing most of Office, and the app that made
+/// the file already does it better than any converter we could run. So we ask
+/// for a PDF export, which is one menu item away and keeps exact layout and
+/// fonts.
 class UnsupportedImportFormat implements Exception {
   const UnsupportedImportFormat(this.filename, this.extension);
 
@@ -44,16 +45,27 @@ class UnsupportedImportFormat implements Exception {
       };
 }
 
-/// Office formats we recognise well enough to explain, but can't render.
-const List<String> kConvertibleExtensions = [
-  'ppt', 'pptx', 'key', 'doc', 'docx',
+/// Office formats the picker accepts so that selecting one gives a real
+/// explanation instead of a greyed-out file the user cannot select or
+/// understand. None of them can be imported directly — each is answered with
+/// [UnsupportedImportFormat] and the "save it as a PDF" dialog.
+const List<String> kOfficeExtensions = [
+  'ppt', 'pptx', 'odp',
+  'doc', 'docx', 'odt', 'rtf',
+  'xls', 'xlsx', 'ods',
+  'key',
 ];
 
 /// Imports external files (PDFs, images) as annotatable documents. Each PDF
 /// page / image becomes a [NotePage] whose background is the source content,
 /// so it can be highlighted and written on like in GoodNotes.
 class ImportService {
-  ImportService(this._db, this._uuid, this._assets, {this.ownerUid});
+  ImportService(
+    this._db,
+    this._uuid,
+    this._assets, {
+    this.ownerUid,
+  });
 
   final AppDatabase _db;
   final Uuid _uuid;
@@ -116,6 +128,9 @@ class ImportService {
   }) async {
     if (images.isEmpty) return null;
 
+    final totalBytes = images.fold<int>(0, (sum, img) => sum + img.bytes.length);
+    await _assets.ensureFits(totalBytes);
+
     final total = images.length;
     onProgress?.call(0, 'Preparing $total page${total == 1 ? '' : 's'}…');
     final docId = _uuid.v4();
@@ -170,7 +185,7 @@ class ImportService {
       type: FileType.custom,
       // Office formats are accepted by the picker so selecting one gives a
       // useful explanation instead of the file being silently unselectable.
-      allowedExtensions: ['pdf', ...kConvertibleExtensions],
+      allowedExtensions: ['pdf', ...kOfficeExtensions],
       // Only ask for bytes on web. On Android the picker loads the whole file
       // into a single Java byte[] before it ever reaches Dart, and anything
       // past the ~192 MB heap limit throws OutOfMemoryError on a plugin
@@ -182,26 +197,30 @@ class ImportService {
     final file = result.files.first;
 
     final extension = (file.extension ?? '').toLowerCase();
+    final name = file.name;
+    final path = file.path;
+    final bytes = file.bytes;
+
+    // Only PDFs and images can be turned into pages. Anything else is
+    // explained rather than half-imported.
     if (extension != 'pdf') {
       throw UnsupportedImportFormat(file.name, extension);
     }
 
-    final path = file.path;
     if (!kIsWeb && path != null) {
       return _importPdfFromPath(
         path: path,
-        name: file.name,
+        name: name,
         parentId: parentId,
         onProgress: onProgress,
       );
     }
 
-    final bytes = file.bytes;
     if (bytes == null) return null;
 
     final docId = _uuid.v4();
     final assetId = _uuid.v4();
-    final title = _titleFrom(file.name);
+    final title = _titleFrom(name);
 
     // Keep an independent copy for storage FIRST: PdfDocument.openData can
     // transfer/detach the original buffer on web, which would then corrupt the

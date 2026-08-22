@@ -90,6 +90,14 @@ void main() {
       );
       expect(
         EditorBarLayout.forSize(const Size(1366, 1024)),
+        EditorBarLayout.tabletRail,
+      );
+      expect(
+        EditorBarLayout.forSize(const Size(1920, 1080)),
+        EditorBarLayout.tabletRail,
+      );
+      expect(
+        EditorBarLayout.forSize(const Size(2560, 1440)),
         EditorBarLayout.single,
       );
     });

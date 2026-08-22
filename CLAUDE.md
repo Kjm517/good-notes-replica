@@ -7,6 +7,7 @@ Cross-platform (Android/iOS/web) note-taking app built with **Flutter**, replica
 - **drift** (SQLite) for local persistence; binary assets on disk via `path_provider`.
 - **perfect_freehand** for pressure-variable ink geometry, rendered via `CustomPainter`.
 - Planned: `pdfx` (PDF), `google_mlkit_digital_ink_recognition` (OCR search), Neon (Postgres) sync behind a thin REST API.
+- Cloud: Firestore for notes, **Cloudflare R2 behind a Worker** (`worker/`) for binaries.
 
 ## Commands
 - Run: `flutter run -d <device>` (Android device/emulator recommended for stylus).
@@ -47,6 +48,15 @@ All colour, type and radius decisions live in `lib/app/design.dart` — **never 
 - Library: `kSidebarBreakpoint` (900) — above it a persistent `LibrarySidebar`, below it filter chips + FAB.
 - Editor: `EditorBarLayout.forWidth` — `phone` (<760, tools move to the bottom `EditorToolDock`), `stacked` (<1240, title row + tool row), `single` (≥1240, one row with a centred tool group).
 - `EditorTopBar.preferredSize` must stay **exactly** the sum of its painted row heights, or the toolbar overflows. Row separators are therefore borders *inside* rows, never `Divider` widgets. `test/editor_top_bar_test.dart` locks this down.
+
+## Imports
+Only **PDFs and images** become annotatable pages. Word/PowerPoint/Excel files are
+accepted by the picker purely so selecting one produces a real explanation
+(`UnsupportedImportFormat` -> `ConvertToPdfDialog`) rather than a greyed-out file:
+the app that made the document exports a better PDF than any converter could, in
+one menu item. Server-side conversion (Gotenberg/LibreOffice) was built and then
+removed — every free always-on 1 GB container host disappeared during 2026, and
+the feature is not worth a monthly bill.
 
 ## Key conventions / gotchas
 - Drift row classes are renamed to avoid Flutter clashes: table `NotePages` -> row `NotePage` (vs Flutter's `Page`); table `CanvasElements` -> row `CanvasElement` (vs Flutter's `Element`).

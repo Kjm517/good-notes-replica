@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:drift/drift.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -21,13 +23,20 @@ class FileSync {
     required this.endpoint,
     http.Client? client,
     FirebaseAuth? auth,
+    Future<String?> Function()? idToken,
   }) : _db = db,
        _client = client ?? http.Client(),
-       _auth = auth ?? FirebaseAuth.instance;
+       _auth = auth,
+       _idToken = idToken;
 
   final AppDatabase _db;
   final http.Client _client;
-  final FirebaseAuth _auth;
+  /// Resolved lazily: touching `FirebaseAuth.instance` needs an initialised
+  /// Firebase app, which a unit test does not have.
+  final FirebaseAuth? _auth;
+
+  /// Supplies the bearer token. Injected in tests, where there is no Firebase.
+  final Future<String?> Function()? _idToken;
 
   /// Base URL of the Worker. Empty disables file sync entirely, which is the
   /// default until one is deployed.
@@ -35,36 +44,56 @@ class FileSync {
 
   bool get enabled => endpoint.isNotEmpty;
 
+  /// Files at or below this go up as one request; larger ones are split.
+  /// R2 requires every part except the last to be the same size, and at least
+  /// 5 MB, so the part size doubles as the threshold.
+  static const int _partBytes = 8 * 1024 * 1024;
+
+  /// Attempts per part before the upload is abandoned and retried next run.
+  static const int _partAttempts = 3;
+
   /// Uploads every asset that has bytes locally but no remote copy yet.
-  Future<void> uploadPending({
+  ///
+  /// Returns the last failure, or null if nothing failed. Swallowing these
+  /// entirely is what made a broken upload indistinguishable from a slow one:
+  /// the row stays pending either way, so without the reason the UI can only
+  /// say "still uploading" forever.
+  Future<String?> uploadPending({
     void Function(String assetId, double progress)? onProgress,
   }) async {
-    if (!enabled) return;
-    final pending = await (_db.select(
-      _db.assets,
-    )..where((a) => a.remoteKey.isNull() & a.deletedAt.isNull())).get();
+    if (!enabled) return null;
+    // Rows without local bytes are skipped in SQL rather than mid-loop: they
+    // belong to the device that imported the file, and this one has nothing
+    // to send for them.
+    final pending = await (_db.select(_db.assets)
+          ..where((a) =>
+              a.remoteKey.isNull() &
+              a.deletedAt.isNull() &
+              (a.localPath.isNotNull() | a.data.isNotNull())))
+        .get();
 
+    String? lastError;
     for (final asset in pending) {
-      // Uploads go out as one buffered body, so an asset that cannot be held in
-      // memory cannot be uploaded either. Skipping leaves remoteKey null and
-      // the file simply stays local, which is survivable; loading it would not
-      // be.
-      final size = asset.sizeBytes;
-      if (size != null && size > kMaxInMemoryAssetBytes) {
-        debugPrint(
-          'Skipping upload of ${asset.id}: '
-          '${(size / 1e6).round()} MB exceeds the in-memory limit',
-        );
-        continue;
-      }
-      final bytes = await readAsset(
-        localPath: asset.localPath,
-        base64: asset.data,
-      );
-      if (bytes == null) continue;
+      final size = asset.sizeBytes ?? 0;
+      final path = asset.localPath;
+      final mime = asset.mime ?? 'application/octet-stream';
+      final key = _keyFor(asset);
       try {
-        final key = _keyFor(asset);
-        await _put(key, bytes, asset.mime ?? 'application/octet-stream');
+        if (size > _partBytes && path != null && supportsFileStorage) {
+          // Big enough to matter: sent a part at a time, straight off the
+          // disk. Nothing larger than one part is ever in memory, so a 150 MB
+          // textbook uploads from a phone that could not hold it.
+          await _putInParts(key, path, size, mime, (fraction) {
+            onProgress?.call(asset.id, fraction);
+          });
+        } else {
+          final bytes = await readAsset(
+            localPath: asset.localPath,
+            base64: asset.data,
+          );
+          if (bytes == null) continue;
+          await _put(key, bytes, mime);
+        }
         await (_db.update(_db.assets)..where((a) => a.id.equals(asset.id)))
             .write(AssetsCompanion(
           remoteKey: Value(key),
@@ -76,10 +105,12 @@ class FileSync {
         ));
         onProgress?.call(asset.id, 1);
       } catch (e) {
-        debugPrint('Upload failed for ${asset.id}: $e');
+        debugPrint('Upload failed for ${asset.id} to $endpoint: $e');
+        lastError = _briefly('$e');
         // Leave remoteKey null so the next run retries.
       }
     }
+    return lastError;
   }
 
   /// Fetches an asset's bytes from R2 and stores them locally.
@@ -105,23 +136,35 @@ class FileSync {
     if (key == null) return false;
 
     try {
-      final bytes = await _get(key);
-      if (bytes == null) return false;
-      final stored = await writeAsset(
+      // Streamed to disk rather than buffered: the download side had the same
+      // ceiling as the upload side, so a textbook that finally uploaded would
+      // have killed the process on the way back down.
+      final request = http.Request(
+        'GET',
+        Uri.parse('$endpoint/file?key=${Uri.encodeQueryComponent(key)}'),
+      )..headers.addAll(await _headers());
+      final response = await _client.send(request);
+      if (response.statusCode == 404) return false;
+      if (response.statusCode >= 300) {
+        throw StateError('Download rejected (${response.statusCode}).');
+      }
+      final stored = await writeAssetStream(
         asset.id,
-        bytes,
+        response.stream,
         extension: asset.kind == 1 ? 'pdf' : 'img',
       );
       await (_db.update(_db.assets)..where((a) => a.id.equals(asset.id))).write(
         AssetsCompanion(
           localPath: Value(stored.localPath),
           data: Value(stored.base64),
-          sizeBytes: Value(bytes.length),
+          sizeBytes: Value(response.contentLength ?? asset.sizeBytes),
         ),
       );
       return true;
     } catch (e) {
-      debugPrint('Download failed for $assetId: $e');
+      // Naming the endpoint here turns "the file just never arrives" into a
+      // one-line diagnosis when it is pointed at the wrong worker.
+      debugPrint('Download failed for $assetId from $endpoint: $e');
       return false;
     }
   }
@@ -134,9 +177,156 @@ class FileSync {
   }
 
   Future<Map<String, String>> _headers() async {
-    final token = await _auth.currentUser?.getIdToken();
+    final provider = _idToken;
+    final token = provider != null
+        ? await provider()
+        : await (_auth ?? FirebaseAuth.instance).currentUser?.getIdToken();
     if (token == null) throw StateError('Not signed in.');
     return {'Authorization': 'Bearer $token'};
+  }
+
+  /// Uploads one file as a series of parts, which R2 stitches back together.
+  ///
+  /// A Worker request body is capped well below the size of a textbook, and
+  /// the phone could not hold one anyway. Each part is read from disk, sent,
+  /// and dropped.
+  Future<void> _putInParts(
+    String key,
+    String localPath,
+    int size,
+    String mime,
+    void Function(double fraction) onProgress,
+  ) async {
+    final uploadId = await _createUpload(key, mime);
+    final parts = <Map<String, Object?>>[];
+    try {
+      var partNumber = 1;
+      for (var start = 0; start < size; start += _partBytes) {
+        final end = math.min(start + _partBytes, size);
+        final chunk = await _slice(localPath, start, end);
+        if (chunk.isEmpty) {
+          throw StateError('Could not read bytes $start–$end of $localPath.');
+        }
+        parts.add({
+          'partNumber': partNumber,
+          'etag': await _uploadPart(key, uploadId, partNumber, chunk),
+        });
+        onProgress(end / size);
+        partNumber++;
+      }
+      await _completeUpload(key, uploadId, parts);
+    } catch (_) {
+      // Leave no half-finished upload behind to be billed for.
+      await _abortUpload(key, uploadId);
+      rethrow;
+    }
+  }
+
+  Future<Uint8List> _slice(String localPath, int start, int end) async {
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in readAssetSlice(localPath, start, end)) {
+      builder.add(chunk);
+    }
+    return builder.takeBytes();
+  }
+
+  Future<String> _createUpload(String key, String mime) async {
+    final response = await _client.post(
+      Uri.parse('$endpoint/multipart/create'
+          '?key=${Uri.encodeQueryComponent(key)}'
+          '&mime=${Uri.encodeQueryComponent(mime)}'),
+      headers: await _headers(),
+    );
+    if (response.statusCode == 404) {
+      throw StateError(
+        'The file worker does not support large uploads yet — '
+        'redeploy the worker in worker/ to enable them.',
+      );
+    }
+    if (response.statusCode >= 300) {
+      throw StateError(
+        'Upload could not start (${response.statusCode}): '
+        '${_briefly(response.body)}',
+      );
+    }
+    final id = (jsonDecode(response.body) as Map)['uploadId'];
+    if (id is! String || id.isEmpty) {
+      throw StateError('Upload could not start: no id returned.');
+    }
+    return id;
+  }
+
+  /// One part, retried a couple of times — a dropped connection partway
+  /// through a 150 MB upload should cost one part, not the whole file.
+  Future<String> _uploadPart(
+    String key,
+    String uploadId,
+    int partNumber,
+    Uint8List bytes,
+  ) async {
+    Object? failure;
+    for (var attempt = 1; attempt <= _partAttempts; attempt++) {
+      try {
+        final response = await _client.put(
+          Uri.parse('$endpoint/multipart/part'
+              '?key=${Uri.encodeQueryComponent(key)}'
+              '&uploadId=${Uri.encodeQueryComponent(uploadId)}'
+              '&part=$partNumber'),
+          headers: {...await _headers(), 'Content-Type': 'application/octet-stream'},
+          body: bytes,
+        );
+        if (response.statusCode >= 300) {
+          throw StateError(
+            'Part $partNumber rejected (${response.statusCode}): '
+            '${_briefly(response.body)}',
+          );
+        }
+        final etag = (jsonDecode(response.body) as Map)['etag'];
+        if (etag is! String || etag.isEmpty) {
+          throw StateError('Part $partNumber returned no etag.');
+        }
+        return etag;
+      } catch (e) {
+        failure = e;
+        if (attempt < _partAttempts) {
+          await Future<void>.delayed(Duration(seconds: attempt));
+        }
+      }
+    }
+    throw StateError('Part $partNumber failed: $failure');
+  }
+
+  Future<void> _completeUpload(
+    String key,
+    String uploadId,
+    List<Map<String, Object?>> parts,
+  ) async {
+    final response = await _client.post(
+      Uri.parse('$endpoint/multipart/complete'
+          '?key=${Uri.encodeQueryComponent(key)}'
+          '&uploadId=${Uri.encodeQueryComponent(uploadId)}'),
+      headers: {...await _headers(), 'Content-Type': 'application/json'},
+      body: jsonEncode({'parts': parts}),
+    );
+    if (response.statusCode >= 300) {
+      throw StateError(
+        'Upload could not be completed (${response.statusCode}): '
+        '${_briefly(response.body)}',
+      );
+    }
+  }
+
+  Future<void> _abortUpload(String key, String uploadId) async {
+    try {
+      await _client.post(
+        Uri.parse('$endpoint/multipart/abort'
+            '?key=${Uri.encodeQueryComponent(key)}'
+            '&uploadId=${Uri.encodeQueryComponent(uploadId)}'),
+        headers: await _headers(),
+      );
+    } catch (e) {
+      debugPrint('Could not abort upload for $key: $e');
+    }
   }
 
   Future<void> _put(String key, Uint8List bytes, String mime) async {
@@ -151,21 +341,6 @@ class FileSync {
         '${_briefly(response.body)}',
       );
     }
-  }
-
-  Future<Uint8List?> _get(String key) async {
-    final response = await _client.get(
-      Uri.parse('$endpoint/file?key=${Uri.encodeQueryComponent(key)}'),
-      headers: await _headers(),
-    );
-    if (response.statusCode == 404) return null;
-    if (response.statusCode >= 300) {
-      throw StateError(
-        'Download rejected (${response.statusCode}): '
-        '${_briefly(response.body)}',
-      );
-    }
-    return response.bodyBytes;
   }
 
   String _briefly(String body) {

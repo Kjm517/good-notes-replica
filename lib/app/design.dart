@@ -30,6 +30,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     required this.premiumText,
     required this.premiumSoft,
     required this.premiumOn,
+    required this.success,
     required this.shadow,
   });
 
@@ -82,6 +83,9 @@ class AppTokens extends ThemeExtension<AppTokens> {
   /// Text/icons sitting on a [premium] fill.
   final Color premiumOn;
 
+  /// Confirmed-ok chrome: a finished cloud sync, and similar success marks.
+  final Color success;
+
   /// Base colour for the large soft drop shadows under cards and sheets.
   final Color shadow;
 
@@ -105,6 +109,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     premiumText: Color(0xFF8A6A1B),
     premiumSoft: Color(0xFFF8EFDA),
     premiumOn: Color(0xFF3A2C07),
+    success: Color(0xFF2F9E6B),
     shadow: Color(0xFF141632),
   );
 
@@ -128,6 +133,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     premiumText: Color(0xFFE8C56A),
     premiumSoft: Color(0xFF2A2416),
     premiumOn: Color(0xFF3A2C07),
+    success: Color(0xFF5FCF96),
     shadow: Color(0xFF05060C),
   );
 
@@ -196,6 +202,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     Color? premiumText,
     Color? premiumSoft,
     Color? premiumOn,
+    Color? success,
     Color? shadow,
   }) {
     return AppTokens(
@@ -218,6 +225,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
       premiumText: premiumText ?? this.premiumText,
       premiumSoft: premiumSoft ?? this.premiumSoft,
       premiumOn: premiumOn ?? this.premiumOn,
+      success: success ?? this.success,
       shadow: shadow ?? this.shadow,
     );
   }
@@ -246,6 +254,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
       premiumText: c(premiumText, other.premiumText),
       premiumSoft: c(premiumSoft, other.premiumSoft),
       premiumOn: c(premiumOn, other.premiumOn),
+      success: c(success, other.success),
       shadow: c(shadow, other.shadow),
     );
   }

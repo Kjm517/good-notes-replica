@@ -33,6 +33,8 @@ class FirestoreStore implements RemoteStore {
         // parentId = pageId; elements are stored flat and filtered by page so
         // one query can fetch a document's elements without walking pages.
         return _user.collection('elements');
+      case RemoteCollection.quizzes:
+        return _user.collection('quizzes');
       case RemoteCollection.assets:
         return _user.collection('assets');
     }
@@ -109,6 +111,36 @@ class FirestoreStore implements RemoteStore {
   }
 
   @override
+  Future<List<RemoteInk>> fetchInkChanged({
+    DateTime? since,
+    int limit = 50,
+  }) async {
+    Query<Map<String, dynamic>> query =
+        _user.collection('ink').orderBy('updatedAt');
+    if (since != null) {
+      query = query.where(
+        'updatedAt',
+        isGreaterThanOrEqualTo: Timestamp.fromDate(since),
+      );
+    }
+    final snap = await query.limit(limit).get();
+    final out = <RemoteInk>[];
+    for (final doc in snap.docs) {
+      final blob = doc.data()['bytes'];
+      final stamp = doc.data()['updatedAt'];
+      if (blob is! Blob || stamp is! Timestamp) continue;
+      out.add(
+        RemoteInk(
+          pageId: doc.id,
+          bytes: blob.bytes,
+          updatedAt: stamp.toDate(),
+        ),
+      );
+    }
+    return out;
+  }
+
+  @override
   Future<bool> putInk(
       String pageId, Uint8List bytes, DateTime updatedAt) async {
     // A Firestore document is capped at ~1 MiB. Normal pages are a few KB;
@@ -156,9 +188,15 @@ class FirestoreStore implements RemoteStore {
           if (!controller.isClosed) controller.add(null);
         }
 
+        // Every collection another device can change. Leaving assets and
+        // quizzes out meant a file finishing its upload elsewhere, or a quiz
+        // taken on a phone, waited for an unrelated ping before this device
+        // noticed.
         subs.add(_user.collection('documents').snapshots().listen(ping));
         subs.add(_user.collection('elements').snapshots().listen(ping));
         subs.add(_user.collection('ink').snapshots().listen(ping));
+        subs.add(_user.collection('assets').snapshots().listen(ping));
+        subs.add(_user.collection('quizzes').snapshots().listen(ping));
       },
       onCancel: () async {
         for (final sub in subs) {

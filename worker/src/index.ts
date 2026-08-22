@@ -73,6 +73,57 @@ export default {
           : json({ exists: false });
       }
 
+      // ---- Multipart upload -------------------------------------------
+      // A Worker request body is capped (100 MB on the free plan) and a
+      // phone cannot hold a textbook in memory anyway, so large files arrive
+      // a part at a time and R2 stitches them together.
+      case 'POST /multipart/create': {
+        const upload = await env.BUCKET.createMultipartUpload(objectKey, {
+          httpMetadata: {
+            contentType:
+              url.searchParams.get('mime') ?? 'application/octet-stream',
+          },
+        });
+        return json({ uploadId: upload.uploadId, key: objectKey });
+      }
+
+      case 'PUT /multipart/part': {
+        const uploadId = url.searchParams.get('uploadId');
+        const partNumber = Number(url.searchParams.get('part'));
+        if (!uploadId || !Number.isInteger(partNumber) || partNumber < 1) {
+          return json({ error: 'Missing uploadId or part number.' }, 400);
+        }
+        if (!request.body) return json({ error: 'Empty part.' }, 400);
+        const upload = env.BUCKET.resumeMultipartUpload(objectKey, uploadId);
+        // R2 needs a known length per part, and the app sends fixed-size
+        // chunks, so buffering one part here is bounded and safe.
+        const part = await upload.uploadPart(
+          partNumber,
+          await request.arrayBuffer(),
+        );
+        return json({ partNumber: part.partNumber, etag: part.etag });
+      }
+
+      case 'POST /multipart/complete': {
+        const uploadId = url.searchParams.get('uploadId');
+        if (!uploadId) return json({ error: 'Missing uploadId.' }, 400);
+        const body = (await request.json()) as {
+          parts?: { partNumber: number; etag: string }[];
+        };
+        const parts = body.parts ?? [];
+        if (parts.length === 0) return json({ error: 'No parts.' }, 400);
+        const upload = env.BUCKET.resumeMultipartUpload(objectKey, uploadId);
+        await upload.complete(parts);
+        return json({ ok: true, key: objectKey });
+      }
+
+      case 'POST /multipart/abort': {
+        const uploadId = url.searchParams.get('uploadId');
+        if (!uploadId) return json({ error: 'Missing uploadId.' }, 400);
+        await env.BUCKET.resumeMultipartUpload(objectKey, uploadId).abort();
+        return json({ ok: true });
+      }
+
       case 'POST /delete': {
         await env.BUCKET.delete(objectKey);
         return json({ ok: true });

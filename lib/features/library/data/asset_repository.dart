@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 
 import '../../../core/db/database.dart';
 import '../../../core/storage/asset_store.dart';
+import '../../../core/storage/storage_quota.dart';
 
 /// Reads/writes binary assets (image & PDF bytes).
 ///
@@ -56,16 +57,141 @@ class AssetRepository {
     return row?.read(_db.assets.sizeBytes);
   }
 
-  /// Live total of stored asset bytes, for the library's storage readout.
-  ///
-  /// Tombstoned rows are excluded — they're pending deletions on the server,
-  /// not space the user is still using.
-  Stream<int> watchTotalBytes() {
+  /// Sum of distinct asset bytes referenced by [documentId]'s pages.
+  Future<int> bytesForDocument(String documentId) async {
+    final row = await _documentBytesQuery(documentId).getSingle();
+    return row.read<int>('total');
+  }
+
+  Selectable<QueryRow> _documentBytesQuery(String documentId) {
+    return _db.customSelect(
+      '''
+      SELECT COALESCE(SUM(a.size_bytes), 0) AS total
+      FROM assets AS a
+      WHERE a.deleted_at IS NULL
+        AND a.size_bytes IS NOT NULL
+        AND a.id IN (
+          SELECT p.pdf_asset_id FROM note_pages AS p
+          WHERE p.document_id = ?1 AND p.deleted_at IS NULL
+            AND p.pdf_asset_id IS NOT NULL
+          UNION
+          SELECT p.bg_asset_id FROM note_pages AS p
+          WHERE p.document_id = ?1 AND p.deleted_at IS NULL
+            AND p.bg_asset_id IS NOT NULL
+        )
+      ''',
+      variables: [Variable<String>(documentId)],
+      readsFrom: {_db.assets, _db.notePages},
+    );
+  }
+
+  /// Sum of asset bytes for documents in the active library (not trashed,
+  /// not permanently deleted). Used by the sidebar meter.
+  Future<int> activeLibraryBytes() async {
+    final row = await _activeLibraryBytesQuery().getSingle();
+    return row.read<int>('total');
+  }
+
+  /// All non-tombstoned asset bytes on disk — includes trash until emptied.
+  /// Used for the 5 GB import cap.
+  Future<int> totalBytes() async {
     final total = _db.assets.sizeBytes.sum();
     final query = _db.selectOnly(_db.assets)
       ..addColumns([total])
       ..where(_db.assets.deletedAt.isNull());
-    return query.map((row) => row.read(total) ?? 0).watchSingle();
+    final row = await query.getSingle();
+    return row.read(total) ?? 0;
+  }
+
+  /// Throws [StorageQuotaExceeded] if [additionalBytes] would push past the
+  /// per-person ceiling.
+  Future<void> ensureFits(int additionalBytes) async {
+    if (additionalBytes <= 0) return;
+    final used = await totalBytes();
+    if (used + additionalBytes > kStorageQuotaBytes) {
+      throw StorageQuotaExceeded(
+        usedBytes: used,
+        neededBytes: additionalBytes,
+      );
+    }
+  }
+
+  /// Live byte total for the sidebar meter — drops when a file is trashed or
+  /// removed, rises again on restore/import.
+  Stream<int> watchTotalBytes() {
+    return _activeLibraryBytesQuery()
+        .watch()
+        .map((rows) => rows.first.read<int>('total'));
+  }
+
+  Selectable<QueryRow> _activeLibraryBytesQuery() {
+    return _db.customSelect(
+      '''
+      SELECT COALESCE(SUM(a.size_bytes), 0) AS total
+      FROM assets AS a
+      WHERE a.deleted_at IS NULL
+        AND a.size_bytes IS NOT NULL
+        AND a.id IN (
+          SELECT p.pdf_asset_id FROM note_pages AS p
+          INNER JOIN documents AS d ON d.id = p.document_id
+          WHERE d.deleted_at IS NULL AND d.trashed_at IS NULL
+            AND p.deleted_at IS NULL AND p.pdf_asset_id IS NOT NULL
+          UNION
+          SELECT p.bg_asset_id FROM note_pages AS p
+          INNER JOIN documents AS d ON d.id = p.document_id
+          WHERE d.deleted_at IS NULL AND d.trashed_at IS NULL
+            AND p.deleted_at IS NULL AND p.bg_asset_id IS NOT NULL
+        )
+      ''',
+      readsFrom: {_db.assets, _db.notePages, _db.documents},
+    );
+  }
+
+  /// Deletes local files for assets no longer referenced by any document
+  /// (including trash). Call after permanent delete or empty trash.
+  Future<void> releaseOrphanedAssets() async {
+    final rows =
+        await (_db.select(_db.assets)..where((a) => a.deletedAt.isNull()))
+            .get();
+    for (final asset in rows) {
+      if (await _isReferencedByRetainedDocument(asset.id)) continue;
+      await _purgeAsset(asset);
+    }
+  }
+
+  Future<bool> _isReferencedByRetainedDocument(String assetId) async {
+    final count = _db.notePages.id.count();
+    final pages = _db.selectOnly(_db.notePages)
+      ..addColumns([count])
+      ..join([
+        innerJoin(
+          _db.documents,
+          _db.documents.id.equalsExp(_db.notePages.documentId),
+        ),
+      ])
+      ..where(_db.documents.deletedAt.isNull())
+      ..where(_db.notePages.deletedAt.isNull())
+      ..where(
+        _db.notePages.pdfAssetId.equals(assetId) |
+            _db.notePages.bgAssetId.equals(assetId),
+      );
+    final row = await pages.getSingle();
+    return (row.read(count) ?? 0) > 0;
+  }
+
+  Future<void> _purgeAsset(Asset asset) async {
+    await deleteAsset(asset.localPath);
+    final now = DateTime.now();
+    await (_db.update(_db.assets)..where((a) => a.id.equals(asset.id))).write(
+      AssetsCompanion(
+        deletedAt: Value(now),
+        updatedAt: Value(now),
+        dirty: const Value(true),
+        localPath: const Value(null),
+        data: const Value(null),
+        sizeBytes: const Value(null),
+      ),
+    );
   }
 
   /// Path to the asset's file on disk, if it has one (native only).
@@ -112,6 +238,7 @@ class AssetRepository {
       return existing.id;
     }
 
+    await ensureFits(bytes.length);
     final stored = await writeAsset(
       id,
       bytes,
@@ -168,6 +295,7 @@ class AssetRepository {
       return existing.id;
     }
 
+    await ensureFits(probe.sizeBytes);
     final copied = await copyAssetFromFile(
       id,
       sourcePath,
@@ -244,6 +372,7 @@ class AssetRepository {
     required String filename,
     String? mime,
   }) async {
+    await ensureFits(bytes.length);
     final digest = sha256.convert(bytes).toString();
     final stored = await writeAsset(
       id,
@@ -258,6 +387,10 @@ class AssetRepository {
         localPath: Value(stored.localPath),
         sha256: Value(digest),
         sizeBytes: Value(bytes.length),
+        // These are different bytes, so the copy in the cloud is stale.
+        // Clearing the key is what queues the new file for upload; leaving it
+        // set would keep every other device on the old PDF forever.
+        remoteKey: const Value(null),
         dirty: const Value(true),
         updatedAt: Value(DateTime.now()),
       ),
@@ -273,6 +406,8 @@ class AssetRepository {
     required String filename,
     String? mime,
   }) async {
+    final probe = await probeFile(sourcePath);
+    await ensureFits(probe.sizeBytes);
     final copied = await copyAssetFromFile(
       id,
       sourcePath,
@@ -285,6 +420,8 @@ class AssetRepository {
         localPath: Value(copied.localPath),
         sha256: Value(copied.sha256),
         sizeBytes: Value(copied.sizeBytes),
+        // As above: new bytes, so the cloud copy has to be replaced.
+        remoteKey: const Value(null),
         dirty: const Value(true),
         updatedAt: Value(DateTime.now()),
       ),
