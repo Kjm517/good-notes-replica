@@ -2,19 +2,14 @@
   "version": "0.2.0",
   "configurations": [
     {
-      // Web storage (IndexedDB, where the local database lives) is scoped to
-      // the origin *including the port*. Without a fixed port, every run gets
-      // a random one and therefore a brand-new empty database, which looks
-      // exactly like "my notebooks disappeared".
       "name": "Notably (Chrome, fixed port)",
       "request": "launch",
       "type": "dart",
       "deviceId": "chrome",
+      "preLaunchTask": "sync-env",
       "args": [
         "--web-port=5000",
-        // Cloudflare Worker fronting R2 file storage. Without this, notes
-        // still sync but source PDFs/images stay on the device.
-        "--dart-define=NOTABLY_FILE_ENDPOINT=https://notably-files.notably.workers.dev"
+        "--dart-define-from-file=.dart_defines.json"
       ]
     },
     {
@@ -22,8 +17,19 @@
       "request": "launch",
       "type": "dart",
       "deviceId": "android",
+      "preLaunchTask": "sync-env",
       "args": [
-        "--dart-define=NOTABLY_FILE_ENDPOINT=https://notably-files.notably.workers.dev"
+        "--dart-define-from-file=.dart_defines.json"
+      ]
+    },
+    {
+      "name": "Notably (iOS)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "Notably iPhone",
+      "preLaunchTask": "sync-env",
+      "args": [
+        "--dart-define-from-file=.dart_defines.json"
       ]
     }
   ]

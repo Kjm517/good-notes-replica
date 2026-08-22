@@ -39,6 +39,10 @@ app.*.symbols
 # Obfuscation related
 app.*.map.json
 
+# Local secrets / sync endpoint (copy from .env.example)
+.env
+.dart_defines.json
+
 # Android Studio will place build artifacts here
 /android/app/debug
 /android/app/profile

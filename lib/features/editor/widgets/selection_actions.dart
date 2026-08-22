@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -82,7 +83,14 @@ class SelectionActions extends ConsumerWidget {
     }
     final name = 'selection-${DateTime.now().millisecondsSinceEpoch}.png';
     final where = await savePng(bytes, name);
-    messenger.showSnackBar(SnackBar(content: Text('Saved $where')));
+    final onMobile = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.android);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(onMobile ? 'Selection shared' : 'Saved $where'),
+      ),
+    );
   }
 
   Future<void> _pickColor(BuildContext context, dynamic controller) async {

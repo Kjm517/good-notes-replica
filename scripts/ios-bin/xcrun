@@ -1,0 +1,7 @@
+#!/bin/bash
+if [[ -d "/Applications/Xcode.app/Contents/Developer" ]]; then
+  export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+elif [[ -d "${HOME}/Downloads/Xcode-beta.app/Contents/Developer" ]]; then
+  export DEVELOPER_DIR="${HOME}/Downloads/Xcode-beta.app/Contents/Developer"
+fi
+exec /usr/bin/xcrun "$@"

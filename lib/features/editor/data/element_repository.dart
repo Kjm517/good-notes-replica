@@ -2,8 +2,15 @@ import 'dart:ui' show Offset;
 import 'dart:ui' as ui;
 
 import 'package:drift/drift.dart';
+<<<<<<< Updated upstream
 import 'package:image_picker/image_picker.dart';
+=======
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+>>>>>>> Stashed changes
 import 'package:uuid/uuid.dart';
+
+import '../../../core/platform/local_file.dart';
 
 import '../../../core/db/database.dart';
 import '../../../core/db/sync_touch.dart';
@@ -43,6 +50,7 @@ class ElementRepository {
     required double maxWidth,
     Offset? at,
   }) async {
+<<<<<<< Updated upstream
     final shot = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (shot == null) return null;
     final bytes = Uint8List.fromList(await shot.readAsBytes());
@@ -50,6 +58,31 @@ class ElementRepository {
       pageId: pageId,
       bytes: bytes,
       filename: shot.name,
+=======
+    final result = await FilePicker.pickFiles(
+      type: FileType.image,
+      withData: kIsWeb,
+    );
+    final file = result?.files.firstOrNull;
+    if (file == null) return null;
+    final path = file.path;
+    if (!kIsWeb && path != null) {
+      final bytes = await readLocalFile(path);
+      return insertImage(
+        pageId: pageId,
+        bytes: bytes,
+        filename: file.name,
+        maxWidth: maxWidth,
+        at: at,
+      );
+    }
+    final bytes = file.bytes;
+    if (bytes == null) return null;
+    return insertImage(
+      pageId: pageId,
+      bytes: Uint8List.fromList(bytes),
+      filename: file.name,
+>>>>>>> Stashed changes
       maxWidth: maxWidth,
       at: at,
     );

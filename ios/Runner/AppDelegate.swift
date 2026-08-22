@@ -1,3 +1,5 @@
+// xcode: set sdk=iOS
+
 import Flutter
 import PDFKit
 import UIKit

@@ -7,6 +7,7 @@ import 'package:printing/printing.dart';
 
 import '../../../core/db/database.dart';
 import '../../../core/platform/save_file.dart';
+import '../../../core/platform/share_bytes.dart';
 import '../export/export_service.dart';
 import '../providers.dart';
 
@@ -124,6 +125,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
         final service = ExportService(ref.read(pageBackgroundServiceProvider));
         final strokeRepo = ref.read(strokeRepositoryProvider);
         final pages = _pagesToExport();
+        final toShare = <({Uint8List bytes, String filename, String mimeType})>[];
         for (var i = 0; i < pages.length; i++) {
           final page = pages[i];
           final png = await service.renderPage(
@@ -132,18 +134,33 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
             strokes: await strokeRepo.getStrokes(page.id),
           );
           if (png == null) continue;
-          await saveBytes(png, '$_safeName-page${i + 1}.png', 'image/png');
+          final name = '$_safeName-page${i + 1}.png';
+          if (_isMobile) {
+            toShare.add((bytes: png, filename: name, mimeType: 'image/png'));
+          } else {
+            await saveBytes(png, name, 'image/png');
+          }
           if (mounted) {
             setState(() {
               _progress = (i + 1) / pages.length;
-              _status = 'Saved page ${i + 1} of ${pages.length}';
+              _status = _isMobile
+                  ? 'Prepared page ${i + 1} of ${pages.length}'
+                  : 'Saved page ${i + 1} of ${pages.length}';
             });
           }
+        }
+        if (_isMobile && toShare.isNotEmpty) {
+          await shareMany(toShare);
         }
         if (mounted) {
           Navigator.of(context).pop();
           ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Exported ${pages.length} image(s)')));
+            SnackBar(
+              content: Text(_isMobile
+                  ? 'Shared ${toShare.length} image(s)'
+                  : 'Exported ${pages.length} image(s)'),
+            ),
+          );
         }
       });
 
@@ -234,7 +251,10 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.image_outlined),
-              title: const Text('Export as image (PNG)'),
+              title: Text(_isMobile ? 'Export as image (share)' : 'Export as image (PNG)'),
+              subtitle: _isMobile
+                  ? const Text('Opens the share sheet so you can save or send images')
+                  : null,
               onTap: _exportPng,
             ),
             ListTile(

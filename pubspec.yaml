@@ -58,12 +58,16 @@ dependencies:
   google_sign_in: ^7.2.0
   http: ^1.6.0
   syncfusion_flutter_pdf: ^33.2.13
+<<<<<<< Updated upstream
   image_picker: ^1.2.3
   google_generative_ai: ^0.4.6
   flutter_dotenv: ^6.0.1
   connectivity_plus: ^7.3.1
   pdfrx: ^2.4.7
   url_launcher: ^6.3.2
+=======
+  share_plus: ^12.0.0
+>>>>>>> Stashed changes
 
 dev_dependencies:
   flutter_test:
