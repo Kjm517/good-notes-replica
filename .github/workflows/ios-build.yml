@@ -34,13 +34,34 @@ jobs:
       # The drift database code is generated; regenerate so the build does not
       # depend on the .g.dart files being committed.
       - name: Generate code
-        run: dart run build_runner build --delete-conflicting-outputs
+        run: dart run build_runner build
 
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      # Not bare `flutter test`: DB-backed widget tests need
+      # sqlite3_flutter_libs, which has no native library under the test
+      # runner, and their unsettled spinners hang pumpAndSettle. CLAUDE.md
+      # lists the suites that are safe to run headless — keep the two in step.
       - name: Run tests
-        run: flutter test
+        run: >
+          flutter test
+          test/core_logic_test.dart
+          test/editor_top_bar_test.dart
+          test/sync_test.dart
+          test/sync_engine_test.dart
+          test/file_sync_test.dart
+          test/pending_upload_test.dart
+          test/refresh_test.dart
+          test/quiz_history_test.dart
+          test/quiz_generator_test.dart
+          test/quiz_highlight_test.dart
+          test/quiz_queue_test.dart
+          test/tools_test.dart
+          test/image_element_test.dart
+          test/ink_page_codec_test.dart
+          test/pdf_outline_test.dart
+          test/pdf_page_text_test.dart
 
       - name: Build iOS (unsigned)
         run: flutter build ios --release --no-codesign

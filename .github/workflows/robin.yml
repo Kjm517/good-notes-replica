@@ -13,9 +13,65 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Robin's own failure for a missing secret is "Input required and not
+  # supplied: llm-base-url", which points at the wrong thing entirely — the
+  # base URL is fine, the whole configuration is simply absent. Check first
+  # and say so.
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          # Secrets cannot be read in an `if:`, so it comes through the
+          # environment. Only its presence is ever tested.
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          if [ -n "$LLM_API_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Robin is not configured"
+            echo
+            echo "Set the API key once, then re-run or comment \`/robin\`:"
+            echo
+            echo '```bash'
+            echo 'gh secret set LLM_API_KEY'
+            echo '```'
+            echo
+            echo "Get a free key at <https://openrouter.ai/> (starts with \`sk-or-\`)."
+            echo
+            echo "\`LLM_BASE_URL\` and \`LLM_MODEL\` are optional — they fall back to"
+            echo "OpenRouter's free route, so the key is the only secret needed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Forks never receive secrets, so a red X there would be permanent
+          # and not something the contributor could ever fix.
+          if [ "$IS_FORK" = "true" ]; then
+            echo "::notice::Robin skipped - secrets are not available to pull requests from forks."
+            exit 0
+          fi
+          echo "::error::Robin needs the LLM_API_KEY repository secret. See the job summary for the one command to run."
+          exit 1
+
   review:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     uses: antongulin/robin/.github/workflows/review.yml@main
     secrets:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      # Defaulted rather than required: these are a public endpoint and a
+      # model name, not credentials, and leaving them as bare secrets meant
+      # three things to set up before the first review could run. Override by
+      # setting the matching secret to use a different provider - see
+      # https://github.com/antongulin/robin#supported-providers
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL || 'https://openrouter.ai/api/v1' }}
+      # `openrouter/free` picks a free model per review and lets the action
+      # fall back when a route drops, which is what the earlier
+      # "Free model routes drop sometimes" message was about.
+      LLM_MODEL: ${{ secrets.LLM_MODEL || 'openrouter/free' }}

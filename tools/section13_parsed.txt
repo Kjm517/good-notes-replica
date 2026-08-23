@@ -1,0 +1,12 @@
+﻿SUB: SIGN IN
+SUB: OVERVIEW
+SUB: USERS
+SUB: SUBSCRIPTIONS
+SUB: VOUCHERS
+SUB: BUG REPORTS (dark)
+SUB: AI USAGE (dark)
+SUB: DOCUMENTS + TEAM + AUDIT
+
+--- data-screen-label ---
+
+--- nav items ---

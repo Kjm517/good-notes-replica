@@ -168,6 +168,10 @@ final quizHistoryProvider =
   return ref.watch(quizHistoryRepositoryProvider).watchForDocument(documentId);
 });
 
+final allQuizHistoryProvider = StreamProvider<List<QuizHistoryRecord>>((ref) {
+  return ref.watch(quizHistoryRepositoryProvider).watchAllCompleted();
+});
+
 /// Quiz generation state — tracks the async generation process.
 class QuizGenerationState {
   const QuizGenerationState({

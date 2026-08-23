@@ -20,6 +20,14 @@ class QuizHistoryRepository {
     return q.watch().map((rows) => [for (final row in rows) _fromRow(row)]);
   }
 
+  /// All completed quiz attempts across every document, newest first.
+  Stream<List<QuizHistoryRecord>> watchAllCompleted() {
+    final q = _db.select(_db.quizAttempts)
+      ..where((t) => t.deletedAt.isNull() & t.completed.equals(true))
+      ..orderBy([(t) => OrderingTerm.desc(t.completedAt)]);
+    return q.watch().map((rows) => [for (final row in rows) _fromRow(row)]);
+  }
+
   Future<void> saveAttempt({
     required String documentId,
     required String familyId,

@@ -12,10 +12,12 @@ import '../../../core/storage/storage_quota.dart';
 /// Bytes live in a file on disk on native platforms and as base64 in the
 /// database on web; [AssetStore] hides the difference.
 class AssetRepository {
-  AssetRepository(this._db, {required this.quotaBytes});
+  AssetRepository(this._db, {required this.storageQuotaBytes});
 
   final AppDatabase _db;
-  final int quotaBytes;
+
+  /// Per-person import cap — 5 GB (free & trial) or 15 GB (paid Premium).
+  final int storageQuotaBytes;
 
   Future<Uint8List?> getBytes(String id) async {
     final row = await (_db.select(
@@ -110,11 +112,11 @@ class AssetRepository {
   Future<void> ensureFits(int additionalBytes) async {
     if (additionalBytes <= 0) return;
     final used = await totalBytes();
-    if (used + additionalBytes > quotaBytes) {
+    if (used + additionalBytes > storageQuotaBytes) {
       throw StorageQuotaExceeded(
         usedBytes: used,
         neededBytes: additionalBytes,
-        quotaBytes: quotaBytes,
+        quotaBytes: storageQuotaBytes,
       );
     }
   }

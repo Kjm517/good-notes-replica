@@ -27,7 +27,7 @@ class LibraryRepository {
   final Uuid _uuid;
   final AssetRepository _assets;
 
-  /// Firebase uid of the signed-in account, or null when signed out.
+  /// Supabase uid of the signed-in account, or null when signed out.
   final String? ownerUid;
 
   /// Rows this session is allowed to see: the current account's documents,

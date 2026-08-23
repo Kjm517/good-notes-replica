@@ -1,13 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/design.dart';
-import '../../app/pricing.dart';
-import '../../core/storage/storage_quota.dart';
-import '../library/providers.dart';
-import '../settings/premium_providers.dart';
 
-/// Space Mono caption + bordered surface — section 12 grouping.
+/// Space Mono section caption + content below.
 class SettingsSection extends StatelessWidget {
   const SettingsSection({
     super.key,
@@ -25,7 +20,7 @@ class SettingsSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
+          padding: const EdgeInsets.fromLTRB(6, 22, 6, 10),
           child: Text(label.toUpperCase(), style: AppTokens.sectionLabel(t.textFaint)),
         ),
         child,
@@ -34,6 +29,7 @@ class SettingsSection extends StatelessWidget {
   }
 }
 
+/// Bordered surface card used for grouped rows.
 class SettingsGroupCard extends StatelessWidget {
   const SettingsGroupCard({super.key, required this.children});
 
@@ -84,44 +80,54 @@ class SettingsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    return Opacity(
-      opacity: dimmed ? 0.72 : 1,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
-            child: Row(
-              children: [
-                Icon(icon, size: 21, color: iconColor ?? t.textSecondary),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: dimmed ? t.textSecondary : t.text,
-                        ),
-                      ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle!,
-                          style: AppTokens.mono(size: 10.5, color: t.textFaint),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                if (trailing != null) trailing!,
-              ],
+    final muted = dimmed ? 0.55 : 1.0;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: t.fill,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(
+                icon,
+                size: 19,
+                color: (iconColor ?? t.textSecondary).withValues(alpha: muted),
+              ),
             ),
-          ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: t.text.withValues(alpha: muted),
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: AppTokens.mono(
+                        size: 10,
+                        color: t.textFaint.withValues(alpha: muted),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (trailing != null) trailing!,
+          ],
         ),
       ),
     );
@@ -129,53 +135,30 @@ class SettingsRow extends StatelessWidget {
 }
 
 class TierBadge extends StatelessWidget {
-  const TierBadge({super.key, required this.premium});
+  const TierBadge({super.key, required this.label, this.premium = false});
 
+  final String label;
   final bool premium;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    if (premium) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFFF4D58A), Color(0xFFD9A94E)],
-          ),
-          borderRadius: BorderRadius.circular(100),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.workspace_premium_rounded, size: 10, color: t.premiumOn),
-            const SizedBox(width: 2),
-            Text(
-              'PRO',
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                color: t.premiumOn,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: t.fill,
-        borderRadius: BorderRadius.circular(100),
-        border: Border.all(color: t.lineStrong),
+        color: premium ? t.premiumSoft : t.fill,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: premium ? t.premium.withValues(alpha: 0.35) : t.line,
+        ),
       ),
       child: Text(
-        'FREE',
-        style: TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.03,
-          color: t.textMuted,
+        label.toUpperCase(),
+        style: AppTokens.mono(
+          size: 9,
+          weight: FontWeight.w600,
+          color: premium ? t.premiumText : t.textMuted,
+          letterSpacing: 0.8,
         ),
       ),
     );
@@ -190,20 +173,28 @@ class UnlockChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-        decoration: BoxDecoration(
-          color: t.premiumSoft.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(100),
-        ),
-        child: Text(
-          'Unlock',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: t.premiumText,
+    return Material(
+      color: t.premiumSoft,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_open_rounded, size: 14, color: t.premiumText),
+              const SizedBox(width: 4),
+              Text(
+                'Unlock',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: t.premiumText,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -211,7 +202,28 @@ class UnlockChip extends StatelessWidget {
   }
 }
 
-/// Recessed track with raised active pill — matches section 12 appearance row.
+class AccentSwitch extends StatelessWidget {
+  const AccentSwitch({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Switch.adaptive(
+      value: value,
+      activeTrackColor: t.accentText,
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// Recessed track with raised active pill — section 12 appearance row.
 class AppearancePicker extends StatelessWidget {
   const AppearancePicker({
     super.key,
@@ -233,7 +245,7 @@ class AppearancePicker extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: t.surface,
+        color: t.fill,
         borderRadius: BorderRadius.circular(Radii.control),
         border: Border.all(color: t.line),
       ),
@@ -247,8 +259,11 @@ class AppearancePicker extends StatelessWidget {
                   duration: const Duration(milliseconds: 140),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
-                    color: mode == opt.$1 ? t.fill : Colors.transparent,
+                    color: mode == opt.$1 ? t.surface : Colors.transparent,
                     borderRadius: BorderRadius.circular(Radii.inner),
+                    boxShadow: mode == opt.$1
+                        ? AppTokens.elevation(t.shadow, y: 2, blur: 8, opacity: 0.08)
+                        : null,
                   ),
                   child: Column(
                     children: [
@@ -278,6 +293,7 @@ class AppearancePicker extends StatelessWidget {
   }
 }
 
+/// Gold gradient card for premium upsell and plan summary.
 class PremiumGradientCard extends StatelessWidget {
   const PremiumGradientCard({super.key, required this.child});
 
@@ -287,78 +303,21 @@ class PremiumGradientCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(Radii.card),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            t.premium.withValues(alpha: 0.18),
-            t.premium.withValues(alpha: 0.05),
+            t.premiumSoft,
+            t.surface,
           ],
         ),
-        border: Border.all(color: t.premium.withValues(alpha: 0.34)),
+        borderRadius: BorderRadius.circular(Radii.card),
+        border: Border.all(color: t.premium.withValues(alpha: 0.35)),
+        boxShadow: AppTokens.elevation(t.shadow, y: 12, blur: 28, opacity: 0.1),
       ),
       child: child,
-    );
-  }
-}
-
-/// Used / quota readout — same numbers as the library sidebar meter.
-class StorageCapacityTile extends ConsumerWidget {
-  const StorageCapacityTile({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final t = context.tokens;
-    final bytes = ref.watch(libraryStorageProvider).asData?.value ?? 0;
-    final quotaBytes = ref.watch(storageQuotaBytesProvider);
-    final fraction = (bytes / quotaBytes).clamp(0.0, 1.0);
-    final usedGb = bytes / (1024 * 1024 * 1024);
-    final quotaGb = quotaBytes / (1024 * 1024 * 1024);
-    final onPremiumStorage = quotaBytes > kFreeStorageQuotaBytes;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Imported files',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.text),
-              ),
-              Text(
-                '${usedGb.toStringAsFixed(1)} / ${quotaGb.toStringAsFixed(0)} GB',
-                style: AppTokens.mono(size: 12, color: t.textSecondary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            onPremiumStorage
-                ? 'Premium storage for PDFs, images, and scans'
-                : '${AppPricing.freeStorageLabel} · 15 GB with Premium',
-            style: TextStyle(fontSize: 11.5, color: t.textMuted),
-          ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: fraction,
-              minHeight: 6,
-              backgroundColor: t.fill,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                fraction >= 1 ? Theme.of(context).colorScheme.error : t.accent,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

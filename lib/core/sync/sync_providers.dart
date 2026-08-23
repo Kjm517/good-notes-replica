@@ -10,7 +10,7 @@ import '../db/database.dart';
 import '../network/network_status.dart';
 import '../storage/asset_store.dart';
 import 'file_sync.dart';
-import 'firestore_store.dart';
+import 'supabase_store.dart';
 import 'sync_engine.dart';
 import 'sync_state.dart';
 
@@ -206,7 +206,7 @@ Future<Map<String, String>> _missingLocalFileDocuments(AppDatabase db) async {
   return missing;
 }
 
-/// The sync engine, or null when signed out / Firebase unavailable.
+/// The sync engine, or null when signed out / Supabase unavailable.
 ///
 /// Rebuilt whenever the signed-in user changes, so signing out tears the
 /// engine down and signing in starts a fresh one for that account.
@@ -229,7 +229,7 @@ final syncEngineProvider = Provider<SyncEngine?>((ref) {
   var disposed = false;
   final engine = SyncEngine(
     db: ref.watch(databaseProvider),
-    remote: FirestoreStore(uid: user.uid),
+    remote: SupabaseStore(uid: user.uid),
     uid: user.uid,
     files: ref.watch(fileSyncProvider),
     isOnline: isOnlineNow,

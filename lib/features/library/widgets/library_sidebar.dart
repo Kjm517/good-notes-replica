@@ -6,7 +6,7 @@ import '../../../app/design.dart';
 import '../../../core/db/database.dart';
 import '../../../core/models/enums.dart';
 import '../../../core/storage/storage_quota.dart';
-import '../../settings/premium_providers.dart';
+import '../../settings/entitlements.dart';
 import '../providers.dart';
 
 /// Width the sidebar occupies when shown. The library only mounts it above
@@ -229,7 +229,7 @@ class _NavRow extends StatelessWidget {
   }
 }
 
-/// Sidebar meter: active-library bytes vs plan storage quota.
+/// Sidebar meter: active-library bytes vs the account storage quota.
 class _StorageMeter extends ConsumerWidget {
   const _StorageMeter();
 
@@ -237,10 +237,10 @@ class _StorageMeter extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final bytes = ref.watch(libraryStorageProvider).asData?.value ?? 0;
-    final quotaBytes = ref.watch(storageQuotaBytesProvider);
-    final fraction = (bytes / quotaBytes).clamp(0.0, 1.0);
+    final quota = ref.watch(storageQuotaBytesProvider);
+    final fraction = (bytes / quota).clamp(0.0, 1.0);
     final usedGb = bytes / (1024 * 1024 * 1024);
-    final quotaGb = quotaBytes / (1024 * 1024 * 1024);
+    final quotaGb = quota / (1024 * 1024 * 1024);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(28, 16, 28, 22),

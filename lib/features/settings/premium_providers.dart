@@ -1,27 +1,72 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../app/pricing.dart';
 import '../../app/providers.dart';
-import '../../core/ai/ai_providers.dart';
-import '../../core/storage/storage_quota.dart';
+import 'billing_env.dart';
+import 'billing_helpers.dart';
+import 'billing_plan.dart';
 
-/// Billing tier — stub until StoreKit / Play Billing is wired.
-enum BillingPlan { none, monthly, yearly }
-
-const kFreeQuizLimitPerMonth = AppPricing.freeQuizLimit;
+export 'billing_plan.dart';
 
 const _planKey = 'billing_plan';
 const _renewKey = 'premium_renews_at';
-const _trialKey = 'premium_trial_active';
+const _historyKey = 'billing_history_json';
 
-final storageQuotaBytesProvider = Provider<int>((ref) {
-  final isPremium = ref.watch(isPremiumProvider);
-  if (!isPremium) return kFreeStorageQuotaBytes;
-  final trial =
-      ref.watch(sharedPrefsProvider).getBool(_trialKey) ?? false;
-  return trial ? kFreeStorageQuotaBytes : kPremiumStorageQuotaBytes;
+/// Live premium flag from RevenueCat when configured.
+final rcPremiumActiveProvider = StateProvider<bool>((ref) => false);
+
+/// Live premium flag from PayMongo wallet checkout (worker entitlement).
+final payMongoPremiumActiveProvider = StateProvider<bool>((ref) => false);
+
+/// Paid Premium — RevenueCat, PayMongo wallet, or dev prefs stub.
+final isPremiumProvider = Provider<bool>((ref) {
+  if (ref.watch(revenueCatConfiguredProvider)) {
+    if (ref.watch(rcPremiumActiveProvider)) return true;
+  }
+  if (ref.watch(payMongoPremiumActiveProvider)) return true;
+  final prefs = ref.watch(sharedPrefsProvider);
+  return prefs.getBool('is_premium') ?? false;
 });
+
+class BillingHistoryEntry {
+  const BillingHistoryEntry({
+    required this.at,
+    required this.plan,
+    required this.amountPhp,
+    required this.status,
+  });
+
+  final DateTime at;
+  final BillingPlan plan;
+  final double amountPhp;
+  final String status;
+
+  String get planLabel => switch (plan) {
+        BillingPlan.yearly => 'Premium — Yearly',
+        BillingPlan.monthly => 'Premium — Monthly',
+        BillingPlan.none => 'Premium',
+      };
+
+  Map<String, dynamic> toJson() => {
+        'at': at.toIso8601String(),
+        'plan': plan.name,
+        'amount': amountPhp,
+        'status': status,
+      };
+
+  factory BillingHistoryEntry.fromJson(Map<String, dynamic> json) {
+    return BillingHistoryEntry(
+      at: DateTime.parse(json['at'] as String),
+      plan: BillingPlan.values.byName(json['plan'] as String),
+      amountPhp: (json['amount'] as num).toDouble(),
+      status: json['status'] as String,
+    );
+  }
+}
 
 final billingPlanProvider =
     NotifierProvider<BillingPlanController, BillingPlan>(
@@ -43,77 +88,151 @@ class BillingPlanController extends Notifier<BillingPlan> {
     return BillingPlan.none;
   }
 
-  Future<void> activate(BillingPlan plan) async {
+  /// Dev / web fallback when RevenueCat is not configured.
+  Future<void> activate(BillingPlan plan, {double? amountPhp}) async {
+    final prefs = ref.read(sharedPrefsProvider);
+    final paid = amountPhp ?? priceForPlan(plan);
+    await prefs.setBool('is_premium', true);
+    await prefs.setString(_planKey, plan.name);
+    final renew = DateTime.now().add(
+      plan == BillingPlan.yearly
+          ? const Duration(days: 365)
+          : const Duration(days: 30),
+    );
+    await prefs.setString(_renewKey, renew.toIso8601String());
+    await _appendHistory(
+      prefs,
+      BillingHistoryEntry(
+        at: DateTime.now(),
+        plan: plan,
+        amountPhp: paid,
+        status: 'Paid',
+      ),
+    );
+    ref.invalidateSelf();
+    ref.invalidate(isPremiumProvider);
+    ref.invalidate(billingHistoryProvider);
+  }
+
+  /// Cache RevenueCat state locally for plan labels and renewal dates.
+  Future<void> syncFromCustomerInfo(CustomerInfo info) async {
+    final prefs = ref.read(sharedPrefsProvider);
+    final active = isPremiumFromCustomerInfo(info);
+    if (active) {
+      final plan = billingPlanFromCustomerInfo(info);
+      final renew = premiumRenewsAtFromCustomerInfo(info);
+      await prefs.setBool('is_premium', true);
+      await prefs.setString(_planKey, plan.name);
+      if (renew != null) {
+        await prefs.setString(_renewKey, renew.toIso8601String());
+      }
+    } else {
+      await prefs.setBool('is_premium', false);
+    }
+    ref.invalidateSelf();
+  }
+
+  Future<void> syncFromPayMongo({
+    required BillingPlan plan,
+    DateTime? expiresAt,
+    double? amountPhp,
+  }) async {
     final prefs = ref.read(sharedPrefsProvider);
     await prefs.setBool('is_premium', true);
     await prefs.setString(_planKey, plan.name);
-    await prefs.setBool(_trialKey, true);
-    final renew = DateTime.now().add(const Duration(days: AppPricing.freeTrialDays));
-    await prefs.setString(_renewKey, renew.toIso8601String());
+    if (expiresAt != null) {
+      await prefs.setString(_renewKey, expiresAt.toIso8601String());
+    }
+    if (amountPhp != null) {
+      await _appendHistory(
+        prefs,
+        BillingHistoryEntry(
+          at: DateTime.now(),
+          plan: plan,
+          amountPhp: amountPhp,
+          status: 'Paid · PayMongo',
+        ),
+      );
+    }
     ref.invalidateSelf();
-    ref.invalidate(isPremiumProvider);
-    ref.invalidate(isPremiumTrialProvider);
-    ref.invalidate(hasUnlimitedAiQuizzesProvider);
-    ref.invalidate(quizLimitReachedProvider);
-    ref.invalidate(storageQuotaBytesProvider);
-    ref.invalidate(monthlyQuizUsageProvider);
+    ref.invalidate(billingHistoryProvider);
   }
 
-  Future<void> restore() async {
-    // Stub: real IAP restore goes here.
+  Future<void> recordStorePurchase({
+    required BillingPlan plan,
+    required Package package,
+  }) async {
     final prefs = ref.read(sharedPrefsProvider);
-    if (prefs.getBool('is_premium') ?? false) return;
+    final price = package.storeProduct.price;
+    await _appendHistory(
+      prefs,
+      BillingHistoryEntry(
+        at: DateTime.now(),
+        plan: plan,
+        amountPhp: price,
+        status: 'Paid · ${package.storeProduct.identifier}',
+      ),
+    );
+    ref.invalidate(billingHistoryProvider);
   }
 }
 
+Future<void> _appendHistory(
+  SharedPreferences prefs,
+  BillingHistoryEntry entry,
+) async {
+  final existing = billingHistoryFromPrefs(prefs);
+  final asStrings = [
+    jsonEncode(entry.toJson()),
+    for (final e in existing) jsonEncode(e.toJson()),
+  ];
+  await prefs.setStringList(_historyKey, asStrings);
+}
+
+List<BillingHistoryEntry> billingHistoryFromPrefs(SharedPreferences prefs) {
+  final raw = prefs.getStringList(_historyKey) ?? const [];
+  final entries = <BillingHistoryEntry>[];
+  for (final line in raw) {
+    try {
+      final json = jsonDecode(line);
+      if (json is Map<String, dynamic>) {
+        entries.add(BillingHistoryEntry.fromJson(json));
+      }
+    } catch (_) {
+      // Skip corrupt rows.
+    }
+  }
+  return entries;
+}
+
+final billingHistoryProvider = Provider<List<BillingHistoryEntry>>((ref) {
+  ref.watch(billingPlanProvider);
+  final prefs = ref.watch(sharedPrefsProvider);
+  return billingHistoryFromPrefs(prefs);
+});
+
 final premiumRenewsAtProvider = Provider<DateTime?>((ref) {
   final prefs = ref.watch(sharedPrefsProvider);
-  if (!(prefs.getBool('is_premium') ?? false)) return null;
+  final paidViaRc =
+      ref.watch(revenueCatConfiguredProvider) && ref.watch(rcPremiumActiveProvider);
+  final paidViaPayMongo = ref.watch(payMongoPremiumActiveProvider);
+  if (!paidViaRc && !paidViaPayMongo && !(prefs.getBool('is_premium') ?? false)) {
+    return null;
+  }
   final raw = prefs.getString(_renewKey);
   if (raw == null) return null;
   return DateTime.tryParse(raw);
 });
-
-/// True while the 7-day premium trial is active (still quota-limited).
-final isPremiumTrialProvider = Provider<bool>((ref) {
-  if (!ref.watch(isPremiumProvider)) return false;
-  return ref.watch(sharedPrefsProvider).getBool(_trialKey) ?? false;
-});
-
-/// Paid premium (trial finished / converted) gets unlimited AI quizzes.
-final hasUnlimitedAiQuizzesProvider = Provider<bool>((ref) {
-  return ref.watch(isPremiumProvider) && !ref.watch(isPremiumTrialProvider);
-});
-
-/// True when free / trial allotment is exhausted — quiz icon stays tappable
-/// but opens the upgrade sheet instead of generating more quizzes.
-final quizLimitReachedProvider = Provider<bool>((ref) {
-  if (ref.watch(hasUnlimitedAiQuizzesProvider)) return false;
-  final usage = ref.watch(monthlyQuizUsageProvider).asData?.value;
-  if (usage == null) return false;
-  return usage.used >= usage.limit;
-});
-
-/// AI quizzes used against the free / trial allotment.
-///
-/// Free: calendar-month window. Trial: from trial start through the 7 days.
-/// Paid premium skips this provider's limit (see [hasUnlimitedAiQuizzesProvider]).
+/// Quizzes completed this calendar month (all documents).
 final monthlyQuizUsageProvider = FutureProvider<({int used, int limit})>(
   (ref) async {
-    if (ref.watch(hasUnlimitedAiQuizzesProvider)) {
+    final isPremium = ref.watch(isPremiumProvider);
+    if (isPremium) {
       return (used: 0, limit: kFreeQuizLimitPerMonth);
     }
     final db = ref.watch(databaseProvider);
     final now = DateTime.now();
-    DateTime start;
-    if (ref.watch(isPremiumTrialProvider)) {
-      final renews = ref.watch(premiumRenewsAtProvider);
-      start = renews != null
-          ? renews.subtract(const Duration(days: AppPricing.freeTrialDays))
-          : now.subtract(const Duration(days: AppPricing.freeTrialDays));
-    } else {
-      start = DateTime(now.year, now.month, 1);
-    }
+    final start = DateTime(now.year, now.month, 1);
     final count = db.quizAttempts.id.count();
     final row = await (db.selectOnly(db.quizAttempts)
           ..addColumns([count])
@@ -125,7 +244,7 @@ final monthlyQuizUsageProvider = FutureProvider<({int used, int limit})>(
   },
 );
 
-/// Aggregate quiz stats for the settings history row.
+/// Aggregate quiz stats for premium settings row.
 final quizStatsProvider = FutureProvider<({int count, int avgPercent})>(
   (ref) async {
     final db = ref.watch(databaseProvider);
@@ -134,13 +253,13 @@ final quizStatsProvider = FutureProvider<({int count, int avgPercent})>(
         .get();
     if (rows.isEmpty) return (count: 0, avgPercent: 0);
     var totalPct = 0;
-    var scored = 0;
+    var counted = 0;
     for (final row in rows) {
-      if (row.questionCount == 0) continue;
+      if (row.questionCount == 0 || !row.completed) continue;
       totalPct += (row.correctCount * 100 / row.questionCount).round();
-      scored++;
+      counted++;
     }
-    final avg = scored == 0 ? 0 : (totalPct / scored).round();
-    return (count: rows.length, avgPercent: avg);
+    final avg = counted == 0 ? 0 : (totalPct / counted).round();
+    return (count: counted, avgPercent: avg);
   },
 );

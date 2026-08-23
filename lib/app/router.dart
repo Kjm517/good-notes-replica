@@ -2,26 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/admin/admin_console_gate.dart';
+import '../features/admin/admin_section.dart';
 import '../features/auth/data/auth_repository.dart';
 import '../features/auth/providers.dart';
 import '../features/auth/sign_in_screen.dart';
 import '../features/editor/editor_screen.dart';
 import '../features/library/library_screen.dart';
 import '../features/library/trash_screen.dart';
+import '../features/settings/billing_history_screen.dart';
+import '../features/settings/global_quiz_history_page.dart';
 import '../features/settings/settings_screen.dart';
-import 'firebase_bootstrap.dart';
+import 'admin_route.dart';
+import 'supabase_bootstrap.dart';
 import 'page_routes.dart';
 
 /// Top-level app routing, including the auth gate that keeps an
-/// unauthenticated user on the sign-in screen when Firebase is configured.
+/// unauthenticated user on the sign-in screen when Supabase is configured.
 ///
-/// The gate reads the current user through a plain [ValueNotifier] fed from
-/// `ref.listen` (rather than rebuilding the router on every auth tick), so the
-/// navigation stack stays intact while sign-in/out re-runs the redirect on its
-/// own — no imperative navigation.
+/// Admin routes (`/admin/...`) bypass the main sign-in gate so
+/// [AdminConsoleGate] can show the staff sign-in screen instead.
 final routerProvider = Provider<GoRouter>((ref) {
-  // The router is only built once auth has resolved (see NotablyApp), so the
-  // seed here already reflects the restored session.
   final user = ValueNotifier<AppUser?>(
     ref.read(authStateProvider).asData?.value,
   );
@@ -32,25 +33,25 @@ final routerProvider = Provider<GoRouter>((ref) {
   });
 
   return GoRouter(
-    // The redirect below funnels unsigned users to the gate; nothing to
-    // pre-load here because the router doesn't exist until auth resolves.
     initialLocation: '/',
     refreshListenable: user,
     redirect: (context, state) {
-      // Local-only mode: no backend to sign into, no gate — stay put.
-      if (!firebaseReady) return null;
+      if (!supabaseReady) return null;
 
       final loc = state.matchedLocation;
       final signedIn = user.value != null;
+      final admin = isAdminRoute(state);
 
       if (!signedIn) {
-        // Unsigned users funnel to the gate; once on it, stop redirecting so
-        // the form can render.
+        if (admin) return null;
         return loc == '/sign-in' ? null : '/sign-in';
       }
 
-      // A signed-in user should never be stranded on the gate screen.
-      if (loc == '/sign-in') return '/';
+      if (loc == '/sign-in') {
+        final next = state.uri.queryParameters['next'];
+        if (next != null && next.startsWith('/admin')) return next;
+        return '/';
+      }
 
       return null;
     },
@@ -98,9 +99,41 @@ final routerProvider = Provider<GoRouter>((ref) {
           child: const SettingsScreen(),
         ),
       ),
+      GoRoute(
+        path: '/quiz-history',
+        pageBuilder: (context, state) => notablyPage(
+          key: state.pageKey,
+          child: const GlobalQuizHistoryPage(),
+        ),
+      ),
+      GoRoute(
+        path: '/billing-history',
+        pageBuilder: (context, state) => notablyPage(
+          key: state.pageKey,
+          child: const BillingHistoryScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/admin',
+        redirect: (context, state) => AdminSection.overview.location,
+      ),
+      for (final section in AdminSection.values)
+        GoRoute(
+          path: section.location,
+          pageBuilder: (context, state) => notablyPage(
+            key: state.pageKey,
+            child: AdminConsoleGate(section: section),
+          ),
+        ),
     ],
-    errorBuilder: (context, state) => Scaffold(
-      body: Center(child: Text('Route error: ${state.error}')),
-    ),
+    errorBuilder: (context, state) {
+      // Deep-link `/admin` variants that missed a child segment.
+      if (isAdminRoute(state)) {
+        return AdminConsoleGate(section: AdminSection.overview);
+      }
+      return Scaffold(
+        body: Center(child: Text('Route error: ${state.error}')),
+      );
+    },
   );
 });

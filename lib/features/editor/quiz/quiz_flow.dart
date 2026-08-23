@@ -8,14 +8,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/design.dart';
 import '../../../app/page_routes.dart';
 import '../../../app/providers.dart';
-import '../../../app/pricing.dart';
 import '../../../core/ai/gemini_service.dart';
 import '../../../core/db/database.dart';
 import '../../../core/models/outline_entry.dart';
 import '../../../core/network/network_status.dart';
 import '../../library/providers.dart';
+import '../../settings/entitlements.dart';
 import '../../settings/premium_plan_sheet.dart';
-import '../../settings/premium_providers.dart';
 import '../pages/page_background_service.dart';
 import '../providers.dart';
 import 'quiz_align.dart';
@@ -51,18 +50,8 @@ class QuizFlow extends ConsumerStatefulWidget {
     required String title,
     required int pageCount,
     void Function(int pageIndex)? onJumpToPage,
-  }) async {
-    final container = ProviderScope.containerOf(context);
-    if (!container.read(hasUnlimitedAiQuizzesProvider)) {
-      final usage = await container.read(monthlyQuizUsageProvider.future);
-      if (usage.used >= usage.limit) {
-        if (!context.mounted) return;
-        await PremiumPlanSheet.show(context);
-        return;
-      }
-    }
-    if (!context.mounted) return;
-    await Navigator.of(context).push(
+  }) {
+    return Navigator.of(context).push(
       notablyRoute<void>(
         fullscreenDialog: true,
         builder: (_) => QuizFlow(
@@ -126,18 +115,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     super.dispose();
   }
 
-  Future<bool> _canGenerateMore() async {
-    if (ref.read(hasUnlimitedAiQuizzesProvider)) return true;
-    final usage = await ref.read(monthlyQuizUsageProvider.future);
-    return usage.used < usage.limit;
-  }
-
   Future<void> _queueCurrent() async {
-    if (!await _canGenerateMore()) {
-      if (!mounted) return;
-      await PremiumPlanSheet.show(context);
-      return;
-    }
     await ref
         .read(quizQueueProvider.notifier)
         .enqueue(
@@ -176,9 +154,10 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   }
 
   Future<void> _generate({bool fromQueue = false}) async {
-    if (!await _canGenerateMore()) {
+    final ent = await ref.read(entitlementProvider.future);
+    if (!ent.canGenerateQuiz) {
       if (!mounted) return;
-      await PremiumPlanSheet.show(context);
+      await _showQuizLimitReached(ent);
       return;
     }
     final online = fromQueue || await isOnlineNow();
@@ -325,8 +304,8 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     } catch (e) {
       debugPrint('Quiz history save failed: $e');
     }
+    ref.read(entitlementServiceProvider).refresh();
     if (!mounted) return;
-    ref.invalidate(monthlyQuizUsageProvider);
     setState(() {
       _questions = questions;
       _familyId = familyId;
@@ -741,7 +720,41 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     );
   }
 
+  Future<void> _showQuizLimitReached(UserEntitlement ent) async {
+    final message = ent.isTrialActive
+        ? 'You\'ve used all ${ent.quizLimit} trial quizzes. Upgrade for unlimited access.'
+        : ent.trialExpired
+            ? 'You\'ve used your ${ent.quizLimit} free quizzes this month. Upgrade for unlimited access.'
+            : 'You\'ve reached your quiz limit. Sign in to start a trial or upgrade to Premium.';
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Quiz limit reached'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              PremiumPlanSheet.show(context);
+            },
+            child: const Text('See plans'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openHistory() async {
+    final ent = await ref.read(entitlementProvider.future);
+    if (!mounted) return;
+    if (!ent.canAccessQuizHistory) {
+      await PremiumPlanSheet.show(context);
+      return;
+    }
     final action = await QuizHistoryPage.open(
       context,
       documentId: widget.documentId,
@@ -807,12 +820,6 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   @override
   Widget build(BuildContext context) {
     ref.watch(documentStreamProvider(widget.documentId));
-    final onTrial = ref.watch(isPremiumTrialProvider);
-    final unlimitedQuizzes = ref.watch(hasUnlimitedAiQuizzesProvider);
-    final quizUsage = ref.watch(monthlyQuizUsageProvider);
-    final freeUsed = quizUsage.asData?.value.used ?? 0;
-    final freeLimit = quizUsage.asData?.value.limit ?? AppPricing.freeQuizLimit;
-    final quizLimitReached = !unlimitedQuizzes && freeUsed >= freeLimit;
     final online = ref.watch(onlineProvider).asData?.value ?? true;
     final queued = [
       for (final job in ref.watch(quizQueueProvider))
@@ -825,6 +832,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
             ?.value
             .isNotEmpty ??
         false;
+    final entitlement = ref.watch(entitlementProvider);
+    final canAccessHistory =
+        entitlement.asData?.value.canAccessQuizHistory ?? false;
     ref.listen<AsyncValue<bool>>(onlineProvider, (prev, next) {
       final wasOnline = prev?.asData?.value;
       final isOnline = next.asData?.value ?? false;
@@ -833,10 +843,6 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
           _phase != _Phase.setup ||
           _launchingQueued) {
         return;
-      }
-      if (!ref.read(hasUnlimitedAiQuizzesProvider)) {
-        final usage = ref.read(monthlyQuizUsageProvider).asData?.value;
-        if (usage != null && usage.used >= usage.limit) return;
       }
       if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
       final job = ref
@@ -926,16 +932,11 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
                 pageCount: widget.pageCount,
               ),
               online: online,
-              showQuizLimit: !unlimitedQuizzes,
-              onTrial: onTrial,
-              freeQuizzesUsed: freeUsed,
-              freeQuizzesLimit: freeLimit,
-              quizLimitReached: quizLimitReached,
               queued: queued != null,
               hasHistory: hasHistory,
+              historyEnabled: canAccessHistory,
               onChanged: (c) => setState(() => _config = c),
               onGenerate: _generate,
-              onUpgrade: () => PremiumPlanSheet.show(context),
               onPickSource: _pickSource,
               onOpenHistory: _openHistory,
               onCancelQueue: () => unawaited(
@@ -985,10 +986,16 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   }
 }
 
-class _PremiumChip extends StatelessWidget {
+class _PremiumChip extends ConsumerWidget {
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
+    final ent = ref.watch(entitlementProvider).asData?.value;
+    final label = switch (ent?.tier) {
+      EntitlementTier.trial => 'TRIAL',
+      EntitlementTier.premium => 'PREMIUM',
+      _ => 'FREE',
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
@@ -1001,7 +1008,7 @@ class _PremiumChip extends StatelessWidget {
           Icon(Icons.workspace_premium_rounded, size: 14, color: t.premiumText),
           const SizedBox(width: 4),
           Text(
-            'PREMIUM',
+            label,
             style: AppTokens.sectionLabel(t.premiumText).copyWith(fontSize: 10),
           ),
         ],
@@ -1016,16 +1023,11 @@ class _SetupView extends StatelessWidget {
     required this.config,
     required this.sourceLabel,
     required this.online,
-    required this.showQuizLimit,
-    required this.onTrial,
-    required this.freeQuizzesUsed,
-    required this.freeQuizzesLimit,
-    required this.quizLimitReached,
     required this.queued,
     required this.hasHistory,
+    required this.historyEnabled,
     required this.onChanged,
     required this.onGenerate,
-    required this.onUpgrade,
     required this.onPickSource,
     required this.onOpenHistory,
     required this.onCancelQueue,
@@ -1035,16 +1037,11 @@ class _SetupView extends StatelessWidget {
   final QuizConfig config;
   final String sourceLabel;
   final bool online;
-  final bool showQuizLimit;
-  final bool onTrial;
-  final int freeQuizzesUsed;
-  final int freeQuizzesLimit;
-  final bool quizLimitReached;
   final bool queued;
   final bool hasHistory;
+  final bool historyEnabled;
   final ValueChanged<QuizConfig> onChanged;
   final VoidCallback onGenerate;
-  final VoidCallback onUpgrade;
   final VoidCallback onPickSource;
   final VoidCallback onOpenHistory;
   final VoidCallback onCancelQueue;
@@ -1099,9 +1096,12 @@ class _SetupView extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Quiz history',
-                  onPressed: onOpenHistory,
-                  icon: Icon(Icons.history_rounded, color: t.premiumText),
+                  tooltip: historyEnabled ? 'Quiz history' : 'Quiz history (Premium)',
+                  onPressed: historyEnabled ? onOpenHistory : null,
+                  icon: Icon(
+                    Icons.history_rounded,
+                    color: historyEnabled ? t.premiumText : t.textFaint,
+                  ),
                 ),
               ],
             ),
@@ -1118,19 +1118,10 @@ class _SetupView extends StatelessWidget {
               online: online,
               queued: queued,
               hasHistory: hasHistory,
+              historyEnabled: historyEnabled,
               onOpenHistory: onOpenHistory,
               onCancelQueue: onCancelQueue,
             ),
-            if (showQuizLimit) ...[
-              const SizedBox(height: 18),
-              _FreePlanUsageBanner(
-                used: freeQuizzesUsed,
-                limit: freeQuizzesLimit,
-                limitReached: quizLimitReached,
-                onTrial: onTrial,
-                onUpgrade: onUpgrade,
-              ),
-            ],
             const SizedBox(height: 22),
             Text(
               'NUMBER OF QUESTIONS',
@@ -1210,8 +1201,7 @@ class _SetupView extends StatelessWidget {
             const SizedBox(height: 28),
             FilledButton.icon(
               onPressed:
-                  quizLimitReached ||
-                      config.kinds.isEmpty ||
+                  config.kinds.isEmpty ||
                       (config.source.mode == QuizSourceMode.sections &&
                           config.source.sectionIds.isEmpty)
                   ? null
@@ -1228,9 +1218,7 @@ class _SetupView extends StatelessWidget {
                 online ? Icons.auto_awesome_rounded : Icons.schedule_rounded,
               ),
               label: Text(
-                quizLimitReached
-                    ? 'Upgrade for unlimited quizzes'
-                    : online
+                online
                     ? 'Generate ${config.count}-question quiz'
                     : 'Queue ${config.count}-question quiz',
               ),
@@ -1248,95 +1236,12 @@ class _SetupView extends StatelessWidget {
   }
 }
 
-class _FreePlanUsageBanner extends StatelessWidget {
-  const _FreePlanUsageBanner({
-    required this.used,
-    required this.limit,
-    required this.limitReached,
-    required this.onTrial,
-    required this.onUpgrade,
-  });
-
-  final int used;
-  final int limit;
-  final bool limitReached;
-  final bool onTrial;
-  final VoidCallback onUpgrade;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    final remaining = (limit - used).clamp(0, limit);
-    final title = limitReached
-        ? (onTrial ? 'Trial quiz limit reached' : 'Free plan limit reached')
-        : onTrial
-            ? '$remaining of $limit AI quizzes left in your trial'
-            : '$remaining of $limit free AI quizzes left';
-    final subtitle = limitReached
-        ? 'Upgrade for unlimited AI quizzes · ${AppPricing.monthly}/mo after trial'
-        : onTrial
-            ? AppPricing.freeQuizLimitLabel
-            : 'Trial includes ${AppPricing.freeQuizLimit} AI quizzes for ${AppPricing.freeTrialDays} days';
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: t.premiumSoft,
-        borderRadius: BorderRadius.circular(Radii.card),
-        border: Border.all(color: t.premium.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.auto_awesome_rounded, size: 22, color: t.premiumText),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: t.premiumText,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: TextStyle(fontSize: 12, color: t.textMuted, height: 1.4),
-          ),
-          if (limitReached) ...[
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: onUpgrade,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(44),
-                backgroundColor: t.premium,
-                foregroundColor: t.premiumOn,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(Radii.control),
-                ),
-              ),
-              child: Text(
-                AppPricing.upgradeFromMonthly,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _OfflineQuizBanner extends StatelessWidget {
   const _OfflineQuizBanner({
     required this.online,
     required this.queued,
     required this.hasHistory,
+    required this.historyEnabled,
     required this.onOpenHistory,
     required this.onCancelQueue,
   });
@@ -1344,6 +1249,7 @@ class _OfflineQuizBanner extends StatelessWidget {
   final bool online;
   final bool queued;
   final bool hasHistory;
+  final bool historyEnabled;
   final VoidCallback onOpenHistory;
   final VoidCallback onCancelQueue;
 
@@ -1420,7 +1326,7 @@ class _OfflineQuizBanner extends StatelessWidget {
                 ),
               ],
             ),
-            if (!online && hasHistory) ...[
+            if (!online && hasHistory && historyEnabled) ...[
               const SizedBox(height: 4),
               TextButton(
                 onPressed: onOpenHistory,

@@ -9,10 +9,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
 import 'app/crash_guard.dart';
-import 'app/firebase_bootstrap.dart';
+import 'app/supabase_bootstrap.dart';
 import 'app/providers.dart';
+import 'core/prefs/shared_preferences_bootstrap.dart';
+import 'features/admin/admin_supabase.dart';
 import 'features/auth/providers.dart';
 import 'features/library/providers.dart';
+import 'features/settings/revenuecat_billing.dart';
 
 void main() => runGuarded(bootstrap);
 
@@ -33,9 +36,13 @@ Future<Widget> bootstrap() async {
     debugPrint('Could not load .env (Gemini will be unavailable): $e');
   }
 
-  // Never fatal: if Firebase isn't configured the app runs local-only.
-  await initFirebase();
+  // Never fatal: if Supabase isn't configured the app runs local-only.
+  await initSupabase();
+  await initAdminSupabase();
 
+  await configureRevenueCat();
+
+  await ensureSharedPreferencesPlatform();
   final prefs = await SharedPreferences.getInstance();
 
   final container = ProviderContainer(

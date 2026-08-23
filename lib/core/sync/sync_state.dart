@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 /// What the sync engine is doing right now.
 enum SyncPhase {
-  /// Not signed in, or Firebase unavailable — purely local.
+  /// Not signed in, or Supabase unavailable — purely local.
   disabled,
 
   /// Signed in, nothing pending.

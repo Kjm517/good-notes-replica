@@ -36,7 +36,7 @@ class Documents extends Table with SyncedTable {
 
   BoolColumn get starred => boolean().withDefault(const Constant(false))();
 
-  /// Firebase uid of the account this belongs to.
+  /// Supabase uid of the account this belongs to.
   ///
   /// Null means "created on this device while signed out" — those stay
   /// visible to everyone and are claimed by the first account that signs in.

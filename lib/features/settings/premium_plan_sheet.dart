@@ -1,12 +1,16 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 
 import '../../app/design.dart';
-import '../../app/pricing.dart';
+import 'billing_helpers.dart';
+import 'billing_ladder.dart';
+import 'billing_plan.dart';
 import 'payment_sheet.dart';
-import 'premium_providers.dart';
+import 'revenuecat_billing.dart';
 
-class PremiumPlanSheet extends ConsumerStatefulWidget {
+class PremiumPlanSheet extends ConsumerWidget {
   const PremiumPlanSheet({super.key});
 
   static Future<void> show(BuildContext context) {
@@ -20,118 +24,232 @@ class PremiumPlanSheet extends ConsumerStatefulWidget {
   }
 
   @override
-  ConsumerState<PremiumPlanSheet> createState() => _PremiumPlanSheetState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final useStore = ref.watch(revenueCatConfiguredProvider);
+    final offeringsAsync = ref.watch(offeringsProvider);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottom),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Choose a plan',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 20),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '7-day free trial · cancel anytime',
+                style: AppTokens.mono(size: 11, color: t.textFaint),
+              ),
+              const SizedBox(height: 20),
+              _PricingLadder(t: t),
+              const SizedBox(height: 16),
+              if (useStore && offeringsAsync.isLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else ...[
+                _PlanOption(
+                  plan: BillingPlan.yearly,
+                  title: 'Yearly',
+                  price: _priceFor(
+                    useStore: useStore,
+                    offerings: offeringsAsync.valueOrNull,
+                    plan: BillingPlan.yearly,
+                  ),
+                  badge: 'Best value',
+                  subtitle:
+                      '~${formatPhp(kYearlyEffectiveMonthlyPhp)}/mo · ${yearlySavingsLabel()}',
+                  package: packageForPlan(
+                    offeringsAsync.valueOrNull,
+                    BillingPlan.yearly,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _PlanOption(
+                  plan: BillingPlan.monthly,
+                  title: 'Monthly',
+                  price: _priceFor(
+                    useStore: useStore,
+                    offerings: offeringsAsync.valueOrNull,
+                    plan: BillingPlan.monthly,
+                  ),
+                  subtitle:
+                      'Students ${formatPhp(kStudentMonthlyPhp)}/mo · launch ${formatPhp(kLaunchMonthlyPhp)}',
+                  package: packageForPlan(
+                    offeringsAsync.valueOrNull,
+                    BillingPlan.monthly,
+                  ),
+                ),
+              ],
+              if (useStore)
+                TextButton(
+                  onPressed: () => _restorePurchases(context, ref),
+                  child: const Text('Restore purchases'),
+                ),
+              const SizedBox(height: 16),
+              Text(
+                premiumTierSummary(),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: t.textMuted),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Free tier: ${freeTierSummary()}.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: t.textFaint, height: 1.35),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _priceFor({
+    required bool useStore,
+    required Offerings? offerings,
+    required BillingPlan plan,
+  }) {
+    if (kIsWeb || !useStore) {
+      return plan == BillingPlan.yearly ? yearlyPriceLabel() : monthlyPriceLabel();
+    }
+    return priceLabelForPackage(packageForPlan(offerings, plan), plan);
+  }
+
+  Future<void> _restorePurchases(BuildContext context, WidgetRef ref) async {
+    try {
+      final info = await restorePurchases();
+      ref.read(customerInfoProvider.notifier).apply(info);
+      if (!context.mounted) return;
+      final active = isPremiumFromCustomerInfo(info);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            active
+                ? 'Premium restored.'
+                : 'No active subscription found for this account.',
+          ),
+        ),
+      );
+      if (active) Navigator.of(context).pop();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Restore failed: $e')),
+      );
+    }
+  }
 }
 
-class _PremiumPlanSheetState extends ConsumerState<PremiumPlanSheet> {
-  BillingPlan _selected = BillingPlan.yearly;
+class _PricingLadder extends StatelessWidget {
+  const _PricingLadder({required this.t});
+
+  final AppTokens t;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.fill,
+        borderRadius: BorderRadius.circular(Radii.inner),
+        border: Border.all(color: t.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _LadderRow(
+            label: 'Free',
+            value: freeTierSummary(),
+            muted: true,
+          ),
+          Divider(height: 16, color: t.line),
+          _LadderRow(label: 'Monthly', value: monthlyPriceLabel()),
+          _LadderRow(
+            label: 'Student',
+            value: '${formatPhp(kStudentMonthlyPhp)}/mo',
+            hint: '.edu email or $kStudentVoucherCode',
+          ),
+          _LadderRow(
+            label: 'Yearly',
+            value: yearlyPriceLabel(),
+            hint: '~${formatPhp(kYearlyEffectiveMonthlyPhp)}/mo · ${yearlySavingsLabel()}',
+            accent: true,
+          ),
+          _LadderRow(
+            label: 'Launch',
+            value: '${formatPhp(kLaunchMonthlyPhp)}/mo',
+            hint: '$kLaunchVoucherCode · first month · GCash/Maya',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LadderRow extends StatelessWidget {
+  const _LadderRow({
+    required this.label,
+    required this.value,
+    this.hint,
+    this.muted = false,
+    this.accent = false,
+  });
+
+  final String label;
+  final String value;
+  final String? hint;
+  final bool muted;
+  final bool accent;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final valueColor = accent ? t.premiumText : (muted ? t.textMuted : t.text);
     return Padding(
-      padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Spacer(),
-              TextButton(
-                onPressed: () async {
-                  await ref.read(billingPlanProvider.notifier).restore();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('No purchases to restore yet.')),
-                  );
-                },
-                child: Text('Restore', style: TextStyle(color: t.textMuted)),
-              ),
-            ],
-          ),
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              gradient: const LinearGradient(
-                colors: [Color(0xFFF4D58A), Color(0xFFD9A94E)],
-              ),
-            ),
-            child: Icon(Icons.workspace_premium_rounded, color: t.premiumOn, size: 29),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'Notably Premium',
-            style: TextStyle(
-              fontSize: 23,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.02,
-              color: t.text,
-            ),
-          ),
-          const SizedBox(height: 7),
-          Text(
-            'Premium includes 15 GB storage, unlimited AI quizzes, and more.',
-            style: TextStyle(fontSize: 13, height: 1.55, color: t.textMuted),
-          ),
-          const SizedBox(height: 18),
-          _PlanOption(
-            title: 'Yearly',
-            subtitle: AppPricing.yearlyBilledSubtitle,
-            price: AppPricing.yearlyPerMonth,
-            unit: '/month',
-            badge: AppPricing.yearlySaveBadge,
-            selected: _selected == BillingPlan.yearly,
-            onTap: () => setState(() => _selected = BillingPlan.yearly),
-          ),
-          const SizedBox(height: 10),
-          _PlanOption(
-            title: 'Monthly',
-            subtitle: 'Billed every month',
-            price: AppPricing.monthly,
-            unit: '/month',
-            selected: _selected == BillingPlan.monthly,
-            onTap: () => setState(() => _selected = BillingPlan.monthly),
-          ),
-          const SizedBox(height: 16),
-          for (final line in AppPricing.premiumBenefits)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 11),
-              child: Row(
-                children: [
-                  Icon(Icons.check_circle_rounded, size: 18, color: t.premiumText),
-                  const SizedBox(width: 11),
-                  Expanded(
-                    child: Text(line, style: TextStyle(fontSize: 12.5, color: t.textSecondary)),
-                  ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 8),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              PaymentSheet.show(context, plan: _selected);
-            },
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-              backgroundColor: t.premium,
-              foregroundColor: t.premiumOn,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            ),
+          SizedBox(
+            width: 64,
             child: Text(
-              AppPricing.continueLabel(yearly: _selected == BillingPlan.yearly),
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5),
+              label,
+              style: AppTokens.mono(
+                size: 10,
+                weight: FontWeight.w600,
+                color: t.textFaint,
+              ),
             ),
           ),
-          const SizedBox(height: 11),
-          Text(
-            AppPricing.freeTrialLabel,
-            textAlign: TextAlign.center,
-            style: AppTokens.mono(size: 11, color: t.textFaint),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: valueColor,
+                  ),
+                ),
+                if (hint != null)
+                  Text(
+                    hint!,
+                    style: TextStyle(fontSize: 10, color: t.textFaint, height: 1.3),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -141,126 +259,103 @@ class _PremiumPlanSheetState extends ConsumerState<PremiumPlanSheet> {
 
 class _PlanOption extends StatelessWidget {
   const _PlanOption({
+    required this.plan,
     required this.title,
-    required this.subtitle,
     required this.price,
-    required this.unit,
-    required this.selected,
-    required this.onTap,
+    required this.subtitle,
     this.badge,
+    this.package,
   });
 
+  final BillingPlan plan;
   final String title;
-  final String subtitle;
   final String price;
-  final String unit;
-  final bool selected;
-  final VoidCallback onTap;
+  final String subtitle;
   final String? badge;
+  final Package? package;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(Radii.card),
-          border: Border.all(
-            color: selected ? t.premium : t.lineStrong,
-            width: selected ? 1.5 : 1,
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(Radii.card),
+      child: InkWell(
+        onTap: () => _select(context),
+        borderRadius: BorderRadius.circular(Radii.card),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(Radii.card),
+            border: Border.all(color: t.line),
           ),
-          gradient: selected
-              ? LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    t.premium.withValues(alpha: 0.16),
-                    t.premium.withValues(alpha: 0.04),
-                  ],
-                )
-              : null,
-          color: selected ? null : t.surface,
-        ),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            if (badge != null)
-              Positioned(
-                top: -22,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFF4D58A), Color(0xFFD9A94E)],
-                    ),
-                    borderRadius: BorderRadius.circular(100),
-                  ),
-                  child: Text(
-                    badge!,
-                    style: TextStyle(
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w700,
-                      color: t.premiumOn,
-                    ),
-                  ),
-                ),
-              ),
-            Row(
-              children: [
-                Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: selected ? t.premium : t.lineStrong,
-                      width: 2,
-                    ),
-                  ),
-                  child: selected
-                      ? Center(
-                          child: Container(
-                            width: 10,
-                            height: 10,
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (badge != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
-                              color: t.premium,
-                              shape: BoxShape.circle,
+                              color: t.premiumSoft,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              badge!,
+                              style: AppTokens.mono(
+                                size: 9,
+                                weight: FontWeight.w600,
+                                color: t.premiumText,
+                              ),
                             ),
                           ),
-                        )
-                      : null,
-                ),
-                const SizedBox(width: 11),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w700,
-                          color: selected ? t.premiumText : t.text,
-                        ),
-                      ),
-                      Text(subtitle, style: TextStyle(fontSize: 11, color: t.textFaint)),
-                    ],
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(price, style: AppTokens.mono(size: 17, color: selected ? t.premiumText : t.text)),
-                    Text(unit, style: TextStyle(fontSize: 10, color: t.textFaint)),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: TextStyle(fontSize: 12, color: t.textMuted)),
                   ],
                 ),
-              ],
-            ),
-          ],
+              ),
+              Text(
+                price,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: t.premiumText,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, color: t.textFaint),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  void _select(BuildContext context) {
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    navigator.push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => PaymentSheet(plan: plan, package: package),
       ),
     );
   }

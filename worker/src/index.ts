@@ -1,25 +1,52 @@
 /**
  * Notably file service.
  *
- * The app stores notes and annotations in Firestore, but the source files
- * (PDFs, images) live in Cloudflare R2 — 10 GB free with no egress charges,
- * which matters when a single textbook is 150 MB.
+ * Notes sync via Supabase Postgres; source files (PDFs, images) live in
+ * Cloudflare R2 — 10 GB free with no egress charges, which matters when a
+ * single textbook is 150 MB.
  *
  * R2 credentials must never ship inside the app, so this Worker sits in
- * front: it verifies the caller's Firebase ID token, then reads or writes
+ * front: it verifies the caller's Supabase access token, then reads or writes
  * objects strictly under that user's own `users/{uid}/` prefix.
+ *
+ * Billing (PayMongo GCash / Maya) uses the same auth and stores entitlement
+ * JSON beside each user's files in R2.
  */
+
+import { requireUid } from './auth';
+import { handleAdmin } from './admin';
+import { handleUserTelemetry } from './user-telemetry';
+import {
+  handleBillingCheckout,
+  handleBillingEntitlement,
+  handleBillingReturn,
+  handleBillingWebhook,
+  handleBillingVoucherValidate,
+  payMongoConfigured,
+} from './billing';
 
 export interface Env {
   /** R2 bucket binding (see wrangler.toml). */
   BUCKET: R2Bucket;
-  /** Firebase project id — tokens must be issued for this project. */
-  FIREBASE_PROJECT_ID: string;
+  /** Supabase project URL, e.g. https://xxxx.supabase.co */
+  SUPABASE_URL: string;
+  /** Public anon key — admins lookups with the caller's JWT. */
+  SUPABASE_ANON_KEY?: string;
+  /** Supabase JWT secret — optional if project uses ES256 signing keys (JWKS). */
+  SUPABASE_JWT_SECRET?: string;
+  /** Service role — create admin Auth users. Never expose to the Flutter app. */
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  /** PayMongo secret API key — set via `wrangler secret put PAYMONGO_SECRET_KEY`. */
+  PAYMONGO_SECRET_KEY?: string;
+  /** PayMongo webhook signing secret — `wrangler secret put PAYMONGO_WEBHOOK_SECRET`. */
+  PAYMONGO_WEBHOOK_SECRET?: string;
+  /** Bootstrap super-admin Supabase UUIDs (comma-separated). */
+  ADMIN_UIDS?: string;
 }
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,PUT,POST,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization,Content-Type',
   'Access-Control-Max-Age': '86400',
 };
@@ -31,6 +58,22 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // ---- Admin (voucher management) ---------------------------------
+    if (url.pathname.startsWith('/admin/')) {
+      return handleAdminRoutes(request, env, url);
+    }
+
+    // ---- User telemetry (heartbeat, bugs, AI usage) -----------------
+    if (url.pathname.startsWith('/user/')) {
+      return handleUserRoutes(request, env, url);
+    }
+
+    // ---- Billing (PayMongo) -----------------------------------------
+    if (url.pathname.startsWith('/billing/')) {
+      return handleBilling(request, env, url);
+    }
+
     const key = url.searchParams.get('key');
 
     let uid: string;
@@ -74,9 +117,6 @@ export default {
       }
 
       // ---- Multipart upload -------------------------------------------
-      // A Worker request body is capped (100 MB on the free plan) and a
-      // phone cannot hold a textbook in memory anyway, so large files arrive
-      // a part at a time and R2 stitches them together.
       case 'POST /multipart/create': {
         const upload = await env.BUCKET.createMultipartUpload(objectKey, {
           httpMetadata: {
@@ -95,8 +135,6 @@ export default {
         }
         if (!request.body) return json({ error: 'Empty part.' }, 400);
         const upload = env.BUCKET.resumeMultipartUpload(objectKey, uploadId);
-        // R2 needs a known length per part, and the app sends fixed-size
-        // chunks, so buffering one part here is bounded and safe.
         const part = await upload.uploadPart(
           partNumber,
           await request.arrayBuffer(),
@@ -135,6 +173,92 @@ export default {
   },
 };
 
+async function handleUserRoutes(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  try {
+    return withCors(await handleUserTelemetry(request, env, url));
+  } catch (e) {
+    const message = (e as Error).message;
+    const status = message.includes('Authorization') ? 401 : 500;
+    return withCors(json({ error: message }, status));
+  }
+}
+
+async function handleAdminRoutes(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  try {
+    return withCors(await handleAdmin(request, env, url));
+  } catch (e) {
+    const message = (e as Error).message;
+    let status = 500;
+    if (message.includes('Authorization')) status = 401;
+    // 503, not 403: the admins table could not be read, so this is the
+    // service being unable to answer rather than the caller being refused.
+    // Reporting it as 403 is what makes a broken RLS policy look like a
+    // missing account.
+    else if ((e as Error).name === 'AdminCheckUnavailable') status = 503;
+    else if (message.includes('Admin access')) status = 403;
+    return withCors(json({ error: message }, status));
+  }
+}
+
+async function handleBilling(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  const route = `${request.method} ${url.pathname}`;
+  const origin = url.origin;
+
+  try {
+    switch (route) {
+      case 'GET /billing/config':
+        return withCors(
+          json({
+            paymongo: payMongoConfigured(env),
+            wallets: ['gcash', 'paymaya'],
+          }),
+        );
+
+      case 'GET /billing/return':
+        return withCors(await handleBillingReturn(request, env));
+
+      case 'POST /billing/webhook':
+        return withCors(await handleBillingWebhook(request, env));
+
+      case 'POST /billing/checkout': {
+        const uid = await requireUid(request, env);
+        return withCors(
+          await handleBillingCheckout(request, env, uid, origin),
+        );
+      }
+
+      case 'GET /billing/entitlement': {
+        const uid = await requireUid(request, env);
+        return withCors(await handleBillingEntitlement(env, uid));
+      }
+
+      case 'GET /billing/vouchers/validate': {
+        const code = url.searchParams.get('code') ?? '';
+        return withCors(await handleBillingVoucherValidate(env, code));
+      }
+
+      default:
+        return withCors(json({ error: 'Not found' }, 404));
+    }
+  } catch (e) {
+    const message = (e as Error).message;
+    const status = message.includes('Authorization') ? 401 : 500;
+    return withCors(json({ error: message }, status));
+  }
+}
+
 function stripLeadingSlashes(key: string): string {
   return key.replace(/^\/+/, '');
 }
@@ -146,128 +270,14 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** Extracts and verifies the Firebase ID token, returning the user's uid. */
-async function requireUid(request: Request, env: Env): Promise<string> {
-  const header = request.headers.get('Authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (!token) throw new Error('Missing Authorization header.');
-  return verifyFirebaseToken(token, env.FIREBASE_PROJECT_ID);
-}
-
-/**
- * Verifies a Firebase ID token: RS256 signature against Google's published
- * certificates, plus issuer, audience and expiry.
- */
-async function verifyFirebaseToken(
-  token: string,
-  projectId: string,
-): Promise<string> {
-  const [rawHeader, rawPayload, rawSignature] = token.split('.');
-  if (!rawHeader || !rawPayload || !rawSignature) {
-    throw new Error('Malformed token.');
+function withCors(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    headers.set(key, value);
   }
-
-  const header = JSON.parse(decodeBase64Url(rawHeader)) as {
-    alg: string;
-    kid: string;
-  };
-  const payload = JSON.parse(decodeBase64Url(rawPayload)) as {
-    aud: string;
-    iss: string;
-    sub: string;
-    exp: number;
-  };
-
-  if (header.alg !== 'RS256') throw new Error('Unexpected token algorithm.');
-  if (payload.aud !== projectId) throw new Error('Token is for another app.');
-  if (payload.iss !== `https://securetoken.google.com/${projectId}`) {
-    throw new Error('Unexpected token issuer.');
-  }
-  if (payload.exp * 1000 < Date.now()) throw new Error('Token expired.');
-  if (!payload.sub) throw new Error('Token has no subject.');
-
-  const certificate = await googleCertificate(header.kid);
-  const key = await crypto.subtle.importKey(
-    'spki',
-    pemToArrayBuffer(certificate),
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  );
-
-  const valid = await crypto.subtle.verify(
-    'RSASSA-PKCS1-v1_5',
-    key,
-    base64UrlToBytes(rawSignature),
-    new TextEncoder().encode(`${rawHeader}.${rawPayload}`),
-  );
-  if (!valid) throw new Error('Invalid token signature.');
-
-  return payload.sub;
-}
-
-/** Google's signing certificates, cached by the Workers HTTP cache. */
-async function googleCertificate(kid: string): Promise<string> {
-  const response = await fetch(
-    'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
-    { cf: { cacheTtl: 3600, cacheEverything: true } },
-  );
-  const certificates = (await response.json()) as Record<string, string>;
-  const certificate = certificates[kid];
-  if (!certificate) throw new Error('Unknown token key id.');
-  return certificate;
-}
-
-function decodeBase64Url(value: string): string {
-  return new TextDecoder().decode(base64UrlToBytes(value));
-}
-
-function base64UrlToBytes(value: string): Uint8Array {
-  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = base64.padEnd(
-    base64.length + ((4 - (base64.length % 4)) % 4),
-    '=',
-  );
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-function pemToArrayBuffer(pem: string): ArrayBuffer {
-  const body = pem
-    .replace(/-----BEGIN CERTIFICATE-----/, '')
-    .replace(/-----END CERTIFICATE-----/, '')
-    .replace(/\s+/g, '');
-  return spkiFromCertificate(base64UrlToBytes(body.replace(/\+/g, '-').replace(/\//g, '_')));
-}
-
-/**
- * Google publishes X.509 certificates but WebCrypto wants a bare SPKI public
- * key, so pull the SubjectPublicKeyInfo out of the DER structure.
- */
-function spkiFromCertificate(der: Uint8Array): ArrayBuffer {
-  // Walk the DER looking for the RSA algorithm identifier that starts the
-  // SubjectPublicKeyInfo block.
-  const marker = [0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d,
-    0x01, 0x01, 0x01];
-  for (let i = 0; i < der.length - marker.length; i++) {
-    let hit = true;
-    for (let j = 0; j < marker.length; j++) {
-      if (der[i + j] !== marker[j]) {
-        hit = false;
-        break;
-      }
-    }
-    if (!hit) continue;
-
-    // The SPKI SEQUENCE starts just before this identifier; find its header.
-    for (let start = i - 4; start >= 0; start--) {
-      if (der[start] === 0x30 && der[start + 1] === 0x82) {
-        const length = (der[start + 2] << 8) | der[start + 3];
-        return der.slice(start, start + 4 + length).buffer as ArrayBuffer;
-      }
-    }
-  }
-  throw new Error('Could not read public key from certificate.');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }

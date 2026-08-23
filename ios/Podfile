@@ -1,7 +1,19 @@
-# Uncomment this line to define a global platform for your project
+# CocoaPods setup for the iOS build.
+#
+# Committed rather than left to CocoaPods to generate, because two of this
+# app's dependencies need settings the generated default does not have, and
+# both failures look like "the package does not support iOS" rather than a
+# configuration problem:
+#
+#   * Firebase (core / auth / firestore) declares a minimum deployment target
+#     of iOS 15.0. `pod install` refuses outright if the project asks for less,
+#     with an error naming the pod rather than the version mismatch.
+#   * `printing` requires Swift, which means `use_frameworks!` on the Runner
+#     target. Without it the build fails on missing module maps.
 platform :ios, '15.0'
 
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+# CocoaPods analytics sends network stats synchronously, which slows every
+# build for no benefit here.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
@@ -11,26 +23,36 @@ project 'Runner', {
 }
 
 def flutter_root
-  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  generated_xcode_build_settings_path =
+    File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
   unless File.exist?(generated_xcode_build_settings_path)
-    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+    raise "#{generated_xcode_build_settings_path} must exist. Run `flutter pub get` first."
   end
 
   File.foreach(generated_xcode_build_settings_path) do |line|
     matches = line.match(/FLUTTER_ROOT\=(.*)/)
     return matches[1].strip if matches
   end
-  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+  raise "FLUTTER_ROOT not found. Delete Generated.xcconfig, then run `flutter pub get`."
 end
 
-require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+require File.expand_path(
+  File.join('packages', 'flutter_tools', 'bin', 'podhelper'),
+  flutter_root,
+)
 
 flutter_ios_podfile_setup
 
 target 'Runner' do
-  use_frameworks!
+  # Static linkage is the combination Firebase's Flutter plugins expect: plain
+  # dynamic `use_frameworks!` builds, then crashes at launch on missing
+  # Firebase symbols. Static keeps `printing`'s Swift requirement satisfied
+  # without that.
+  use_frameworks! :linkage => :static
+  use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
   target 'RunnerTests' do
     inherit! :search_paths
   end
@@ -40,6 +62,9 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
+      # Pods default to their own (older) minimums, which Xcode 15+ warns about
+      # and which can leave a pod built against an SDK the app no longer
+      # supports. Pin every one to the app's target.
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
     end
   end

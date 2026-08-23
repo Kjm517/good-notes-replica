@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -5,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/ai/gemini_service.dart';
 import 'quiz_align.dart';
+import '../../../core/sync/user_telemetry.dart';
 import 'quiz_models.dart';
 import 'quiz_quality.dart';
 
@@ -106,6 +108,11 @@ class AiQuizGenerator {
       difficulty: _difficultyName(config.difficulty),
       additionalInstructions: additionalInstructions,
     );
+    unawaited(UserTelemetry.recordAiUsage(
+      feature: 'quiz',
+      promptTokens: result.promptTokenCount,
+      outputTokens: result.candidatesTokenCount,
+    ));
     return _parseResponse(result.text, config);
   }
 
