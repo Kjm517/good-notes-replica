@@ -66,7 +66,7 @@ void main() {
     final files = FileSync(
       db: db,
       endpoint: 'https://worker.test',
-      idToken: () async => 'token',
+      idToken: ({bool forceRefresh = false}) async => 'token',
       client: MockClient((request) async {
         attempted.add(request.url.queryParameters['key'] ?? '');
         return http.Response('{"ok":true}', 200);
@@ -95,7 +95,7 @@ void main() {
     final files = FileSync(
       db: db,
       endpoint: 'https://worker.test',
-      idToken: () async => 'token',
+      idToken: ({bool forceRefresh = false}) async => 'token',
       client: MockClient(
         (_) async => http.Response('{"error":"Quota exceeded"}', 507),
       ),

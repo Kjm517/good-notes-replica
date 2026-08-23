@@ -61,7 +61,9 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
   @override
   void initState() {
     super.initState();
-    if (widget.outlinePending || widget.outline.isNotEmpty) {
+    // Default to page thumbnails (Android parity). Switch to Outline when the
+    // TOC arrives — see [didUpdateWidget].
+    if (widget.outline.isNotEmpty) {
       _tab = SidebarTab.outline;
     }
   }

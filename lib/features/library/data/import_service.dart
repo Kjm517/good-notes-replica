@@ -92,6 +92,16 @@ class ImportService {
 
     final images = <ImagePayload>[];
     for (final file in result.files) {
+      final path = file.path;
+      if (!kIsWeb && path != null) {
+        final bytes = await readLocalFile(path);
+        images.add((
+          bytes: Uint8List.fromList(bytes),
+          name: file.name,
+          ext: file.extension,
+        ));
+        continue;
+      }
       final bytes = file.bytes;
       if (bytes == null) continue;
       // Keep an independent copy: decoding later can detach the original
@@ -148,45 +158,9 @@ class ImportService {
           ));
       var index = 0;
       String? coverThumb;
-<<<<<<< Updated upstream
       for (final img in images) {
         final stored = Uint8List.fromList(img.bytes);
         final size = await _imageSize(img.bytes);
-=======
-      for (final file in result.files) {
-        final path = file.path;
-        if (!kIsWeb && path != null) {
-          final bytes = await readLocalFile(path);
-          final stored = Uint8List.fromList(bytes);
-          final size = await _imageSize(stored);
-          final assetId = await _assets.storeFile(
-            id: _uuid.v4(),
-            sourcePath: path,
-            kind: 0,
-            filename: file.name,
-            mime: _mimeFromExt(file.extension),
-          );
-          await _db.into(_db.notePages).insert(NotePagesCompanion.insert(
-                id: _uuid.v4(),
-                documentId: docId,
-                pageIndex: index++,
-                template: const Value(PaperTemplate.blank),
-                bgAssetId: Value(assetId),
-                pageW: Value(size.width),
-                pageH: Value(size.height),
-              ));
-          coverThumb ??= base64Encode(stored);
-          onProgress?.call(index / total, 'Imported $index of $total images');
-          continue;
-        }
-
-        final bytes = file.bytes;
-        if (bytes == null) continue;
-        // Keep an independent copy for storage: decoding below can detach the
-        // original buffer (esp. on web), which would corrupt the DB write.
-        final stored = Uint8List.fromList(bytes);
-        final size = await _imageSize(bytes);
->>>>>>> Stashed changes
         final assetId = await _assets.store(
           id: _uuid.v4(),
           bytes: stored,

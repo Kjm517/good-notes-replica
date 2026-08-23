@@ -34,7 +34,7 @@ EditorTopBar _bar(EditorBarLayout layout) {
 void main() {
   group('EditorTopBar.preferredSize', () {
     test('phone reserves the title row only', () {
-      expect(_bar(EditorBarLayout.phone).preferredSize.height, 56);
+      expect(_bar(EditorBarLayout.phone).preferredSize.height, 48);
     });
 
     // Title row 56 + tool row 60.

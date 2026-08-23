@@ -63,16 +63,23 @@ class SyncEngine {
   StreamSubscription<void>? _remoteWatch;
   StreamSubscription<List<ConnectivityResult>>? _net;
 
-  /// True if something changed while a sync was already running, so the run
-  /// that follows doesn't miss it.
+  /// True if something external changed while a sync was already running, so
+  /// the run that follows doesn't miss it. Local DB writes and Firestore
+  /// echoes from *this* push must not set the flag — that is what made sync
+  /// restart forever on "Downloading file…".
   bool _missedUpdate = false;
 
   /// Last progress fraction emitted — reused when tagging a file download.
   double _lastProgress = 0;
 
+  /// Per-asset backoff after a failed R2 download so we don't hammer the
+  /// worker every quiet period.
+  final Map<String, DateTime> _downloadBackoffUntil = {};
+
   /// How long to wait after the last change before syncing. Long enough that a
   /// burst of strokes becomes one upload, short enough to feel automatic.
   static const Duration _quietPeriod = Duration(milliseconds: 500);
+  static const Duration _downloadBackoff = Duration(seconds: 45);
 
   /// Watches the database and syncs after any change, so callers never have to
   /// remember to trigger it.
@@ -91,19 +98,18 @@ class SyncEngine {
           _db.quizAttempts,
         ]))
         .listen((_) {
-      if (_running) {
-        _missedUpdate = true;
-        return;
-      }
+      // Own pull/push writes fire this stream; do not defer another run for
+      // them. A real user edit after we finish will schedule normally.
+      if (_running) return;
       scheduleSync();
     });
     // Another device's import never touches *this* SQLite, so local table
     // watches alone leave the library empty until resume or a manual tap.
     _remoteWatch ??= _remote.watchChanges().listen((_) {
-      if (_running) {
-        _missedUpdate = true;
-        return;
-      }
+      // Mid-run snapshots are almost always echoes of *this* device's push.
+      // Deferring on them caused an endless sync loop. Real remote changes
+      // that land after we go idle still schedule below.
+      if (_running) return;
       scheduleSync(delay: const Duration(milliseconds: 400));
     });
     _net ??= Connectivity().onConnectivityChanged.listen(_onConnectivity);
@@ -158,8 +164,35 @@ class SyncEngine {
 
   /// Turns auto-sync back on and runs when the network is up.
   void resume() {
+    if (!_paused) {
+      unawaited(_refreshConnectivity());
+      return;
+    }
     _paused = false;
+    // Clear the paused badge immediately — waiting for the next sync left the
+    // cloud menu looking stuck after "Resume" / "Sync now".
+    if (!_running) {
+      _emit(SyncStatus(
+        phase: SyncPhase.idle,
+        lastSyncedAt: _lastSyncedAt,
+      ));
+    }
     unawaited(_refreshConnectivity());
+  }
+
+  /// Manual sync from the cloud menu. Unpauses first so "Sync now" still works
+  /// after the user has stopped auto-sync.
+  Future<void> syncNowFromUser({bool full = true}) async {
+    if (_paused) {
+      _paused = false;
+      if (!_running) {
+        _emit(SyncStatus(
+          phase: SyncPhase.idle,
+          lastSyncedAt: _lastSyncedAt,
+        ));
+      }
+    }
+    return syncNow(full: full);
   }
 
   /// Coalesces bursts of edits into one sync run.
@@ -205,6 +238,12 @@ class SyncEngine {
       return;
     }
     _running = true;
+    if (_files != null && !_files.enabled) {
+      debugPrint(
+        'File sync disabled (empty NOTABLY_FILE_ENDPOINT) — '
+        'notes sync, PDFs stay on the importing device.',
+      );
+    }
     _emitProgress(0.0, 'Syncing…');
     // Stamp the cursor *before* talking to the cloud. Stamping afterwards
     // skips anything that landed during a long pull — the other device's
@@ -214,24 +253,37 @@ class SyncEngine {
       await _push();
       await _pull(full: full);
       _lastSyncedAt = startedAt;
-      final pendingFiles = await _pendingFileUploadCount();
-      if (pendingFiles > 0) {
+      final pendingUploads = await _pendingFileUploadCount();
+      final pendingDownloads = await _pendingFileDownloadCount();
+      if (pendingUploads > 0) {
         // Notes may be idle while a large PDF is still waiting on R2 — don't
         // claim "fully synced" or the library card stays stuck on Uploading.
         _emit(SyncStatus(
           phase: SyncPhase.pending,
-          pendingChanges: pendingFiles,
+          pendingChanges: pendingUploads,
           lastSyncedAt: _lastSyncedAt,
           // A repeatedly failing upload used to look identical to a slow
           // one: both sat on "still uploading" with the reason only in the
           // debug console. Say what went wrong instead.
           message: _lastUploadError != null
               ? 'Upload failed: $_lastUploadError'
-              : pendingFiles == 1
+              : pendingUploads == 1
                   ? '1 file still uploading'
-                  : '$pendingFiles files still uploading',
+                  : '$pendingUploads files still uploading',
         ));
         scheduleSync(delay: const Duration(seconds: 12));
+      } else if (pendingDownloads > 0) {
+        // Waiting on R2 keys from another device, or a download that needs a
+        // retry after backoff — keep the UI honest and try again shortly.
+        _emit(SyncStatus(
+          phase: SyncPhase.pending,
+          pendingChanges: pendingDownloads,
+          lastSyncedAt: _lastSyncedAt,
+          message: pendingDownloads == 1
+              ? '1 file still downloading'
+              : '$pendingDownloads files still downloading',
+        ));
+        scheduleSync(delay: const Duration(seconds: 10));
       } else {
         _emit(SyncStatus(
           phase: SyncPhase.idle,
@@ -375,6 +427,36 @@ class SyncEngine {
     return (await query.getSingle()).read(count) ?? 0;
   }
 
+  /// Source PDFs/images referenced by pages that still lack local bytes.
+  Future<int> _pendingFileDownloadCount() async {
+    if (_files == null || !_files.enabled) return 0;
+    final pages = await (_db.select(_db.notePages)
+          ..where((p) => p.deletedAt.isNull()))
+        .get();
+    final assetIds = <String>{
+      for (final p in pages) ...[
+        if (p.pdfAssetId != null) p.pdfAssetId!,
+        if (p.bgAssetId != null) p.bgAssetId!,
+      ],
+    };
+    var missing = 0;
+    for (final id in assetIds) {
+      final asset = await (_db.select(_db.assets)
+            ..where((a) => a.id.equals(id) & a.deletedAt.isNull()))
+          .getSingleOrNull();
+      if (asset == null) {
+        missing++;
+        continue;
+      }
+      final hasBytes = await assetExists(
+        localPath: asset.localPath,
+        hasInlineData: asset.data != null && asset.data!.isNotEmpty,
+      );
+      if (!hasBytes) missing++;
+    }
+    return missing;
+  }
+
   /// Records assets in the cloud and uploads any bytes not there yet.
   Future<void> _pushAssets() async {
     // Bytes first so the metadata upsert includes remoteKey. The previous
@@ -382,8 +464,10 @@ class SyncEngine {
     // a null key and the other device had nothing to download.
     _lastUploadError = await _files?.uploadPending(
       onProgress: (assetId, fraction) {
+        // Keep overall sync in the asset band so the indicator doesn't jump
+        // from 0%→100% on one file then snap back to "Uploading elements".
         _emitProgress(
-          fraction,
+          0.35 + 0.09 * fraction.clamp(0.0, 1.0),
           'Uploading file…',
           activeAssetId: assetId,
         );
@@ -872,7 +956,7 @@ class SyncEngine {
   /// Hydrates an asset row from the cloud and downloads its bytes when R2 is
   /// configured. Safe to call repeatedly — already-local content is a no-op.
   Future<void> _ensureAsset(String assetId) async {
-    final local = await (_db.select(_db.assets)
+    var local = await (_db.select(_db.assets)
           ..where((a) => a.id.equals(assetId)))
         .getSingleOrNull();
     final hasBytes = local != null &&
@@ -880,7 +964,10 @@ class SyncEngine {
           localPath: local.localPath,
           hasInlineData: local.data != null && local.data!.isNotEmpty,
         );
-    if (hasBytes) return;
+    if (hasBytes) {
+      _downloadBackoffUntil.remove(assetId);
+      return;
+    }
 
     if (local == null || local.remoteKey == null) {
       final record =
@@ -901,14 +988,42 @@ class SyncEngine {
               remoteUpdatedAt: Value(record.updatedAt),
             ),
           );
+      local = await (_db.select(_db.assets)
+            ..where((a) => a.id.equals(assetId)))
+          .getSingleOrNull();
+    }
+
+    // Metadata arrived before the importing device finished uploading to R2.
+    // Calling download() here only fails and used to look like endless sync.
+    if (local?.remoteKey == null) return;
+
+    final backoffUntil = _downloadBackoffUntil[assetId];
+    if (backoffUntil != null && backoffUntil.isAfter(DateTime.now())) {
+      return;
     }
 
     _emitProgress(
-      _lastProgress,
+      _lastProgress.clamp(0.60, 0.74),
       'Downloading file…',
       activeAssetId: assetId,
     );
-    await _files?.download(assetId);
+    final ok = await _files?.download(
+          assetId,
+          onProgress: (fraction) {
+            _emitProgress(
+              0.60 + 0.14 * fraction.clamp(0.0, 1.0),
+              'Downloading file…',
+              activeAssetId: assetId,
+            );
+          },
+        ) ??
+        false;
+    if (ok) {
+      _downloadBackoffUntil.remove(assetId);
+    } else {
+      _downloadBackoffUntil[assetId] =
+          DateTime.now().add(_downloadBackoff);
+    }
   }
 
   /// Called when opening a document so pages whose PDF was synced as metadata
@@ -940,8 +1055,20 @@ class SyncEngine {
         } catch (_) {}
       }
     }
-    for (final id in ids) {
-      await _ensureAsset(id);
+    // Opening a doc downloads outside syncNow; don't leave the toolbar stuck
+    // on SyncPhase.syncing after a failed or skipped file fetch.
+    final leaveBusy = !_running;
+    try {
+      for (final id in ids) {
+        await _ensureAsset(id);
+      }
+    } finally {
+      if (leaveBusy && !_running && !_paused) {
+        _emit(SyncStatus(
+          phase: SyncPhase.idle,
+          lastSyncedAt: _lastSyncedAt,
+        ));
+      }
     }
   }
 

@@ -8,6 +8,7 @@ import '../../../core/db/database.dart';
 import '../../../core/models/enums.dart';
 import '../../../core/models/outline_entry.dart';
 import '../../../core/storage/asset_store.dart';
+import '../../../core/sync/file_sync.dart';
 import '../../library/data/asset_repository.dart';
 import 'native_pdf_text.dart';
 import 'outline_heading_detector.dart';
@@ -38,10 +39,12 @@ class SearchHit {
 /// the page row — searching a 4,895-page book then costs one SQL query instead
 /// of re-parsing 150 MB.
 class DocumentTextService {
-  DocumentTextService(this._db, this._assets);
+  DocumentTextService(this._db, this._assets, {FileSync? files})
+      : _files = files;
 
   final AppDatabase _db;
   final AssetRepository _assets;
+  final FileSync? _files;
 
   /// In-flight text jobs, chained per document so a quiz extract and Find
   /// don't parse the same PDF at once — and a second caller waits instead of
@@ -326,8 +329,12 @@ class DocumentTextService {
 
   Future<List<OutlineEntry>?> _outlineFromNative(String assetId) async {
     if (!NativePdfText.isSupported) return null;
-    final path = await _assets.localPathOf(assetId);
-    if (path == null) return null;
+    var path = await _assets.localPathOf(assetId);
+    if (path == null || !await assetExists(localPath: path)) {
+      await _files?.download(assetId);
+      path = await _assets.localPathOf(assetId);
+    }
+    if (path == null || !await assetExists(localPath: path)) return null;
     final session = await NativePdfText.open(path);
     if (session == null) return null;
     try {

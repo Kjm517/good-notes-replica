@@ -59,7 +59,8 @@ class SyncIndicator extends ConsumerWidget {
                 SyncPhase.idle => status.lastSyncedAt == null
                     ? 'Synced — tap to resync'
                     : 'Synced • tap to resync',
-                SyncPhase.pending => '${status.pendingChanges} change(s) pending',
+                SyncPhase.pending => status.message ??
+                    '${status.pendingChanges} change(s) pending',
                 SyncPhase.error => status.message ?? 'Sync error',
                 SyncPhase.paused => 'Sync paused',
                 SyncPhase.offline => kNoWifiOrMobileData,
@@ -140,30 +141,36 @@ class SyncIndicator extends ConsumerWidget {
               value: _SyncMenuAction.resume,
               child: Text('Resume syncing', style: TextStyle(color: t.text)),
             )
-          else ...[
+          else
             PopupMenuItem(
               value: _SyncMenuAction.stop,
               child: Text('Stop syncing', style: TextStyle(color: t.text)),
             ),
-            if (online)
-              PopupMenuItem(
-                value: _SyncMenuAction.now,
-                child: Text(
-                  synced ? 'Resync' : 'Sync now',
-                  style: TextStyle(color: t.text),
-                ),
+          if (online)
+            PopupMenuItem(
+              value: _SyncMenuAction.now,
+              child: Text(
+                synced ? 'Resync' : 'Sync now',
+                style: TextStyle(color: t.text),
               ),
-          ],
+            ),
         ];
       },
-      onSelected: (action) {
+      onSelected: (action) async {
         switch (action) {
           case _SyncMenuAction.stop:
-            ref.read(syncPausedProvider.notifier).setPaused(true);
+            await ref.read(syncPausedProvider.notifier).setPaused(true);
           case _SyncMenuAction.resume:
-            ref.read(syncPausedProvider.notifier).setPaused(false);
+            await ref.read(syncPausedProvider.notifier).setPaused(false);
+            await engine.syncNowFromUser(full: false);
           case _SyncMenuAction.now:
-            engine.syncNow();
+            // "Sync now" must work even after Stop — previously syncNow()
+            // no-op'd while the engine stayed paused, and the menu hid the
+            // action entirely.
+            if (ref.read(syncPausedProvider)) {
+              await ref.read(syncPausedProvider.notifier).setPaused(false);
+            }
+            await engine.syncNowFromUser();
         }
       },
     );

@@ -672,4 +672,25 @@ void main() {
     expect(last?.phase, SyncPhase.paused);
     expect(cloud.documents.containsKey('doc-paused'), isFalse);
   });
+
+  test('syncNowFromUser unpauses and pushes', () async {
+    await deviceA.into(deviceA.documents).insert(DocumentsCompanion.insert(
+          id: 'doc-force',
+          type: DocumentType.notebook,
+          title: const Value('force sync'),
+          ownerUid: const Value('user-1'),
+        ));
+    SyncStatus? last;
+    final engine = SyncEngine(
+      db: deviceA,
+      remote: cloud,
+      uid: 'user-1',
+      onStatus: (s) => last = s,
+    );
+    addTearDown(engine.dispose);
+    engine.pause();
+    await engine.syncNowFromUser(full: false);
+    expect(last?.phase, isNot(SyncPhase.paused));
+    expect(cloud.documents.containsKey('doc-force'), isTrue);
+  });
 }

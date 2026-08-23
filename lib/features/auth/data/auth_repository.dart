@@ -45,6 +45,16 @@ class AuthRepository {
 
   AppUser? get currentUser => _toAppUser(_auth.currentUser);
 
+  /// Fresh Firebase ID token for the R2 Worker. Returns null when signed out.
+  ///
+  /// [forceRefresh] asks Firebase for a new token — needed when the Worker
+  /// rejects a cached one with 401.
+  Future<String?> idToken({bool forceRefresh = false}) async {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+    return user.getIdToken(forceRefresh);
+  }
+
   AppUser? _toAppUser(User? user) => user == null
       ? null
       : AppUser(
@@ -151,9 +161,14 @@ class AuthRepository {
     await _auth.signOut();
     if (!kIsWeb) {
       try {
-        await GoogleSignIn.instance.signOut();
+        final signIn = GoogleSignIn.instance;
+        await signIn.initialize();
+        // signOut clears the local session; disconnect revokes so the next
+        // sign-in shows the account picker instead of auto-selecting Google.
+        await signIn.signOut();
+        await signIn.disconnect();
       } catch (_) {
-        // Not signed in with Google; nothing to do.
+        // Not signed in with Google, or already disconnected.
       }
     }
   }

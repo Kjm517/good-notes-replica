@@ -2,14 +2,30 @@
 ///
 /// Enforced when new asset bytes are written. Re-importing a file that already
 /// exists on this device does not consume additional quota.
-const int kStorageQuotaBytes = 5 * 1024 * 1024 * 1024; // 5 GB
+const int kFreeStorageQuotaBytes = 5 * 1024 * 1024 * 1024;
+const int kPremiumStorageQuotaBytes = 15 * 1024 * 1024 * 1024;
 
-/// Thrown when an import or write would push past [kStorageQuotaBytes].
+/// Default cap for free accounts (and premium free-trial period).
+const int kStorageQuotaBytes = kFreeStorageQuotaBytes;
+
+int storageQuotaBytes({required bool isPremium, bool trialActive = false}) {
+  if (isPremium && !trialActive) return kPremiumStorageQuotaBytes;
+  return kFreeStorageQuotaBytes;
+}
+
+int storageQuotaGb({required bool isPremium, bool trialActive = false}) =>
+    storageQuotaBytes(isPremium: isPremium, trialActive: trialActive) ~/
+    (1024 * 1024 * 1024);
+
+String storageQuotaLabel({required bool isPremium, bool trialActive = false}) =>
+    '${storageQuotaGb(isPremium: isPremium, trialActive: trialActive)} GB';
+
+/// Thrown when an import or write would push past the active quota.
 class StorageQuotaExceeded implements Exception {
   const StorageQuotaExceeded({
     required this.usedBytes,
     required this.neededBytes,
-    this.quotaBytes = kStorageQuotaBytes,
+    required this.quotaBytes,
   });
 
   final int usedBytes;
@@ -23,12 +39,13 @@ class StorageQuotaExceeded implements Exception {
   String get title => isFull ? 'Storage full' : 'Not enough storage';
 
   String get message {
+    final cap = '${quotaBytes ~/ (1024 * 1024 * 1024)} GB';
     if (isFull) {
-      return 'You’ve used ${formatStorageBytes(usedBytes)} of your 5 GB allowance. '
+      return 'You’ve used ${formatStorageBytes(usedBytes)} of your $cap allowance. '
           'Delete documents you no longer need, then try again.';
     }
     return 'This file needs ${formatStorageBytes(neededBytes)}, but only '
-        '${formatStorageBytes(remainingBytes)} is free of your 5 GB.';
+        '${formatStorageBytes(remainingBytes)} is free of your $cap.';
   }
 
   @override

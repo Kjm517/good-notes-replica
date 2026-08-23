@@ -58,6 +58,7 @@ final documentTextServiceProvider = Provider<DocumentTextService>((ref) {
   return DocumentTextService(
     ref.watch(databaseProvider),
     ref.watch(assetRepositoryProvider),
+    files: ref.watch(fileSyncProvider),
   );
 });
 

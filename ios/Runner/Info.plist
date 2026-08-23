@@ -26,7 +26,6 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-<<<<<<< Updated upstream
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>mailto</string>
@@ -37,16 +36,10 @@
 	<string>Notably imports images from your photo library as document pages.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Notably saves exported pages and PDFs to your photo library when you choose to.</string>
-=======
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Notably needs photo access to import images into your notebooks.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Notably can save exported images to your photo library when you choose that destination.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
->>>>>>> Stashed changes
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

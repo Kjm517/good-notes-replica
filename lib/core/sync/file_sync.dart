@@ -23,7 +23,7 @@ class FileSync {
     required this.endpoint,
     http.Client? client,
     FirebaseAuth? auth,
-    Future<String?> Function()? idToken,
+    Future<String?> Function({bool forceRefresh})? idToken,
   }) : _db = db,
        _client = client ?? http.Client(),
        _auth = auth,
@@ -36,7 +36,7 @@ class FileSync {
   final FirebaseAuth? _auth;
 
   /// Supplies the bearer token. Injected in tests, where there is no Firebase.
-  final Future<String?> Function()? _idToken;
+  final Future<String?> Function({bool forceRefresh})? _idToken;
 
   /// Base URL of the Worker. Empty disables file sync entirely, which is the
   /// default until one is deployed.
@@ -117,7 +117,12 @@ class FileSync {
   ///
   /// Used when a document is opened on a device that has the notes but not the
   /// file yet. Returns false if the file isn't available.
-  Future<bool> download(String assetId) async {
+  ///
+  /// [onProgress] reports 0..1 as bytes land when the response length is known.
+  Future<bool> download(
+    String assetId, {
+    void Function(double progress)? onProgress,
+  }) async {
     if (!enabled) return false;
     final asset = await (_db.select(
       _db.assets,
@@ -139,18 +144,41 @@ class FileSync {
       // Streamed to disk rather than buffered: the download side had the same
       // ceiling as the upload side, so a textbook that finally uploaded would
       // have killed the process on the way back down.
-      final request = http.Request(
-        'GET',
-        Uri.parse('$endpoint/file?key=${Uri.encodeQueryComponent(key)}'),
-      )..headers.addAll(await _headers());
-      final response = await _client.send(request);
+      var response = await _sendFileGet(key);
+      // A stale Firebase ID token is the usual 401 — refresh once and retry.
+      if (response.statusCode == 401) {
+        debugPrint(
+          'Download 401 for $assetId — refreshing Firebase token and retrying. '
+          '${await _bodyHint(response)}',
+        );
+        response = await _sendFileGet(key, forceRefresh: true);
+      }
+      if (response.statusCode == 401) {
+        throw StateError(
+          'Download rejected (401). ${await _bodyHint(response)} '
+          'Sign out and back in, or confirm the Worker FIREBASE_PROJECT_ID '
+          'matches this app (notably-f76a0).',
+        );
+      }
       if (response.statusCode == 404) return false;
       if (response.statusCode >= 300) {
-        throw StateError('Download rejected (${response.statusCode}).');
+        throw StateError(
+          'Download rejected (${response.statusCode}). '
+          '${await _bodyHint(response)}',
+        );
       }
+      final total = response.contentLength ?? asset.sizeBytes ?? 0;
+      var received = 0;
+      final tracked = response.stream.map((chunk) {
+        received += chunk.length;
+        if (total > 0) {
+          onProgress?.call((received / total).clamp(0.0, 1.0));
+        }
+        return chunk;
+      });
       final stored = await writeAssetStream(
         asset.id,
-        response.stream,
+        tracked,
         extension: asset.kind == 1 ? 'pdf' : 'img',
       );
       await (_db.update(_db.assets)..where((a) => a.id.equals(asset.id))).write(
@@ -160,12 +188,34 @@ class FileSync {
           sizeBytes: Value(response.contentLength ?? asset.sizeBytes),
         ),
       );
+      onProgress?.call(1);
       return true;
     } catch (e) {
       // Naming the endpoint here turns "the file just never arrives" into a
       // one-line diagnosis when it is pointed at the wrong worker.
       debugPrint('Download failed for $assetId from $endpoint: $e');
       return false;
+    }
+  }
+
+  Future<http.StreamedResponse> _sendFileGet(
+    String key, {
+    bool forceRefresh = false,
+  }) async {
+    final request = http.Request(
+      'GET',
+      Uri.parse('$endpoint/file?key=${Uri.encodeQueryComponent(key)}'),
+    )..headers.addAll(await _headers(forceRefresh: forceRefresh));
+    return _client.send(request);
+  }
+
+  Future<String> _bodyHint(http.StreamedResponse response) async {
+    try {
+      final body = await response.stream.bytesToString();
+      if (body.isEmpty) return '';
+      return body.length > 180 ? body.substring(0, 180) : body;
+    } catch (_) {
+      return '';
     }
   }
 
@@ -176,12 +226,16 @@ class FileSync {
     return hash == null ? '${asset.id}.$suffix' : 'sha/$hash.$suffix';
   }
 
-  Future<Map<String, String>> _headers() async {
+  Future<Map<String, String>> _headers({bool forceRefresh = false}) async {
     final provider = _idToken;
     final token = provider != null
-        ? await provider()
-        : await (_auth ?? FirebaseAuth.instance).currentUser?.getIdToken();
-    if (token == null) throw StateError('Not signed in.');
+        ? await provider(forceRefresh: forceRefresh)
+        : await (_auth ?? FirebaseAuth.instance)
+            .currentUser
+            ?.getIdToken(forceRefresh);
+    if (token == null || token.isEmpty) {
+      throw StateError('Not signed in — file sync needs a Firebase session.');
+    }
     return {'Authorization': 'Bearer $token'};
   }
 

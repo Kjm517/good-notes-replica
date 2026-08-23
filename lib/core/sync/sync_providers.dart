@@ -5,7 +5,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../app/env_config.dart';
 import '../../features/auth/providers.dart';
 import '../db/database.dart';
 import '../network/network_status.dart';
@@ -53,11 +52,10 @@ class SyncPausedController extends Notifier<bool> {
 
 /// Base URL of the Cloudflare Worker that fronts R2 file storage.
 ///
-<<<<<<< Updated upstream
 /// Resolved in this order, so a deployment does not depend on remembering a
 /// build flag:
 ///   1. `NOTABLY_FILE_ENDPOINT` in `.env` — set this to your own worker
-///   2. `--dart-define=NOTABLY_FILE_ENDPOINT=...`
+///   2. `--dart-define=NOTABLY_FILE_ENDPOINT=...` / EnvConfig
 ///   3. the default below
 ///
 /// Every worker lives on its own account subdomain, so the default only works
@@ -86,17 +84,18 @@ String _trimEndpoint(String raw) {
   final value = raw.trim();
   return value.endsWith('/') ? value.substring(0, value.length - 1) : value;
 }
-=======
-/// Set in `.env` as NOTABLY_FILE_ENDPOINT, synced via `scripts/sync-env.sh`.
-/// Empty disables file sync; notes still sync via Firestore.
-const String kFileEndpoint = EnvConfig.fileEndpoint;
->>>>>>> Stashed changes
 
 /// Uploads/downloads source PDFs and images, or null when signed out.
 final fileSyncProvider = Provider<FileSync?>((ref) {
   final user = ref.watch(authStateProvider).asData?.value;
   if (user == null) return null;
-  return FileSync(db: ref.watch(databaseProvider), endpoint: kFileEndpoint);
+  final auth = ref.watch(authRepositoryProvider);
+  return FileSync(
+    db: ref.watch(databaseProvider),
+    endpoint: kFileEndpoint,
+    idToken: ({bool forceRefresh = false}) async =>
+        auth?.idToken(forceRefresh: forceRefresh),
+  );
 });
 
 /// Documents whose source PDF/image this device still has to upload to R2.

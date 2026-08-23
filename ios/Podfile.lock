@@ -1,27 +1,15 @@
 PODS:
   - Flutter (1.0.0)
-  - pdfx (1.0.0):
-    - Flutter
-  - printing (1.0.0):
-    - Flutter
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
-  - pdfx (from `.symlinks/plugins/pdfx/ios`)
-  - printing (from `.symlinks/plugins/printing/ios`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
-  pdfx:
-    :path: ".symlinks/plugins/pdfx/ios"
-  printing:
-    :path: ".symlinks/plugins/printing/ios"
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  pdfx: 77f4dddc48361fbb01486fa2bdee4532cbb97ef3
-  printing: 54ff03f28fe9ba3aa93358afb80a8595a071dd07
 
 PODFILE CHECKSUM: 4b015915ec662986b54bf30ab778da63f7dda016
 

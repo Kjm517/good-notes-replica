@@ -31,9 +31,9 @@ class DocumentTransferState {
     final pct = percent(status);
     return switch (kind) {
       DocumentTransferKind.none => null,
-      DocumentTransferKind.downloading => pct != null
-          ? 'Downloading $pct%'
-          : 'Downloading…',
+      DocumentTransferKind.downloading => status.isBusy
+          ? (pct != null ? 'Downloading $pct%' : 'Downloading…')
+          : 'Waiting for file…',
       DocumentTransferKind.uploading => locked
           ? (pct != null ? 'Uploading $pct%' : 'Uploading…')
           : 'Waiting to upload',
@@ -44,8 +44,9 @@ class DocumentTransferState {
     final pct = percent(status);
     return switch (kind) {
       DocumentTransferKind.none => null,
-      DocumentTransferKind.downloading =>
-        pct != null ? 'Downloading · $pct%' : 'Downloading…',
+      DocumentTransferKind.downloading => status.isBusy
+          ? (pct != null ? 'Downloading · $pct%' : 'Downloading…')
+          : 'Waiting for file…',
       DocumentTransferKind.uploading => locked
           ? (pct != null ? 'Uploading · $pct%' : 'Uploading…')
           : 'Waiting to upload',

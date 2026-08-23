@@ -10,6 +10,7 @@ import 'package:notably/core/db/database.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:notably/core/sync/file_sync.dart';
 import 'package:notably/core/sync/sync_providers.dart';
+import 'package:notably/core/storage/storage_quota.dart';
 import 'package:notably/features/library/data/asset_repository.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
@@ -110,7 +111,7 @@ void main() {
       db: db,
       endpoint: 'https://files.test',
       client: client,
-      idToken: () async => 'test-token',
+      idToken: ({bool forceRefresh = false}) async => 'test-token',
     );
 
     await sync.uploadPending();
@@ -163,7 +164,7 @@ void main() {
 
     final replacement = File('${temp.path}/replacement.pdf')
       ..writeAsBytesSync(List<int>.filled(2048, 3));
-    await AssetRepository(db).replaceFromFile(
+    await AssetRepository(db, quotaBytes: kFreeStorageQuotaBytes).replaceFromFile(
       id: 'asset-big',
       sourcePath: replacement.path,
       kind: 1,

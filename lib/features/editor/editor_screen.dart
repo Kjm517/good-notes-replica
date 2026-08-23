@@ -13,6 +13,8 @@ import '../../core/models/enums.dart';
 import '../../core/models/outline_entry.dart';
 import '../../core/models/page_geometry.dart';
 import '../../core/sync/sync_providers.dart';
+import '../library/document_transfer.dart';
+import '../library/open_document.dart';
 import '../library/providers.dart';
 import 'canvas/continuous_canvas.dart';
 import 'pages/page_background_service.dart';
@@ -34,6 +36,23 @@ class EditorScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final transfer = documentTransferState(
+      documentId: documentId,
+      pendingUpload:
+          ref.watch(pendingUploadDocumentsProvider).asData?.value ?? const {},
+      missingLocal:
+          ref.watch(missingLocalFileDocumentsProvider).asData?.value ??
+              const {},
+      status: ref.watch(syncStatusProvider),
+      paused: ref.watch(syncPausedProvider),
+    );
+    if (transfer.locked) {
+      return DocumentTransferGate(
+        documentId: documentId,
+        transfer: transfer,
+      );
+    }
+
     final docAsync = ref.watch(documentStreamProvider(documentId));
     return docAsync.when(
       loading: () =>
@@ -138,6 +157,13 @@ class _EditorState extends ConsumerState<_Editor> {
       await engine.ensureDocumentAssets(widget.document.id);
     }
     if (!mounted) return;
+    if (widget.document.type == DocumentType.pdf) {
+      unawaited(
+        ref
+            .read(documentTextServiceProvider)
+            .ensureOutline(widget.document.id),
+      );
+    }
 
     if (!needsFile) {
       _finishPrepare();
@@ -160,16 +186,21 @@ class _EditorState extends ConsumerState<_Editor> {
       final record = await assets.get(id);
       if (!mounted) return;
       if (record?.remoteKey != null) {
+        _setPrepare('Downloading file…', 0.04);
+        await _waitForLocalFile();
+        if (!mounted) return;
+        if (await assets.hasBytes(id)) continue;
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'This PDF is saved to your account and will download on its '
-              'own. Check your connection and reopen the notebook.',
+              'This PDF is saved to your account but has not finished '
+              'downloading. Check your connection and try again.',
             ),
             duration: Duration(seconds: 6),
           ),
         );
-        _finishPrepare();
+        _leaveDocument();
         return;
       }
 
@@ -231,6 +262,30 @@ class _EditorState extends ConsumerState<_Editor> {
     if (ahead.isNotEmpty) bg.prefetchAll(ahead);
     _setPrepare('Ready', 1);
     _finishPrepare();
+  }
+
+  Future<void> _waitForLocalFile() async {
+    while (mounted) {
+      final missing =
+          ref.read(missingLocalFileDocumentsProvider).value ?? const {};
+      if (!missing.containsKey(widget.document.id)) return;
+
+      final status = ref.read(syncStatusProvider);
+      final transfer = documentTransferState(
+        documentId: widget.document.id,
+        pendingUpload:
+            ref.read(pendingUploadDocumentsProvider).value ?? const {},
+        missingLocal: missing,
+        status: status,
+        paused: ref.read(syncPausedProvider),
+      );
+      final pct = transfer.percent(status);
+      _setPrepare(
+        pct != null ? 'Downloading file… $pct%' : 'Downloading file…',
+        pct != null ? 0.04 + (pct / 100) * 0.06 : 0.04,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
   }
 
   /// Lets this device supply the original PDF when sync only brought metadata.
@@ -748,33 +803,60 @@ class _EditorState extends ConsumerState<_Editor> {
                     ),
                   if (_readingMode)
                     Positioned(
-                      top: 0,
-                      right: 0,
+                      right: 18,
+                      bottom: 30,
                       child: SafeArea(
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 4, right: 10),
-                          child: Material(
-                            color: context.tokens.surface,
-                            shape: const CircleBorder(),
-                            elevation: 0,
-                            child: DecoratedBox(
+                        top: false,
+                        child: Material(
+                          color: context.tokens.accent,
+                          borderRadius: BorderRadius.circular(16),
+                          elevation: 0,
+                          child: InkWell(
+                            onTap: () =>
+                                setState(() => _readingMode = false),
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              width: 48,
+                              height: 48,
                               decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: context.tokens.line),
-                                boxShadow: AppTokens.elevation(
-                                  context.tokens.shadow,
-                                  y: 8,
-                                  blur: 24,
-                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: context.tokens.accent.withValues(
+                                      alpha: 0.55,
+                                    ),
+                                    blurRadius: 30,
+                                    offset: const Offset(0, 14),
+                                    spreadRadius: -10,
+                                  ),
+                                ],
                               ),
-                              child: IconButton(
-                                tooltip: 'Show tools',
-                                onPressed: () =>
-                                    setState(() => _readingMode = false),
-                                icon: Icon(
-                                  Icons.close_rounded,
-                                  color: context.tokens.text,
-                                ),
+                              child: const Icon(
+                                Icons.edit_rounded,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (_readingMode && state.pages.isNotEmpty)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: ColoredBox(
+                        color: context.tokens.fill,
+                        child: SizedBox(
+                          height: 3,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: (state.currentIndex + 1) /
+                                  state.pages.length,
+                              child: ColoredBox(
+                                color: context.tokens.accent,
                               ),
                             ),
                           ),
@@ -819,7 +901,10 @@ class _EditorState extends ConsumerState<_Editor> {
     required double width,
     required bool closeOnJump,
   }) {
-    final state = ref.read(editorControllerProvider(widget.document.id));
+    final doc =
+        ref.watch(documentStreamProvider(widget.document.id)).asData?.value ??
+            widget.document;
+    final state = ref.watch(editorControllerProvider(widget.document.id));
     return EditorSidebar(
       documentId: widget.document.id,
       pages: state.pages,
@@ -830,10 +915,9 @@ class _EditorState extends ConsumerState<_Editor> {
         _canvasController.jumpToPage(index);
         if (closeOnJump) setState(() => _sidebarOpen = false);
       },
-      outline: OutlineEntry.decode(widget.document.outline),
+      outline: OutlineEntry.decode(doc.outline),
       outlinePending:
-          widget.document.type == DocumentType.pdf &&
-          widget.document.outline == null,
+          doc.type == DocumentType.pdf && doc.outline == null,
     );
   }
 
@@ -1033,7 +1117,12 @@ class _TabletLibraryPane extends ConsumerWidget {
                   return _TabletDocumentRow(
                     document: doc,
                     selected: doc.id == currentDocumentId,
-                    onTap: () => context.go('/doc/${doc.id}'),
+                    onTap: () => tryOpenDocument(
+                      context,
+                      doc,
+                      container: ProviderScope.containerOf(context),
+                      replace: true,
+                    ),
                   );
                 },
               ),
@@ -1059,54 +1148,76 @@ class _TabletDocumentRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
+    final pendingUpload =
+        ref.watch(pendingUploadDocumentsProvider).asData?.value ?? const {};
+    final missingLocal =
+        ref.watch(missingLocalFileDocumentsProvider).asData?.value ?? const {};
+    final paused = ref.watch(syncPausedProvider);
+    final status = ref.watch(syncStatusProvider);
+    final transfer = documentTransferState(
+      documentId: document.id,
+      pendingUpload: pendingUpload,
+      missingLocal: missingLocal,
+      status: status,
+      paused: paused,
+    );
+    final locked = transfer.locked;
     final count = ref
         .watch(documentPageCountProvider(document.id))
         .asData
         ?.value;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Material(
-        color: selected ? t.accentSoft : Colors.transparent,
-        borderRadius: BorderRadius.circular(Radii.control),
-        child: ListTile(
-          dense: true,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(Radii.control),
-          ),
-          leading: Container(
-            width: 36,
-            height: 44,
-            decoration: BoxDecoration(
-              color: document.type == DocumentType.pdf
-                  ? t.pdfBadge.withValues(alpha: 0.12)
-                  : t.accentSoft,
-              borderRadius: BorderRadius.circular(7),
-              border: Border.all(color: t.line),
+    final badgeLabel = transfer.listBadgeLabel(status);
+    return Opacity(
+      opacity: locked ? 0.45 : 1,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Material(
+          color: selected ? t.accentSoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(Radii.control),
+          child: ListTile(
+            dense: true,
+            enabled: !locked,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(Radii.control),
             ),
-            child: Icon(
-              document.type == DocumentType.pdf
-                  ? Icons.picture_as_pdf_rounded
-                  : Icons.description_outlined,
-              size: 18,
-              color: document.type == DocumentType.pdf
-                  ? t.pdfBadge
-                  : t.accentText,
+            leading: Container(
+              width: 36,
+              height: 44,
+              decoration: BoxDecoration(
+                color: document.type == DocumentType.pdf
+                    ? t.pdfBadge.withValues(alpha: 0.12)
+                    : t.accentSoft,
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(color: t.line),
+              ),
+              child: Icon(
+                locked && transfer.kind == DocumentTransferKind.downloading
+                    ? Icons.cloud_download_outlined
+                    : document.type == DocumentType.pdf
+                        ? Icons.picture_as_pdf_rounded
+                        : Icons.description_outlined,
+                size: 18,
+                color: document.type == DocumentType.pdf
+                    ? t.pdfBadge
+                    : t.accentText,
+              ),
             ),
-          ),
-          title: Text(
-            document.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-              color: t.text,
+            title: Text(
+              document.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                color: t.text,
+              ),
             ),
+            subtitle: Text(
+              badgeLabel ??
+                  (count == null ? 'Document' : '$count pp'),
+              style: AppTokens.mono(size: 10, color: t.textFaint),
+            ),
+            onTap: locked ? null : onTap,
           ),
-          subtitle: Text(
-            count == null ? 'Document' : '$count pp',
-            style: AppTokens.mono(size: 10, color: t.textFaint),
-          ),
-          onTap: onTap,
         ),
       ),
     );
@@ -1131,6 +1242,7 @@ class _PagesOutlineDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Material(
           color: t.surfaceAlt,

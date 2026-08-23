@@ -362,23 +362,29 @@ class PageBackgroundService {
   Future<PdfDocument> _openPdf(String assetId) {
     return _pdfDocs.putIfAbsent(assetId, () async {
       try {
-        // Prefer opening straight from disk: pdfx then reads the file lazily
-        // instead of us materialising the whole thing in memory. For a 150 MB
-        // textbook that is the difference between a brief pause and a stall.
-        final path = await _assets.localPathOf(assetId);
-        if (path != null) {
+        Future<PdfDocument?> openFromDisk() async {
+          final path = await _assets.localPathOf(assetId);
+          if (path == null) return null;
+          if (!await assetExists(localPath: path)) return null;
           try {
             return await PdfDocument.openFile(path);
           } catch (e) {
-            debugPrint('[bg] openFile failed, falling back to bytes: $e');
+            debugPrint('[bg] openFile failed for $path: $e');
+            return null;
           }
         }
-        // Web (no filesystem) and any legacy rows still stored inline. If the
-        // row has no bytes yet (synced from another device), try R2 first.
-        //
-        // Reading the file whole is the last resort for a reason: a textbook
-        // sized PDF does not fit in a single allocation on a phone, so failing
-        // with a message beats being killed mid-render.
+
+        var doc = await openFromDisk();
+        if (doc != null) return doc;
+
+        // Metadata can sync before bytes land on disk — fetch from R2 first
+        // rather than trying to hold a textbook in memory.
+        final downloaded = await _files?.download(assetId) ?? false;
+        if (downloaded) {
+          doc = await openFromDisk();
+          if (doc != null) return doc;
+        }
+
         final size = await _assets.sizeOf(assetId);
         if (size != null && size > kMaxInMemoryAssetBytes) {
           throw StateError(

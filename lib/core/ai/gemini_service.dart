@@ -204,7 +204,11 @@ You are a university exam writer. Write $questionCount questions a professor wou
 
 Generate exactly $questionCount questions.
 
-HARD RULE — MULTIPLE CHOICE OPENINGS
+HARD RULE — QUESTION KINDS
+Use ONLY these kind values: ${kinds.join(', ')}.
+Do not invent other kinds. Do not emit shortAnswer unless shortAnswer is in that list.
+
+${kinds.contains('multipleChoice') ? '''HARD RULE — MULTIPLE CHOICE OPENINGS
 Never write "Which of the following", "Which one of the following", or "Which of these".
 Rotate the first word. The set MUST include all of these (at least two each if $questionCount >= 12, otherwise at least one each):
 - What … ?   (What is / What are / What do you call / What happens)
@@ -213,13 +217,9 @@ Rotate the first word. The set MUST include all of these (at least two each if $
 - Why … ?    (Why does / Why is / Why would)
 Also mix How … ? and Name / Identify.
 Do not use the same opening for more than a third of the multiple-choice items.
-
-GOOD examples:
-{"kind":"shortAnswer","prompt":"What do you call the organelle that packages proteins for transport across the membrane?","choices":[],"correctIndex":0,"acceptedAnswer":"Golgi apparatus","explanation":"The Golgi apparatus packages proteins and lipids into vesicles for delivery to other organelles or the cell surface. Cargo typically arrives from the rough endoplasmic reticulum, which synthesises those proteins. See page 14.","pageIndex":13,"highlight":{"x":0.08,"y":0.42,"w":0.38,"h":0.019}}
-{"kind":"multipleChoice","prompt":"Where is ATP generated in animal cells?","choices":["Mitochondria during cellular respiration","Lysosomes during hydrolysis","The nucleus during transcription","The Golgi during packaging"],"correctIndex":0,"acceptedAnswer":"Mitochondria during cellular respiration","explanation":"Mitochondria generate ATP through cellular respiration. That energy conversion occurs at the inner mitochondrial membrane. Lysosomes hydrolyse worn-out organelles; they do not produce ATP. See page 15.","pageIndex":14,"highlight":{"x":0.53,"y":0.18,"w":0.38,"h":0.019}}
-{"kind":"multipleChoice","prompt":"When do mitochondria generate ATP?","choices":["During cellular respiration","During Golgi packaging","During lysosomal digestion","During nuclear transcription"],"correctIndex":0,"acceptedAnswer":"During cellular respiration","explanation":"ATP is generated during cellular respiration, the mitochondrial pathway that oxidises fuel molecules. Golgi packaging and lysosomal digestion are separate organelle functions. See page 15.","pageIndex":14,"highlight":{"x":0.08,"y":0.18,"w":0.38,"h":0.019}}
-{"kind":"multipleChoice","prompt":"Why do eukaryotic cells contain ribosomes?","choices":["They synthesise proteins from amino acids","They store the cell's genetic material","They generate ATP by respiration","They digest worn-out organelles"],"correctIndex":0,"acceptedAnswer":"They synthesise proteins from amino acids","explanation":"Ribosomes synthesise proteins from amino acids. The nucleus stores DNA, and mitochondria produce ATP by respiration. See page 14.","pageIndex":13,"highlight":{"x":0.08,"y":0.10,"w":0.38,"h":0.019}}
-{"kind":"multipleChoice","prompt":"What prevents backflow from the left ventricle into the left atrium during contraction?","choices":["The mitral valve leaflet","The aortic sinus wall","The papillary muscle","The chordae tendineae"],"correctIndex":0,"acceptedAnswer":"The mitral valve leaflet","explanation":"The mitral valve leaflet sits between the left atrium and the left ventricle and closes during ventricular contraction. The aortic valve occupies the outflow tract instead. See page 8.","pageIndex":7,"highlight":{"x":0.18,"y":0.36,"w":0.36,"h":0.022}}
+''' : ''}
+GOOD examples (only kinds you are allowed to emit):
+${_quizExamplesFor(kinds)}
 
 BAD example — never write anything like this:
 {"prompt":"Which of the following is often injected, especially near the limbus?","choices":["The Eye","Patients","Panuveitis","Suspected Viral Etiology"],"explanation":"The Eye is often injected, especially near the limbus."}
@@ -258,7 +258,7 @@ ${kindDescriptions.join('\n')}
 
 Return a JSON array only. Each element:
 {
-  "kind": "multipleChoice" | "trueFalse" | "shortAnswer",
+  "kind": "${kinds.isEmpty ? 'multipleChoice' : kinds.join(' | ')}",
   "prompt": "The question text",
   "choices": ["A", "B", "C", "D"],
   "correctIndex": 2,
@@ -268,7 +268,7 @@ Return a JSON array only. Each element:
   "sourceQuote": "the sentence from that page which states the answer, copied exactly",
   "highlight": {"x": 0.08, "y": 0.40, "w": 0.38, "h": 0.019}
 }
-For shortAnswer, choices is []. pageIndex is 0-based from the source headings.
+${kinds.contains('shortAnswer') ? 'For shortAnswer, choices is []. ' : 'Do not emit shortAnswer. '}${kinds.contains('trueFalse') ? 'For trueFalse, choices must be ["True", "False"]. ' : ''}pageIndex is 0-based from the source headings.
 
 SOURCE QUOTE (this is what the student is shown)
 "sourceQuote" is ONE sentence copied CHARACTER FOR CHARACTER out of the page text above — the sentence that states the answer.
@@ -281,6 +281,38 @@ highlight x/y/w/h are 0–1 fractions of the page image covering the source pass
 $context
 ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstructions' : ''}
 ''';
+  }
+
+  /// Example JSON rows for the kinds the user actually selected.
+  ///
+  /// Showing a shortAnswer example when that kind is off is what made Gemini
+  /// mix short-answer items into MC / T-F quizzes.
+  static String _quizExamplesFor(Set<String> kinds) {
+    const mc1 =
+        '{"kind":"multipleChoice","prompt":"Where is ATP generated in animal cells?","choices":["Mitochondria during cellular respiration","Lysosomes during hydrolysis","The nucleus during transcription","The Golgi during packaging"],"correctIndex":0,"acceptedAnswer":"Mitochondria during cellular respiration","explanation":"Mitochondria generate ATP through cellular respiration. That energy conversion occurs at the inner mitochondrial membrane. Lysosomes hydrolyse worn-out organelles; they do not produce ATP. See page 15.","pageIndex":14,"highlight":{"x":0.53,"y":0.18,"w":0.38,"h":0.019}}';
+    const mc2 =
+        '{"kind":"multipleChoice","prompt":"When do mitochondria generate ATP?","choices":["During cellular respiration","During Golgi packaging","During lysosomal digestion","During nuclear transcription"],"correctIndex":0,"acceptedAnswer":"During cellular respiration","explanation":"ATP is generated during cellular respiration, the mitochondrial pathway that oxidises fuel molecules. Golgi packaging and lysosomal digestion are separate organelle functions. See page 15.","pageIndex":14,"highlight":{"x":0.08,"y":0.18,"w":0.38,"h":0.019}}';
+    const mc3 =
+        '{"kind":"multipleChoice","prompt":"Why do eukaryotic cells contain ribosomes?","choices":["They synthesise proteins from amino acids","They store the cell\'s genetic material","They generate ATP by respiration","They digest worn-out organelles"],"correctIndex":0,"acceptedAnswer":"They synthesise proteins from amino acids","explanation":"Ribosomes synthesise proteins from amino acids. The nucleus stores DNA, and mitochondria produce ATP by respiration. See page 14.","pageIndex":13,"highlight":{"x":0.08,"y":0.10,"w":0.38,"h":0.019}}';
+    const tf =
+        '{"kind":"trueFalse","prompt":"Mitochondria generate ATP through cellular respiration in animal cells.","choices":["True","False"],"correctIndex":0,"acceptedAnswer":"True","explanation":"Mitochondria generate ATP through cellular respiration. That pathway oxidises fuel molecules at the inner mitochondrial membrane. See page 15.","pageIndex":14,"highlight":{"x":0.08,"y":0.18,"w":0.38,"h":0.019}}';
+    const sa =
+        '{"kind":"shortAnswer","prompt":"What do you call the organelle that packages proteins for transport across the membrane?","choices":[],"correctIndex":0,"acceptedAnswer":"Golgi apparatus","explanation":"The Golgi apparatus packages proteins and lipids into vesicles for delivery to other organelles or the cell surface. Cargo typically arrives from the rough endoplasmic reticulum, which synthesises those proteins. See page 14.","pageIndex":13,"highlight":{"x":0.08,"y":0.42,"w":0.38,"h":0.019}}';
+
+    final examples = <String>[];
+    if (kinds.contains('multipleChoice')) {
+      examples.addAll([mc1, mc2, mc3]);
+    }
+    if (kinds.contains('trueFalse')) {
+      examples.add(tf);
+    }
+    if (kinds.contains('shortAnswer')) {
+      examples.add(sa);
+    }
+    if (examples.isEmpty) {
+      examples.addAll([mc1, mc2]);
+    }
+    return examples.join('\n');
   }
 
   Future<GeminiTextResult> _generateParts(

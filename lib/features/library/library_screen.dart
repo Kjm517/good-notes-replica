@@ -13,6 +13,7 @@ import '../sync/sync_indicator.dart';
 import 'data/import_service.dart';
 import 'data/library_repository.dart';
 import 'document_transfer.dart';
+import 'open_document.dart';
 import 'providers.dart';
 import 'widgets/convert_to_pdf_dialog.dart';
 import 'widgets/create_sheet.dart';
@@ -766,40 +767,11 @@ class _ListRow extends ConsumerWidget {
 }
 
 void _open(BuildContext context, Document d) {
-  final container = ProviderScope.containerOf(context);
-  final pendingUpload =
-      container.read(pendingUploadDocumentsProvider).asData?.value ?? const {};
-  final missingLocal =
-      container.read(missingLocalFileDocumentsProvider).asData?.value ??
-          const {};
-  final paused = container.read(syncPausedProvider);
-  final status = container.read(syncStatusProvider);
-  final transfer = documentTransferState(
-    documentId: d.id,
-    pendingUpload: pendingUpload,
-    missingLocal: missingLocal,
-    status: status,
-    paused: paused,
+  tryOpenDocument(
+    context,
+    d,
+    container: ProviderScope.containerOf(context),
   );
-  if (transfer.locked) {
-    final pct = transfer.percent(status);
-    final pctLabel = pct != null ? ' ($pct%)' : '';
-    final verb = transfer.kind == DocumentTransferKind.downloading
-        ? 'downloading'
-        : 'uploading';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Still $verb$pctLabel — try again when sync finishes.'),
-      ),
-    );
-    return;
-  }
-  if (d.type == DocumentType.folder) {
-    context.push('/folder/${d.id}');
-  } else {
-    container.read(libraryRepositoryProvider).touchOpened(d.id);
-    context.push('/doc/${d.id}');
-  }
 }
 
 void _toggleStar(BuildContext context, Document d) {
@@ -1017,17 +989,22 @@ Future<void> runCreateFlow(
   }
 }
 
-/// Blocks PDF/image/scan imports when the 5 GB allowance is already full.
+/// Blocks PDF/image/scan imports when the storage allowance is already full.
 Future<bool> _ensureStorageAvailable(
   BuildContext context,
   WidgetRef ref,
 ) async {
-  final used = await ref.read(assetRepositoryProvider).totalBytes();
-  if (used < kStorageQuotaBytes) return true;
+  final assets = ref.read(assetRepositoryProvider);
+  final used = await assets.totalBytes();
+  if (used < assets.quotaBytes) return true;
   if (!context.mounted) return false;
   await showStorageQuotaDialog(
     context,
-    StorageQuotaExceeded(usedBytes: used, neededBytes: 1),
+    StorageQuotaExceeded(
+      usedBytes: used,
+      neededBytes: 1,
+      quotaBytes: assets.quotaBytes,
+    ),
   );
   return false;
 }

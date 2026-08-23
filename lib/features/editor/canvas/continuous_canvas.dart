@@ -1700,10 +1700,12 @@ class _PageTile extends ConsumerStatefulWidget {
 class _PageTileState extends ConsumerState<_PageTile> {
   ui.Image? _background;
   bool _loading = false;
+  bool _loadFailed = false;
   bool _requestedFull = false;
 
   bool get _hasBackground =>
-      widget.page.pdfAssetId != null || widget.page.bgAssetId != null;
+      widget.page.bgAssetId != null ||
+      (widget.page.pdfAssetId != null && widget.page.pdfPageIndex != null);
 
   @override
   void initState() {
@@ -1771,12 +1773,20 @@ class _PageTileState extends ConsumerState<_PageTile> {
       }
       final old = _background;
       setState(() {
-        if (img != null) _background = img;
+        if (img != null) {
+          _background = img;
+          _loadFailed = false;
+        } else if (_hasBackground) {
+          _loadFailed = true;
+        }
         _loading = false;
       });
       if (old != null && !identical(old, _background)) old.dispose();
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() {
+        _loading = false;
+        if (_hasBackground) _loadFailed = true;
+      });
     }
   }
 
@@ -1930,6 +1940,41 @@ class _PageTileState extends ConsumerState<_PageTile> {
                       width: 48,
                       height: 48,
                       child: CircularProgressIndicator(strokeWidth: 3),
+                    ),
+                  ),
+                if (_loadFailed && _background == null && !_loading)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.cloud_download_outlined,
+                            size: 36,
+                            color: context.tokens.textMuted,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'PDF not available on this device',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: context.tokens.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Check your connection and reopen the notebook',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: context.tokens.textFaint,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
               ],
