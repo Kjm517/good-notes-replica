@@ -7,6 +7,8 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let pdfText = PdfTextChannel()
+  private let keepAlive = KeepAliveChannel()
+  private let fileTransfer = FileTransferChannel()
 
   override func application(
     _ application: UIApplication,
@@ -17,7 +19,18 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    pdfText.register(messenger: engineBridge.applicationRegistrar.messenger())
+    let messenger = engineBridge.applicationRegistrar.messenger()
+    pdfText.register(messenger: messenger)
+    keepAlive.register(messenger: messenger)
+    fileTransfer.register(messenger: messenger)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    handleEventsForBackgroundURLSession identifier: String,
+    completionHandler: @escaping () -> Void
+  ) {
+    fileTransfer.handleBackgroundEvents(completionHandler)
   }
 }
 
@@ -119,6 +132,176 @@ private enum PdfTextError: LocalizedError {
     case .couldNotOpen: return "Could not open PDF"
     case .closed: return "PDF session closed"
     case .unknownMethod: return "Unknown method"
+    }
+  }
+}
+
+/// Extra CPU/network time after the user switches apps so a Dart HTTP
+/// upload is not frozen at the first suspend.
+private final class KeepAliveChannel {
+  static let name = "notably/keep_alive"
+  private var task = UIBackgroundTaskIdentifier.invalid
+
+  func register(messenger: FlutterBinaryMessenger) {
+    FlutterMethodChannel(name: Self.name, binaryMessenger: messenger)
+      .setMethodCallHandler { [weak self] call, result in
+        switch call.method {
+        case "start":
+          self?.start()
+          result(nil)
+        case "stop":
+          self?.stop()
+          result(nil)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+  }
+
+  func start() {
+    guard task == .invalid else { return }
+    task = UIApplication.shared.beginBackgroundTask(withName: "notably.sync") { [weak self] in
+      self?.stop()
+    }
+  }
+
+  func stop() {
+    guard task != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(task)
+    task = .invalid
+  }
+}
+
+/// Downloads a file with a background URLSession so iOS can finish it after
+/// the app is no longer on screen.
+private final class FileTransferChannel: NSObject, URLSessionDownloadDelegate, FlutterStreamHandler {
+  static let name = "notably/file_transfer"
+
+  private var session: URLSession!
+  private var pending: (dest: String, result: FlutterResult)?
+  private var eventSink: FlutterEventSink?
+  private var backgroundCompletion: (() -> Void)?
+
+  func register(messenger: FlutterBinaryMessenger) {
+    let config = URLSessionConfiguration.background(withIdentifier: "com.notably.notably.files")
+    config.isDiscretionary = false
+    config.sessionSendsLaunchEvents = true
+    session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+
+    FlutterMethodChannel(name: Self.name, binaryMessenger: messenger)
+      .setMethodCallHandler { [weak self] call, result in
+        guard call.method == "download" else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        self?.download(call.arguments, result: result)
+      }
+    FlutterEventChannel(name: "notably/file_transfer/events", binaryMessenger: messenger)
+      .setStreamHandler(self)
+  }
+
+  func handleBackgroundEvents(_ completion: @escaping () -> Void) {
+    backgroundCompletion = completion
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    eventSink = events
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+
+  private func download(_ arguments: Any?, result: @escaping FlutterResult) {
+    guard pending == nil else {
+      result(FlutterError(code: "busy", message: "A download is already running", details: nil))
+      return
+    }
+    guard let args = arguments as? [String: Any],
+          let urlString = args["url"] as? String,
+          let url = URL(string: urlString),
+          let dest = args["destPath"] as? String
+    else {
+      result(FlutterError(code: "args", message: "Missing url or destPath", details: nil))
+      return
+    }
+    var request = URLRequest(url: url)
+    if let headers = args["headers"] as? [String: String] {
+      for (key, value) in headers {
+        request.setValue(value, forHTTPHeaderField: key)
+      }
+    }
+    pending = (dest, result)
+    session.downloadTask(with: request).resume()
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didWriteData bytesWritten: Int64,
+    totalBytesWritten: Int64,
+    totalBytesExpectedToWrite: Int64
+  ) {
+    guard totalBytesExpectedToWrite > 0 else { return }
+    let fraction = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+    DispatchQueue.main.async { [weak self] in
+      self?.eventSink?(["progress": fraction])
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didFinishDownloadingTo location: URL
+  ) {
+    if let http = downloadTask.response as? HTTPURLResponse,
+       !(200...299).contains(http.statusCode) {
+      finish(ok: false, message: "HTTP \(http.statusCode)")
+      return
+    }
+    let dest = pending?.dest
+    do {
+      guard let dest else { throw URLError(.cannotCreateFile) }
+      let destURL = URL(fileURLWithPath: dest)
+      try FileManager.default.createDirectory(
+        at: destURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+      if FileManager.default.fileExists(atPath: dest) {
+        try FileManager.default.removeItem(at: destURL)
+      }
+      try FileManager.default.moveItem(at: location, to: destURL)
+      finish(ok: true)
+    } catch {
+      finish(ok: false, message: error.localizedDescription)
+    }
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    if let error {
+      finish(ok: false, message: error.localizedDescription)
+    }
+  }
+
+  func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+    let done = backgroundCompletion
+    backgroundCompletion = nil
+    DispatchQueue.main.async { done?() }
+  }
+
+  private func finish(ok: Bool, message: String? = nil) {
+    guard let pending else { return }
+    self.pending = nil
+    DispatchQueue.main.async {
+      if ok {
+        pending.result(true)
+      } else {
+        pending.result(
+          FlutterError(code: "download", message: message ?? "Download failed", details: nil)
+        )
+      }
     }
   }
 }

@@ -580,4 +580,79 @@ void main() {
     expect(aligned.pageIndex, 41);
     expect(aligned.highlight, isNotNull);
   });
+
+  test('quizOversampleCount asks for extra items on a 25-question quiz', () {
+    expect(quizOversampleCount(25), 35);
+    expect(quizOversampleCount(20), 28);
+    expect(quizOversampleCount(0), 0);
+  });
+
+  test('decodeQuizQuestionArray keeps complete objects from truncated JSON', () {
+    const truncated = '''
+[
+  {"kind":"trueFalse","prompt":"Mitochondria generate ATP in animal cells.","choices":["True","False"],"correctIndex":0,"acceptedAnswer":"True","explanation":"Mitochondria generate ATP through cellular respiration. See page 15.","pageIndex":14},
+  {"kind":"multipleChoice","prompt":"Where is ATP generated in animal cells?","choices":["Mitochondria during cellular respiration","Lysosomes during hydrolysis","The nucleus during transcription","The Golgi during packaging"],"correctIndex":0,"acceptedAnswer":"Mitochondria during cellular respiration","explanation":"Mitochondria generate ATP through cellular respiration. See page 15.","pageIndex":14},
+  {"kind":"trueFalse","prompt":"Lysosomes make ATP.","choices":["True","False"],"correctIndex":1,"acceptedAnswer":"False","explanation":"Lysosomes digest
+''';
+    final decoded = decodeQuizQuestionArray(truncated);
+    expect(decoded, hasLength(2));
+    expect((decoded.first as Map)['prompt'], contains('Mitochondria generate ATP'));
+  });
+
+  test('isExamStyleQuestion keeps long factual explanations without because/fact', () {
+    const q = QuizQuestion(
+      kind: QuizKind.multipleChoice,
+      prompt: 'Where is ATP generated in animal cells?',
+      choices: [
+        'Mitochondria during cellular respiration',
+        'Lysosomes during hydrolysis of organelles',
+        'The nucleus during gene transcription',
+        'The Golgi during protein packaging',
+      ],
+      correctIndex: 0,
+      acceptedAnswer: 'Mitochondria during cellular respiration',
+      explanation:
+          'Mitochondria generate ATP through cellular respiration at the '
+          'inner mitochondrial membrane. Lysosomes hydrolyse worn-out '
+          'organelles and do not produce ATP. See page 15.',
+      pageIndex: 14,
+    );
+    expect(isExamStyleQuestion(q), isTrue);
+  });
+
+  test('keepRequestedKinds drops kinds the student did not select', () {
+    const mc = QuizQuestion(
+      kind: QuizKind.multipleChoice,
+      prompt: 'Where is ATP generated in animal cells?',
+      choices: [
+        'Mitochondria during cellular respiration',
+        'Lysosomes during hydrolysis of organelles',
+        'The nucleus during gene transcription',
+        'The Golgi during protein packaging',
+      ],
+      correctIndex: 0,
+      acceptedAnswer: 'Mitochondria during cellular respiration',
+      explanation:
+          'Mitochondria generate ATP through cellular respiration at the '
+          'inner mitochondrial membrane. Lysosomes hydrolyse worn-out '
+          'organelles and do not produce ATP. See page 15.',
+      pageIndex: 14,
+    );
+    const sa = QuizQuestion(
+      kind: QuizKind.shortAnswer,
+      prompt: 'What do you call the organelle that generates ATP?',
+      choices: [],
+      correctIndex: 0,
+      acceptedAnswer: 'Mitochondria',
+      explanation:
+          'Mitochondria generate ATP through cellular respiration at the '
+          'inner mitochondrial membrane. See page 15.',
+      pageIndex: 14,
+    );
+    final kept = keepRequestedKinds(
+      [mc, sa],
+      {QuizKind.multipleChoice, QuizKind.trueFalse},
+    );
+    expect(kept, [mc]);
+  });
 }

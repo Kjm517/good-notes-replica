@@ -9,5 +9,20 @@ binding = "BUCKET"
 bucket_name = "notably-files"
 
 [vars]
-# Tokens are only accepted if they were issued for this Firebase project.
-FIREBASE_PROJECT_ID = "notably-f76a0"
+# Supabase project root URL only (no /rest/v1).
+SUPABASE_URL = "https://npuurqebnluyvyciljcx.supabase.co"
+# Public anon key (same as app .env SUPABASE_ANON_KEY) — Worker uses it with
+# the caller's access token to read public.admins.
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wdXVycWVibmx1eXZ5Y2lsamN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc0NTU2NTcsImV4cCI6MjEwMzAzMTY1N30.BOIIQoDoF2VDykJhNHKgjIIDfg6vapnc1FIHbnkWt1E"
+
+# PayMongo (GCash / Maya) — set secrets before enabling wallet checkout:
+#   wrangler secret put PAYMONGO_SECRET_KEY
+#   wrangler secret put PAYMONGO_WEBHOOK_SECRET
+# Webhook URL: https://<your-worker>/billing/webhook
+#
+# Auth — optional legacy JWT secret (HS256). New projects often use ES256 JWKS:
+#   wrangler secret put SUPABASE_JWT_SECRET
+#
+# Create admin Auth users from Team (Project Settings → API → service_role):
+#   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# Then open the app on web → Settings → Admin console (or /admin/overview).

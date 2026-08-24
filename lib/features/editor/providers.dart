@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -39,8 +40,15 @@ final elementRepositoryProvider = Provider<ElementRepository>((ref) {
 });
 
 /// Live image/text elements for a page.
+///
+/// Auto-disposing: each instance holds a live SQL watch, so a long PDF would
+/// otherwise accumulate one permanent subscription per page and re-run all of
+/// them on every element write. Visible page tiles keep theirs alive.
 final pageElementsProvider =
-    StreamProvider.family<List<CanvasElement>, String>((ref, pageId) {
+    StreamProvider.autoDispose.family<List<CanvasElement>, String>((
+  ref,
+  pageId,
+) {
   return ref.watch(elementRepositoryProvider).watchElements(pageId);
 });
 
@@ -58,6 +66,7 @@ final documentTextServiceProvider = Provider<DocumentTextService>((ref) {
   return DocumentTextService(
     ref.watch(databaseProvider),
     ref.watch(assetRepositoryProvider),
+    files: ref.watch(fileSyncProvider),
   );
 });
 
@@ -83,16 +92,71 @@ final pageBackgroundServiceProvider = Provider<PageBackgroundService>((ref) {
 });
 
 /// Live pages of a document (for the thumbnail rail / navigation).
+///
+/// Throttled on the trailing edge only: every committed stroke touches its
+/// page row for sync, and Drift invalidates by table, so ink alone would
+/// re-select and decode every row of a 4000-page PDF on each pen lift. The
+/// leading emission still lands immediately, so adding or reordering a page
+/// stays instant.
 final pagesStreamProvider =
     StreamProvider.family<List<NotePage>, String>((ref, documentId) {
-  return ref.watch(pageRepositoryProvider).watchPages(documentId);
+  return _throttleLatest(
+    ref.watch(pageRepositoryProvider).watchPages(documentId),
+    const Duration(milliseconds: 250),
+  );
 });
 
+/// Emits the first event straight away, then at most one event per [window],
+/// always the most recent one seen during it.
+Stream<T> _throttleLatest<T>(Stream<T> source, Duration window) {
+  return Stream<T>.multi((controller) {
+    Timer? timer;
+    T? pending;
+    var hasPending = false;
+
+    void flush() {
+      timer = null;
+      if (!hasPending) return;
+      final value = pending as T;
+      hasPending = false;
+      pending = null;
+      controller.add(value);
+      timer = Timer(window, flush);
+    }
+
+    final sub = source.listen(
+      (value) {
+        if (timer == null) {
+          controller.add(value);
+          timer = Timer(window, flush);
+        } else {
+          pending = value;
+          hasPending = true;
+        }
+      },
+      onError: controller.addError,
+      onDone: () {
+        timer?.cancel();
+        timer = null;
+        if (hasPending) controller.add(pending as T);
+        controller.close();
+      },
+    );
+
+    controller.onCancel = () {
+      timer?.cancel();
+      return sub.cancel();
+    };
+  });
+}
+
 /// The stateful editor for a document.
-final editorControllerProvider =
-    NotifierProvider.family<EditorController, EditorState, String>(
-  EditorController.new,
-);
+///
+/// Auto-dispose so leaving a notebook drops the in-memory stroke cache and the
+/// next open always reloads from SQLite — otherwise an empty cache entry after
+/// a bad sync could hide drawings that are still on disk.
+final editorControllerProvider = NotifierProvider.autoDispose
+    .family<EditorController, EditorState, String>(EditorController.new);
 
 /// Whether a resting palm/finger is ignored once a stylus is in use. Persisted
 /// app-wide and read by the canvas' pointer routing.
@@ -165,6 +229,10 @@ final quizHistoryRepositoryProvider = Provider<QuizHistoryRepository>((ref) {
 final quizHistoryProvider =
     StreamProvider.family<List<QuizHistoryRecord>, String>((ref, documentId) {
   return ref.watch(quizHistoryRepositoryProvider).watchForDocument(documentId);
+});
+
+final allQuizHistoryProvider = StreamProvider<List<QuizHistoryRecord>>((ref) {
+  return ref.watch(quizHistoryRepositoryProvider).watchAllCompleted();
 });
 
 /// Quiz generation state — tracks the async generation process.

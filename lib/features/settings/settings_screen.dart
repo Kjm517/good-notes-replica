@@ -1,26 +1,53 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 
+import '../../app/app_version.dart';
 import '../../app/design.dart';
-import '../../app/firebase_bootstrap.dart';
+import '../../app/supabase_bootstrap.dart';
 import '../../app/providers.dart';
-import '../../core/ai/ai_providers.dart';
+import '../../core/sync/sync_providers.dart';
+import '../../core/sync/sync_state.dart';
 import '../auth/providers.dart';
+import 'entitlements.dart';
+import 'about_notably_sheet.dart';
+import 'bug_report_sheet.dart';
+import 'paymongo_billing.dart';
+import 'premium_plan_sheet.dart';
+import 'premium_providers.dart';
+import 'settings_widgets.dart';
 
-const kBugReportEmail = 'kajama517@gmail.com';
-
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Pick up admin/plan changes as soon as Settings opens, not only on resume.
+    Future.microtask(() {
+      unawaited(ref.read(payMongoEntitlementRefreshProvider)());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final t = context.tokens;
-    final mode = ref.watch(themeModeProvider);
-    final controller = ref.read(themeModeProvider.notifier);
+    final entitlement = ref.watch(entitlementProvider);
+    final ent = entitlement.asData?.value;
+    final hasPremiumFeatures = ent?.hasPremiumFeatures ?? false;
+    final plan = ref.watch(billingPlanProvider);
+    final renews = ref.watch(premiumRenewsAtProvider);
+    final width = MediaQuery.sizeOf(context).width;
+    final horizontalPad = width >= AppBreakpoints.phone ? 24.0 : 18.0;
 
     return Scaffold(
       backgroundColor: t.canvas,
@@ -28,61 +55,62 @@ class SettingsScreen extends ConsumerWidget {
         backgroundColor: t.canvas,
         title: const Text('Settings'),
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
-            children: [
-              const SettingsSection(
-                label: 'Account',
-                children: [_AccountTile()],
-              ),
-              SettingsSection(
-                label: 'AI Features',
-                children: [_PremiumTile()],
-              ),
-              SettingsSection(
-                label: 'Appearance',
-                children: [
-                  for (final option in const [
-                    (ThemeMode.system, 'System default', Icons.brightness_auto_rounded),
-                    (ThemeMode.light, 'Light', Icons.light_mode_rounded),
-                    (ThemeMode.dark, 'Dark', Icons.dark_mode_rounded),
-                  ])
-                    _ChoiceRow(
-                      icon: option.$3,
-                      label: option.$2,
-                      selected: mode == option.$1,
-                      onTap: () => controller.set(option.$1),
-                    ),
-                ],
-              ),
-              SettingsSection(
-                label: 'About',
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 620),
+            child: ListView(
+              padding: EdgeInsets.fromLTRB(horizontalPad, 8, horizontalPad, 40),
+              children: [
+                SettingsSection(
+                  label: 'Account',
+                  child: SettingsGroupCard(
+                    children: [_AccountHeader(entitlement: ent)],
+                  ),
+                ),
+                SettingsSection(
+                  label: 'Plan',
+                  child: ent?.isPremium == true
+                      ? _ActivePlanCard(plan: plan, renewsAt: renews)
+                      : ent?.isTrialActive == true
+                          ? _TrialPlanCard(entitlement: ent!)
+                          : _GoPremiumCard(trialExpired: ent?.trialExpired ?? false),
+                ),
+                SettingsSection(
+                  label: 'AI Features',
+                  child: _AiFeaturesCard(
+                    entitlement: ent,
+                    hasPremiumFeatures: hasPremiumFeatures,
+                  ),
+                ),
+                SettingsSection(
+                  label: 'Appearance',
+                  child: _AppearanceSection(),
+                ),
+                SettingsSection(
+                  label: 'Support',
+                  child: _SupportSection(),
+                ),
+                if (kIsWeb)
+                  SettingsSection(
+                    label: 'Admin',
+                    child: SettingsGroupCard(
                       children: [
-                        Text('Notably',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: t.text,
-                            )),
-                        const SizedBox(height: 3),
-                        Text('A GoodNotes-style note-taking app',
-                            style:
-                                TextStyle(fontSize: 13, color: t.textMuted)),
+                        SettingsRow(
+                          icon: Icons.admin_panel_settings_outlined,
+                          title: 'Admin console',
+                          subtitle: 'Staff sign-in (separate from this account)',
+                          onTap: () => context.push('/admin/overview'),
+                        ),
                       ],
                     ),
                   ),
-                  const _BugReportTile(),
-                ],
-              ),
-            ],
+                SettingsSection(
+                  label: 'About',
+                  child: _AboutSection(),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -90,43 +118,394 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-/// A titled card of rows — the grouping used across settings and the document
-/// sheet, with a Space Mono caption above a bordered surface.
-class SettingsSection extends StatelessWidget {
-  const SettingsSection({
-    super.key,
-    required this.label,
-    required this.children,
-  });
+class _AccountHeader extends ConsumerWidget {
+  const _AccountHeader({this.entitlement});
 
-  final String label;
-  final List<Widget> children;
+  final UserEntitlement? entitlement;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
+    final user = ref.watch(authStateProvider).asData?.value;
+    final plan = ref.watch(billingPlanProvider);
+    final tier = entitlement?.isPremium == true && plan == BillingPlan.lifetime
+        ? 'Lifetime'
+        : (entitlement?.tierLabel ?? 'Free');
+    final premiumBadge = entitlement?.isPremium == true || entitlement?.isTrialActive == true;
+
+    if (user == null) {
+      return ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: t.fill,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(Icons.cloud_off_rounded, size: 22, color: t.textMuted),
+        ),
+        title: const Text(
+          'Not signed in',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          supabaseReady
+              ? 'Sign in to sync your notes and start your 7-day trial'
+              : 'Sync is not set up — notes stay on this device',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 12.5, color: t.textMuted),
+        ),
+        trailing: TierBadge(label: tier, premium: premiumBadge),
+        onTap: () => context.push('/sign-in'),
+      );
+    }
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      leading: CircleAvatar(
+        radius: 22,
+        backgroundColor: t.accentSoft,
+        foregroundColor: t.accentText,
+        backgroundImage:
+            user.photoUrl == null ? null : NetworkImage(user.photoUrl!),
+        child: user.photoUrl == null
+            ? Text(
+                user.label.characters.first.toUpperCase(),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              )
+            : null,
+      ),
+      title: Text(
+        user.label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(
+        user.email ?? 'Signed in',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: AppTokens.mono(size: 11, color: t.textMuted),
+      ),
+      trailing: TierBadge(label: tier, premium: premiumBadge),
+    );
+  }
+}
+
+class _TrialPlanCard extends StatelessWidget {
+  const _TrialPlanCard({required this.entitlement});
+
+  final UserEntitlement entitlement;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final days = entitlement.trialDaysRemaining ?? 0;
+    return PremiumGradientCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.hourglass_top_rounded, color: t.premiumText, size: 26),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Free trial',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: t.text,
+                      ),
+                    ),
+                    Text(
+                      '$days day${days == 1 ? '' : 's'} left · ${entitlement.quizUsed} of ${entitlement.quizLimit} quizzes used',
+                      style: AppTokens.mono(size: 10, color: t.textFaint),
+                    ),
+                  ],
+                ),
+              ),
+              const TierBadge(label: 'Trial', premium: true),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            '5 GB storage · quiz history and AI quizzes unlocked during your trial. '
+            'Upgrade to Premium for 15 GB and unlimited quizzes.',
+            style: TextStyle(fontSize: 13, color: t.textSecondary, height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () => PremiumPlanSheet.show(context),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              backgroundColor: t.premium,
+              foregroundColor: t.premiumOn,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(Radii.control),
+              ),
+            ),
+            child: const Text('Upgrade to Premium'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GoPremiumCard extends StatelessWidget {
+  const _GoPremiumCard({required this.trialExpired});
+
+  final bool trialExpired;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return PremiumGradientCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.workspace_premium_rounded, color: t.premiumText, size: 26),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      trialExpired ? 'Trial ended' : 'Go Premium',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: t.text,
+                      ),
+                    ),
+                    Text(
+                      trialExpired
+                          ? 'Premium features are locked'
+                          : 'Unlimited AI quizzes & history',
+                      style: AppTokens.mono(size: 10, color: t.textFaint),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            trialExpired
+                ? 'Your 7-day trial has ended. Premium from ${monthlyPriceLabel()} '
+                    '(students ${formatPhp(kStudentMonthlyPhp)}/mo) keeps AI quizzes, '
+                    'history, and 15 GB storage.'
+                : 'Start a 7-day trial with $kTrialQuizLimit AI quizzes, or go Premium from '
+                    '${monthlyPriceLabel()} — ${yearlyPriceLabel()} ${yearlySavingsLabel().toLowerCase()}.',
+            style: TextStyle(fontSize: 13, color: t.textSecondary, height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () => PremiumPlanSheet.show(context),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              backgroundColor: t.premium,
+              foregroundColor: t.premiumOn,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(Radii.control),
+              ),
+            ),
+            child: const Text('See plans'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivePlanCard extends StatelessWidget {
+  const _ActivePlanCard({required this.plan, this.renewsAt});
+
+  final BillingPlan plan;
+  final DateTime? renewsAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final planName = billingPlanLabel(plan);
+    final lifetime = plan == BillingPlan.lifetime;
+    final renewLabel = lifetime
+        ? 'Never expires'
+        : renewsAt == null
+            ? 'Active subscription'
+            : 'Renews ${DateFormat.yMMMd().format(renewsAt!)}';
+
+    return PremiumGradientCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.verified_rounded, color: t.premiumText, size: 24),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Premium · $planName',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(renewLabel, style: AppTokens.mono(size: 10, color: t.textFaint)),
+                    Text(
+                      '15 GB storage · unlimited AI quizzes',
+                      style: AppTokens.mono(size: 10, color: t.textFaint),
+                    ),
+                  ],
+                ),
+              ),
+              const TierBadge(label: 'Active', premium: true),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => PremiumPlanSheet.show(context),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: t.premiumText,
+                    side: BorderSide(color: t.premium.withValues(alpha: 0.4)),
+                  ),
+                  child: const Text('Manage plan'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => context.push('/billing-history'),
+                  child: const Text('Billing history'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AiFeaturesCard extends ConsumerWidget {
+  const _AiFeaturesCard({
+    required this.hasPremiumFeatures,
+    this.entitlement,
+  });
+
+  final UserEntitlement? entitlement;
+  final bool hasPremiumFeatures;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
+    final stats = ref.watch(quizStatsProvider);
+    final syncStatus = ref.watch(syncStatusProvider);
+    final syncPaused = ref.watch(syncPausedProvider);
+
+    final ent = entitlement;
+    final quizSubtitle = ent == null
+        ? 'Checking usage…'
+        : ent.quizUsageLabel();
+
+    final historySubtitle = stats.when(
+      data: (s) => s.count == 0
+          ? 'No quizzes yet'
+          : '${s.count} quizzes · ${s.avgPercent}% average',
+      loading: () => 'Loading…',
+      error: (_, _) => 'Quiz history',
+    );
+
+    final syncSubtitle = _syncLabel(syncStatus, syncPaused);
+
+    return SettingsGroupCard(
+      children: [
+        SettingsRow(
+          icon: Icons.auto_awesome_rounded,
+          iconColor: hasPremiumFeatures ? t.premiumText : t.textMuted,
+          title: 'AI quizzes',
+          subtitle: quizSubtitle,
+          dimmed: !hasPremiumFeatures && ent?.isFree == true,
+          trailing: ent?.isPremium == true
+              ? const AccentSwitch(value: true, onChanged: null)
+              : hasPremiumFeatures
+                  ? null
+                  : UnlockChip(onTap: () => PremiumPlanSheet.show(context)),
+        ),
+        SettingsRow(
+          icon: Icons.history_rounded,
+          title: 'Quiz history',
+          subtitle: hasPremiumFeatures
+              ? historySubtitle
+              : ent?.trialExpired == true
+                  ? 'Locked — upgrade to Premium'
+                  : 'Keep every attempt and retake',
+          dimmed: !hasPremiumFeatures,
+          trailing: hasPremiumFeatures
+              ? Icon(Icons.chevron_right_rounded, color: t.textFaint)
+              : UnlockChip(onTap: () => PremiumPlanSheet.show(context)),
+          onTap: hasPremiumFeatures ? () => context.push('/quiz-history') : null,
+        ),
+        SettingsRow(
+          icon: Icons.cloud_sync_rounded,
+          title: 'Cloud sync',
+          subtitle: syncSubtitle,
+          trailing: AccentSwitch(
+            value: !syncPaused,
+            onChanged: (enabled) {
+              ref.read(syncPausedProvider.notifier).setPaused(!enabled);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  static String _syncLabel(SyncStatus status, bool paused) {
+    if (paused) return 'Paused — notes stay on this device';
+    return switch (status.phase) {
+      SyncPhase.disabled => 'Sign in to sync across devices',
+      SyncPhase.idle => 'Up to date',
+      SyncPhase.syncing => status.progressMessage ?? 'Syncing…',
+      SyncPhase.pending =>
+        status.pendingChanges > 0
+            ? '${status.pendingChanges} changes pending'
+            : 'Pending sync',
+      SyncPhase.offline => 'Offline — will sync when online',
+      SyncPhase.paused => 'Sync paused',
+      SyncPhase.error => status.message ?? 'Sync error',
+    };
+  }
+}
+
+class _AppearanceSection extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(themeModeProvider);
+    final controller = ref.read(themeModeProvider.notifier);
+    return SettingsGroupCard(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(6, 22, 6, 10),
-          child: Text(label.toUpperCase(),
-              style: AppTokens.sectionLabel(t.textFaint)),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            color: t.surface,
-            borderRadius: BorderRadius.circular(Radii.card),
-            border: Border.all(color: t.line),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              for (var i = 0; i < children.length; i++) ...[
-                if (i > 0) Divider(height: 1, color: t.line),
-                children[i],
-              ],
-            ],
+          padding: const EdgeInsets.all(14),
+          child: AppearancePicker(
+            mode: mode,
+            onChanged: controller.set,
           ),
         ),
       ],
@@ -134,242 +513,50 @@ class SettingsSection extends StatelessWidget {
   }
 }
 
-/// A single-select row with a check on the active option.
-class _ChoiceRow extends StatelessWidget {
-  const _ChoiceRow({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+class _AboutSection extends StatelessWidget {
+  const _AboutSection();
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            Icon(icon,
-                size: 20, color: selected ? t.accentText : t.textMuted),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    color: t.text,
-                  )),
-            ),
-            if (selected)
-              Icon(Icons.check_rounded, size: 19, color: t.accentText),
-          ],
+    return SettingsGroupCard(
+      children: [
+        SettingsRow(
+          icon: Icons.info_outline_rounded,
+          title: 'About Notably',
+          subtitle: 'Version $kAppVersion',
+          trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
+          onTap: () => AboutNotablySheet.show(context),
         ),
-      ),
+      ],
     );
   }
 }
 
-/// Shows who's signed in, or invites the user to sign in for sync.
-class _AccountTile extends ConsumerWidget {
-  const _AccountTile();
+class _SupportSection extends ConsumerWidget {
+  const _SupportSection();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final t = context.tokens;
-    final user = ref.watch(authStateProvider).asData?.value;
-
-    if (user == null) {
-      return ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: t.fill,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(Icons.cloud_off_rounded, size: 21, color: t.textMuted),
+    return SettingsGroupCard(
+      children: [
+        SettingsRow(
+          icon: Icons.bug_report_outlined,
+          title: 'Report a bug',
+          subtitle: 'Goes to the admin Bug reports console',
+          trailing: Icon(Icons.chevron_right_rounded, color: context.tokens.textFaint),
+          onTap: () => BugReportSheet.show(context),
         ),
-        title: const Text('Not signed in',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-        subtitle: Text(
-          firebaseReady
-              ? 'Sign in to sync your notes across devices'
-              : 'Sync is not set up yet — notes are stored on this device',
-          style: TextStyle(fontSize: 12.5, color: t.textMuted),
+        SettingsRow(
+          icon: Icons.logout_rounded,
+          title: 'Sign out',
+          subtitle: 'Stop syncing on this device',
+          onTap: () async {
+            final repo = ref.read(authRepositoryProvider);
+            await repo?.signOut();
+          },
         ),
-        trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
-        onTap: () => context.push('/sign-in'),
-      );
-    }
-
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      leading: CircleAvatar(
-        radius: 21,
-        backgroundColor: t.accentSoft,
-        foregroundColor: t.accentText,
-        backgroundImage:
-            user.photoUrl == null ? null : NetworkImage(user.photoUrl!),
-        child: user.photoUrl == null
-            ? Text(user.label.characters.first.toUpperCase(),
-                style: const TextStyle(fontWeight: FontWeight.w700))
-            : null,
-      ),
-      title: Text(user.label,
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-      subtitle: Text(user.email ?? 'Signed in',
-          style: AppTokens.mono(size: 11.5, color: t.textMuted)),
-      trailing: TextButton(
-        onPressed: () async {
-          final repo = ref.read(authRepositoryProvider);
-          await repo?.signOut();
-        },
-        child: const Text('Sign out'),
-      ),
-    );
-  }
-}
-
-/// Premium / AI features toggle.
-///
-/// In a real app this would gate behind IAP (RevenueCat, Google Play Billing).
-/// For now it's a simple SharedPreferences flag so the quiz-from-document
-/// flow can be tested end to end.
-class _PremiumTile extends ConsumerWidget {
-  const _PremiumTile();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final t = context.tokens;
-    final isPremium = ref.watch(isPremiumProvider);
-    final aiReady = ref.watch(aiAvailableProvider);
-
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      leading: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: isPremium ? t.accentSoft : t.fill,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(
-          isPremium ? Icons.auto_awesome : Icons.auto_awesome_outlined,
-          size: 21,
-          color: isPremium ? t.accentText : t.textMuted,
-        ),
-      ),
-      title: Text(
-        isPremium ? 'AI Premium' : 'Free Plan',
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-      ),
-      subtitle: Text(
-        aiReady
-            ? (isPremium
-                ? 'AI-powered quizzes from your documents'
-                : 'Upgrade for AI quiz generation')
-            : 'Add GEMINI_API_KEY to .env and rebuild',
-        style: TextStyle(fontSize: 12.5, color: t.textMuted),
-      ),
-      trailing: Switch.adaptive(
-        value: isPremium,
-        activeTrackColor: t.accentText,
-        onChanged: (value) async {
-          final prefs = ref.read(sharedPrefsProvider);
-          await prefs.setBool('is_premium', value);
-          // Force rebuild of the provider.
-          ref.invalidate(isPremiumProvider);
-        },
-      ),
-    );
-  }
-}
-
-class _BugReportTile extends StatelessWidget {
-  const _BugReportTile();
-
-  static String get _deviceLabel {
-    if (kIsWeb) return 'Web';
-    return switch (defaultTargetPlatform) {
-      TargetPlatform.android => 'Android',
-      TargetPlatform.iOS => 'iOS',
-      TargetPlatform.macOS => 'macOS',
-      TargetPlatform.windows => 'Windows',
-      TargetPlatform.linux => 'Linux',
-      TargetPlatform.fuchsia => 'Fuchsia',
-    };
-  }
-
-  Future<void> _report(BuildContext context) async {
-    final uri = Uri(
-      scheme: 'mailto',
-      path: kBugReportEmail,
-      query: [
-        'subject=${Uri.encodeComponent('Notably bug report')}',
-        'body=${Uri.encodeComponent(
-          'What happened?\n\n'
-          '\n'
-          'Steps to reproduce:\n'
-          '1. \n'
-          '2. \n'
-          '\n'
-          '—\n'
-          'Notably 1.0.0 · $_deviceLabel\n',
-        )}',
-      ].join('&'),
-    );
-
-    try {
-      final opened = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (opened || !context.mounted) return;
-    } catch (_) {
-      // Fall through to clipboard.
-    }
-    await Clipboard.setData(const ClipboardData(text: kBugReportEmail));
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('No mail app found. Copied $kBugReportEmail'),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      leading: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: t.fill,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(Icons.bug_report_outlined, size: 21, color: t.textMuted),
-      ),
-      title: const Text(
-        'Report a bug',
-        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-      ),
-      subtitle: Text(
-        'Email $kBugReportEmail',
-        style: TextStyle(fontSize: 12.5, color: t.textMuted),
-      ),
-      trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
-      onTap: () => _report(context),
+      ],
     );
   }
 }

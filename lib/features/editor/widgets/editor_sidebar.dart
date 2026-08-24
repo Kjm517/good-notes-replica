@@ -61,7 +61,9 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
   @override
   void initState() {
     super.initState();
-    if (widget.outlinePending || widget.outline.isNotEmpty) {
+    // Default to page thumbnails (Android parity). Switch to Outline when the
+    // TOC arrives — see [didUpdateWidget].
+    if (widget.outline.isNotEmpty) {
       _tab = SidebarTab.outline;
     }
   }
@@ -113,10 +115,18 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
     return widget.defaultPageSize;
   }
 
+  /// Height of one Pages-tab row, matching [_ThumbTile]'s padding + preview +
+  /// page number. Using [_kThumbWidth] here used to undershoot the real tile
+  /// (the preview is as wide as the sidebar, not 186), which overflowed
+  /// yellow-and-black stripes under every thumbnail.
   double _thumbExtent(NotePage page) {
     final size = _sizeFor(page);
     final aspect = size.width == 0 ? 1.3 : size.height / size.width;
-    return 14 + _kThumbWidth * aspect + 20;
+    const hPad = 32.0; // [_ThumbTile] left + right
+    const vPad = 14.0; // [_ThumbTile] top + bottom
+    const label = 28.0; // 6px gap + Space Mono 11
+    final thumbW = (widget.width - hPad).clamp(1.0, 400.0);
+    return vPad + thumbW * aspect + label;
   }
 
   @override
@@ -171,7 +181,7 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
                           child: Text(
                             tab == SidebarTab.thumbnails ? 'Pages' : 'Outline',
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: 14.5,
                               fontWeight: _tab == tab
                                   ? FontWeight.w600
                                   : FontWeight.w500,
@@ -252,7 +262,7 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
               'Reading contents…',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 13.5,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: t.textSecondary,
               ),
@@ -261,7 +271,7 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
             Text(
               'Using the PDF’s bookmarks when it has them.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: t.textMuted),
+              style: TextStyle(fontSize: 13, color: t.textMuted),
             ),
           ],
         ),
@@ -285,7 +295,7 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
               'No outline yet',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 13.5,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: t.textSecondary,
               ),
@@ -295,7 +305,7 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
               'PDFs with a table of contents show it here. '
               'Bookmark a page to add your own.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: t.textMuted),
+              style: TextStyle(fontSize: 13, color: t.textMuted),
             ),
           ],
         ),
@@ -339,8 +349,11 @@ class _EditorSidebarState extends ConsumerState<EditorSidebar> {
   Widget _sectionLabel(BuildContext context, String text) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 6),
-      child: Text(text.toUpperCase(),
-          style: AppTokens.sectionLabel(context.tokens.textFaint)),
+      child: Text(
+        text.toUpperCase(),
+        style: AppTokens.sectionLabel(context.tokens.textFaint)
+            .copyWith(fontSize: 12),
+      ),
     );
   }
 }
@@ -419,10 +432,16 @@ class _OutlineTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final tablet =
+        MediaQuery.sizeOf(context).shortestSide >= AppBreakpoints.tabletShortest;
     // Indent nested entries; cap the depth so a deep outline never marches off
     // the edge of a 240px sidebar.
     final indent = 10.0 + (depth.clamp(0, 5)) * 12.0;
     final topLevel = depth == 0;
+    final titleSize = tablet
+        ? (topLevel ? 16.0 : 15.0)
+        : (topLevel ? 15.0 : 14.0);
+    final pageSize = tablet ? 13.0 : 12.0;
 
     return InkWell(
       onTap: onTap,
@@ -436,7 +455,7 @@ class _OutlineTile extends StatelessWidget {
             ),
           ),
         ),
-        padding: EdgeInsets.fromLTRB(indent, 6, 12, 6),
+        padding: EdgeInsets.fromLTRB(indent, tablet ? 8 : 7, 12, tablet ? 8 : 7),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -453,7 +472,7 @@ class _OutlineTile extends StatelessWidget {
                         expanded
                             ? Icons.expand_more_rounded
                             : Icons.chevron_right_rounded,
-                        size: 18,
+                        size: tablet ? 20 : 18,
                         color: selected ? t.accentText : t.textMuted,
                       ),
                     )
@@ -461,7 +480,7 @@ class _OutlineTile extends StatelessWidget {
                       ? Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Icon(Icons.bookmark_rounded,
-                              size: 14, color: t.accentText),
+                              size: tablet ? 16 : 15, color: t.accentText),
                         )
                       : null,
             ),
@@ -473,7 +492,7 @@ class _OutlineTile extends StatelessWidget {
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: topLevel ? 13 : 12.5,
+                    fontSize: titleSize,
                     height: 1.3,
                     fontWeight: selected || topLevel
                         ? FontWeight.w600
@@ -491,7 +510,7 @@ class _OutlineTile extends StatelessWidget {
               child: Text(
                 '$pageNumber',
                 style: AppTokens.mono(
-                  size: 10.5,
+                  size: pageSize,
                   color: selected ? t.accentText : t.textFaint,
                 ),
               ),
@@ -571,58 +590,93 @@ class _ThumbTileState extends ConsumerState<_ThumbTile> {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final aspect = widget.pageSize.height / widget.pageSize.width;
+    final w = widget.pageSize.width == 0 ? 1.0 : widget.pageSize.width;
+    final aspect = widget.pageSize.height / w;
+    final preview = GestureDetector(
+      onTap: widget.onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: widget.selected ? t.accent : t.line,
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: t.shadow.withValues(alpha: 0.10),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: AspectRatio(
+          aspectRatio: 1 / aspect,
+          // Composites background + ink + images, so the preview shows
+          // the annotations rather than just the source page.
+          child: (_hasBackground && _image == null)
+              ? const Center(
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : PagePreview(
+                  page: widget.page,
+                  baseSize: widget.pageSize,
+                  background: _image,
+                ),
+        ),
+      ),
+    );
+    final number = Text(
+      '${widget.number}',
+      style: AppTokens.mono(
+        size: 11,
+        weight: widget.selected ? FontWeight.w700 : FontWeight.w400,
+        color: widget.selected ? t.accentText : t.textFaint,
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
-      child: Column(
-        children: [
-          GestureDetector(
-            onTap: widget.onTap,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: widget.selected ? t.accent : t.line,
-                  width: 2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: t.shadow.withValues(alpha: 0.10),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (!constraints.hasBoundedHeight) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                preview,
+                const SizedBox(height: 6),
+                number,
+              ],
+            );
+          }
+          // ListView itemExtent is a tight height. Shrink the preview to
+          // keep the page number on-screen instead of painting overflow
+          // stripes while thumbnails render.
+          return Column(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.center,
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    child: SizedBox(
+                      width: _kThumbWidth,
+                      height: _kThumbWidth * aspect,
+                      child: preview,
+                    ),
                   ),
-                ],
+                ),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: AspectRatio(
-                aspectRatio: 1 / aspect,
-                // Composites background + ink + images, so the preview shows
-                // the annotations rather than just the source page.
-                child: (_hasBackground && _image == null)
-                    ? const Center(
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    : PagePreview(
-                        page: widget.page,
-                        baseSize: widget.pageSize,
-                        background: _image,
-                      ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text('${widget.number}',
-              style: AppTokens.mono(
-                size: 11,
-                weight: widget.selected ? FontWeight.w700 : FontWeight.w400,
-                color: widget.selected ? t.accentText : t.textFaint,
-              )),
-        ],
+              const SizedBox(height: 6),
+              number,
+            ],
+          );
+        },
       ),
     );
   }

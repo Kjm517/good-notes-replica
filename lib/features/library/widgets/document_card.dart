@@ -11,6 +11,7 @@ import '../../../core/sync/sync_providers.dart';
 import '../document_transfer.dart';
 import '../providers.dart';
 import 'cover_styles.dart';
+import 'cover_sync_progress.dart';
 
 /// A single grid tile for a folder / notebook / pdf.
 ///
@@ -54,25 +55,29 @@ class DocumentCard extends ConsumerWidget {
       missingLocal: missingLocal,
       status: status,
       paused: paused,
+      documentType: document.type,
+      pageCount: pageCount,
+      hasCoverPreview:
+          document.coverThumb != null && document.coverThumb!.isNotEmpty,
     );
     final locked = transfer.locked;
     final badgeLabel = transfer.badgeLabel(status);
+    final progress = transfer.progressFraction(status);
     final transferIcon = switch (transfer.kind) {
       DocumentTransferKind.downloading => Icons.cloud_download_outlined,
       DocumentTransferKind.uploading => Icons.cloud_upload_outlined,
+      DocumentTransferKind.syncingPages => Icons.cloud_sync_outlined,
       DocumentTransferKind.none => null,
     };
 
-    return Opacity(
-      opacity: locked ? 0.45 : 1,
-      child: Material(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(Radii.card),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: locked ? null : onTap,
-          onLongPress: onLongPress,
-          child: Container(
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(Radii.card),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: locked ? null : onTap,
+        onLongPress: locked ? null : onLongPress,
+        child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(Radii.card),
               border: Border.all(color: t.line),
@@ -84,9 +89,14 @@ class DocumentCard extends ConsumerWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      _isFolder
-                          ? _FolderThumb(document: document)
-                          : _CoverThumb(document: document),
+                      CoverSyncProgressOverlay(
+                        key: ValueKey(document.id),
+                        active: transfer.showCoverProgress,
+                        progress: progress,
+                        builder: (_) => _isFolder
+                            ? _FolderThumb(document: document)
+                            : _CoverThumb(document: document),
+                      ),
                       if (onStarTap != null && !locked)
                         Positioned(
                           top: 8,
@@ -100,44 +110,13 @@ class DocumentCard extends ConsumerWidget {
                         const Positioned(
                             left: 8, bottom: 8, child: _PdfBadge()),
                       if (badgeLabel != null)
-                        ColoredBox(
-                          color: locked
-                              ? t.canvas.withValues(alpha: 0.35)
-                              : Colors.transparent,
-                          child: Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: t.surface.withValues(alpha: 0.92),
-                                  borderRadius:
-                                      BorderRadius.circular(Radii.inner),
-                                  border: Border.all(color: t.line),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      transferIcon ?? Icons.cloud_outlined,
-                                      size: 14,
-                                      color: t.textSecondary,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      badgeLabel,
-                                      style: AppTokens.mono(
-                                        size: 11,
-                                        color: t.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                            child: CoverTransferBadge(
+                              icon: transferIcon ?? Icons.cloud_outlined,
+                              label: badgeLabel,
                             ),
                           ),
                         ),
@@ -165,7 +144,7 @@ class DocumentCard extends ConsumerWidget {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              badgeLabel ?? _subtitle(document, pageCount),
+                              _subtitle(document, pageCount),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: AppTokens.mono(
@@ -174,7 +153,7 @@ class DocumentCard extends ConsumerWidget {
                           ],
                         ),
                       ),
-                      if (onMore != null)
+                      if (onMore != null && !locked)
                         InkWell(
                           borderRadius: BorderRadius.circular(20),
                           onTap: onMore,
@@ -191,8 +170,7 @@ class DocumentCard extends ConsumerWidget {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   static String _subtitle(Document d, int? pages) {
@@ -205,6 +183,47 @@ class DocumentCard extends ConsumerWidget {
       DocumentType.notebook => 'Notebook$pp · $when',
       DocumentType.pdf => 'PDF$pp · $when',
     };
+  }
+}
+
+/// Sync chip on a library cover. The grid tile can be ~130px wide on iPad,
+/// so the label ellipsizes instead of painting overflow stripes.
+class CoverTransferBadge extends StatelessWidget {
+  const CoverTransferBadge({
+    super.key,
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: t.surface.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(Radii.inner),
+        border: Border.all(color: t.line),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: t.textSecondary),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTokens.mono(size: 11, color: t.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -239,36 +258,62 @@ class _StarButton extends StatelessWidget {
   }
 }
 
-class _CoverThumb extends StatelessWidget {
+class _CoverThumb extends StatefulWidget {
   const _CoverThumb({required this.document});
   final Document document;
 
   @override
+  State<_CoverThumb> createState() => _CoverThumbState();
+}
+
+class _CoverThumbState extends State<_CoverThumb> {
+  MemoryImage? _image;
+  String? _encoded;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CoverThumb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncImage();
+  }
+
+  void _syncImage() {
+    final encoded = widget.document.coverThumb;
+    if (encoded == _encoded) return;
+    _encoded = encoded;
+    if (encoded == null || encoded.isEmpty) {
+      _image = null;
+      return;
+    }
+    _image = MemoryImage(base64Decode(encoded));
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Rendered once at import and cached on the row, so the library never
-    // has to open the source PDF to draw a card.
-    final encoded = document.coverThumb;
-    if (encoded != null && encoded.isNotEmpty) {
-      // Real first-page preview (PDF cover / imported image).
+    final image = _image;
+    if (image != null) {
       return ColoredBox(
         color: Colors.white,
-        child: Image.memory(
-          base64Decode(encoded),
+        child: Image(
+          image: image,
           fit: BoxFit.cover,
           gaplessPlayback: true,
-          cacheWidth: 360,
+          filterQuality: FilterQuality.medium,
           errorBuilder: (context, error, stack) => const SizedBox.shrink(),
         ),
       );
     }
 
-    // Fallback: notebook cover gradient (also shown while the thumb loads).
-    final cover = coverStyleAt(document.coverStyle);
+    final cover = coverStyleAt(widget.document.coverStyle);
     return DecoratedBox(
       decoration: BoxDecoration(gradient: cover.gradient),
       child: Row(
         children: [
-          // The spine: a darker strip that reads as a bound notebook.
           Container(width: 10, color: Colors.black.withValues(alpha: 0.18)),
         ],
       ),

@@ -5,13 +5,12 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../app/env_config.dart';
 import '../../features/auth/providers.dart';
 import '../db/database.dart';
 import '../network/network_status.dart';
 import '../storage/asset_store.dart';
 import 'file_sync.dart';
-import 'firestore_store.dart';
+import 'supabase_store.dart';
 import 'sync_engine.dart';
 import 'sync_state.dart';
 
@@ -53,11 +52,10 @@ class SyncPausedController extends Notifier<bool> {
 
 /// Base URL of the Cloudflare Worker that fronts R2 file storage.
 ///
-<<<<<<< Updated upstream
 /// Resolved in this order, so a deployment does not depend on remembering a
 /// build flag:
 ///   1. `NOTABLY_FILE_ENDPOINT` in `.env` — set this to your own worker
-///   2. `--dart-define=NOTABLY_FILE_ENDPOINT=...`
+///   2. `--dart-define=NOTABLY_FILE_ENDPOINT=...` / EnvConfig
 ///   3. the default below
 ///
 /// Every worker lives on its own account subdomain, so the default only works
@@ -86,17 +84,18 @@ String _trimEndpoint(String raw) {
   final value = raw.trim();
   return value.endsWith('/') ? value.substring(0, value.length - 1) : value;
 }
-=======
-/// Set in `.env` as NOTABLY_FILE_ENDPOINT, synced via `scripts/sync-env.sh`.
-/// Empty disables file sync; notes still sync via Firestore.
-const String kFileEndpoint = EnvConfig.fileEndpoint;
->>>>>>> Stashed changes
 
 /// Uploads/downloads source PDFs and images, or null when signed out.
 final fileSyncProvider = Provider<FileSync?>((ref) {
   final user = ref.watch(authStateProvider).asData?.value;
   if (user == null) return null;
-  return FileSync(db: ref.watch(databaseProvider), endpoint: kFileEndpoint);
+  final auth = ref.watch(authRepositoryProvider);
+  return FileSync(
+    db: ref.watch(databaseProvider),
+    endpoint: kFileEndpoint,
+    idToken: ({bool forceRefresh = false}) async =>
+        auth?.idToken(forceRefresh: forceRefresh),
+  );
 });
 
 /// Documents whose source PDF/image this device still has to upload to R2.
@@ -153,16 +152,56 @@ final missingLocalFileDocumentsProvider =
     return Stream.value(const <String, String>{});
   }
   final db = ref.watch(databaseProvider);
-  final pagesStream = (db.select(db.notePages)
-        ..where((p) => p.deletedAt.isNull()))
-      .watch();
+
+  // Drift invalidates by table, so every committed stroke re-runs these — a
+  // stroke touches its page row for sync. Both triggers are reduced to a
+  // signature and de-duplicated so the recompute below (which stats a file per
+  // document) only runs when the page→asset mapping or an asset really moved.
+  final pagesStream = db
+      .customSelect(
+        'SELECT document_id, COALESCE(pdf_asset_id, bg_asset_id) AS asset_id '
+        'FROM note_pages '
+        'WHERE deleted_at IS NULL '
+        'AND (pdf_asset_id IS NOT NULL OR bg_asset_id IS NOT NULL) '
+        'GROUP BY document_id ORDER BY document_id',
+        readsFrom: {db.notePages},
+      )
+      .watch()
+      .map((rows) => rows
+          .map((r) =>
+              '${r.read<String>('document_id')}:${r.read<String>('asset_id')}')
+          .join(','))
+      .distinct();
+
   final assetsStream = (db.select(db.assets)
         ..where((a) => a.deletedAt.isNull()))
-      .watch();
+      .watch()
+      .map((assets) => assets
+          .map((a) => '${a.id}:${a.remoteKey ?? ''}:${a.localPath ?? ''}:'
+              '${a.data?.isNotEmpty ?? false}')
+          .join(','))
+      .distinct();
 
   return Stream.multi((controller) {
+    var running = false;
+    var again = false;
+
     Future<void> emit() async {
-      controller.add(await _missingLocalFileDocuments(db));
+      if (running) {
+        again = true;
+        return;
+      }
+      running = true;
+      try {
+        do {
+          again = false;
+          final value = await _missingLocalFileDocuments(db);
+          if (controller.isClosed) return;
+          controller.add(value);
+        } while (again);
+      } finally {
+        running = false;
+      }
     }
 
     unawaited(emit());
@@ -175,19 +214,35 @@ final missingLocalFileDocumentsProvider =
   });
 });
 
-Future<Map<String, String>> _missingLocalFileDocuments(AppDatabase db) async {
-  final pages = await (db.select(db.notePages)
-        ..where((p) => p.deletedAt.isNull()))
+/// One `documentId → assetId` pair per document, taken from its lowest-indexed
+/// backed page.
+///
+/// Done in SQL rather than by walking every page row: this runs whenever the
+/// pages table changes, and a library holding a few thousand-page PDFs would
+/// otherwise decode every row of every document each time. SQLite defines the
+/// bare columns of a `min()` aggregate as coming from the matching row.
+Future<Map<String, String>> _assetIdByDocument(AppDatabase db) async {
+  final rows = await db
+      .customSelect(
+        'SELECT document_id, '
+        'COALESCE(pdf_asset_id, bg_asset_id) AS asset_id, '
+        'MIN(page_index) AS page_index '
+        'FROM note_pages '
+        'WHERE deleted_at IS NULL '
+        'AND (pdf_asset_id IS NOT NULL OR bg_asset_id IS NOT NULL) '
+        'GROUP BY document_id',
+        readsFrom: {db.notePages},
+      )
       .get();
-  if (pages.isEmpty) return const <String, String>{};
+  return {
+    for (final row in rows)
+      row.read<String>('document_id'): row.read<String>('asset_id'),
+  };
+}
 
-  final assetIdByDocument = <String, String>{};
-  for (final page in pages) {
-    final assetId = page.pdfAssetId ?? page.bgAssetId;
-    if (assetId != null) {
-      assetIdByDocument.putIfAbsent(page.documentId, () => assetId);
-    }
-  }
+Future<Map<String, String>> _missingLocalFileDocuments(AppDatabase db) async {
+  final assetIdByDocument = await _assetIdByDocument(db);
+  if (assetIdByDocument.isEmpty) return const <String, String>{};
 
   final missing = <String, String>{};
   for (final entry in assetIdByDocument.entries) {
@@ -202,12 +257,19 @@ Future<Map<String, String>> _missingLocalFileDocuments(AppDatabase db) async {
       localPath: asset.localPath,
       hasInlineData: asset.data != null && asset.data!.isNotEmpty,
     );
-    if (!hasBytes) missing[entry.key] = entry.value;
+    if (hasBytes) continue;
+    final recovered = await findStoredAssetPath(entry.value);
+    if (recovered != null) {
+      await (db.update(db.assets)..where((a) => a.id.equals(entry.value)))
+          .write(AssetsCompanion(localPath: Value(recovered)));
+      continue;
+    }
+    missing[entry.key] = entry.value;
   }
   return missing;
 }
 
-/// The sync engine, or null when signed out / Firebase unavailable.
+/// The sync engine, or null when signed out / Supabase unavailable.
 ///
 /// Rebuilt whenever the signed-in user changes, so signing out tears the
 /// engine down and signing in starts a fresh one for that account.
@@ -230,7 +292,7 @@ final syncEngineProvider = Provider<SyncEngine?>((ref) {
   var disposed = false;
   final engine = SyncEngine(
     db: ref.watch(databaseProvider),
-    remote: FirestoreStore(uid: user.uid),
+    remote: SupabaseStore(uid: user.uid),
     uid: user.uid,
     files: ref.watch(fileSyncProvider),
     isOnline: isOnlineNow,

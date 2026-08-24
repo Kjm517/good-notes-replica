@@ -1,13 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/firebase_bootstrap.dart';
 import '../../app/providers.dart';
+import '../../app/supabase_bootstrap.dart';
 import 'data/auth_repository.dart';
 
-/// Null when Firebase isn't configured, so the UI can say so instead of
+/// Null when Supabase isn't configured, so the UI can say so instead of
 /// throwing when someone taps "Sign in".
 final authRepositoryProvider = Provider<AuthRepository?>((ref) {
-  if (!firebaseReady) return null;
+  if (!supabaseReady) return null;
   return AuthRepository();
 });
 
@@ -27,8 +27,7 @@ final isSignedInProvider = Provider<bool>((ref) {
 /// any provider exists, to end a session the user asked not to keep.
 const keepSignedInKey = 'keep_signed_in';
 
-/// Whether a session should outlive closing the app. Defaults to on, which is
-/// what the platform SDKs do anyway.
+/// Whether a session should outlive closing the app. Defaults to on.
 final keepSignedInProvider =
     NotifierProvider<KeepSignedInController, bool>(KeepSignedInController.new);
 

@@ -21,21 +21,36 @@ class RemoteRecord {
 }
 
 /// One page's ink, as it travels back from the cloud.
+///
+/// Small pages keep [bytes] inline; large pages set [remoteKey] (R2) and leave
+/// [bytes] null/empty — the engine downloads the blob before applying.
 class RemoteInk {
   const RemoteInk({
     required this.pageId,
-    required this.bytes,
     required this.updatedAt,
+    this.bytes,
+    this.remoteKey,
   });
 
   final String pageId;
-  final Uint8List bytes;
+  final Uint8List? bytes;
+  final String? remoteKey;
   final DateTime updatedAt;
+
+  bool get usesRemoteFile =>
+      remoteKey != null && remoteKey!.isNotEmpty;
 }
 
 /// Which collection a record belongs to. Kept small and explicit so the
 /// Firestore paths stay in one place.
-enum RemoteCollection { documents, pages, elements, assets, quizzes }
+enum RemoteCollection {
+  documents,
+  pages,
+  elements,
+  assets,
+  quizzes,
+  userPrefs,
+}
 
 /// The cloud side of sync. Implemented by Firestore in production and by a
 /// fake in tests.
@@ -72,9 +87,24 @@ abstract class RemoteStore {
     int limit = 50,
   });
 
-  /// Returns false when the blob was not stored (e.g. over Firestore's size
-  /// cap) so the engine can leave the local strokes dirty and retry.
-  Future<bool> putInk(String pageId, Uint8List bytes, DateTime updatedAt);
+  /// Stores page ink metadata. Pass [bytes] for inline storage, or
+  /// [remoteKey] after uploading a large blob to R2. Returns false when the
+  /// row could not be written so the engine leaves strokes dirty.
+  Future<bool> putInk(
+    String pageId,
+    DateTime updatedAt, {
+    Uint8List? bytes,
+    String? remoteKey,
+  });
+
+  /// Ink for a specific set of pages, regardless of when it changed.
+  ///
+  /// [fetchInkChanged] is bounded per run, so a device syncing a large
+  /// backlog can go idle before it reaches the notebook the user is about to
+  /// open. Opening a document asks for exactly its pages instead of hoping
+  /// the incremental cursor already covered them.
+  Future<List<RemoteInk>> fetchInkForPages(List<String> pageIds) async =>
+      const [];
 
   /// A single record by id, or null if it doesn't exist. Used to hydrate asset
   /// metadata when a pulled page points at a PDF that this device has never

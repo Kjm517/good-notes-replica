@@ -12,11 +12,18 @@ export PATH="$ROOT/scripts/ios-bin:$PATH"
 export COPYFILE_DISABLE=1
 
 # Build artifacts on Desktop fail codesign; keep them on /tmp instead.
+# /tmp is wiped on reboot, so always recreate the target even if the symlink
+# already exists — otherwise rsync fails with "mkpath: File exists".
 BUILD_LINK="$ROOT/build"
-if [[ ! -L "$BUILD_LINK" ]]; then
+BUILD_TARGET="/tmp/notably-ios-build"
+mkdir -p "$BUILD_TARGET"
+if [[ -L "$BUILD_LINK" ]]; then
+  :
+elif [[ -e "$BUILD_LINK" ]]; then
   rm -rf "$BUILD_LINK"
-  mkdir -p /tmp/notably-ios-build
-  ln -s /tmp/notably-ios-build "$BUILD_LINK"
+  ln -s "$BUILD_TARGET" "$BUILD_LINK"
+else
+  ln -s "$BUILD_TARGET" "$BUILD_LINK"
 fi
 
 # .env → .dart_defines.json for --dart-define-from-file

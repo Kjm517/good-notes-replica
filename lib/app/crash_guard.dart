@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'url_strategy.dart';
+
 /// Boots the app with every error funnel wired up first.
 ///
 /// A release build has no console and no red screen. An exception thrown out of
@@ -24,6 +26,7 @@ Future<void> runGuarded(Future<Widget> Function() bootstrap) async {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      configureWebUrlStrategy();
 
       FlutterError.onError = (details) {
         FlutterError.presentError(details);

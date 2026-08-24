@@ -45,6 +45,9 @@ Future<CopiedAsset> copyAssetFromFile(
 Future<CopiedAsset> probeFile(String sourcePath) =>
     throw UnsupportedError('Asset files are not available on web');
 
+Future<String> plannedAssetPath(String id, {String extension = 'bin'}) =>
+    throw UnsupportedError('Asset files are not available on web');
+
 Future<bool> assetExists({
   String? localPath,
   bool hasInlineData = false,
@@ -54,3 +57,5 @@ Future<Uint8List?> readAsset({String? localPath, String? base64}) async =>
     base64 == null ? null : base64Decode(base64);
 
 Future<void> deleteAsset(String? localPath) async {}
+
+Future<String?> findStoredAssetPath(String id) async => null;

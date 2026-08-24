@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../../app/providers.dart';
 import '../../../core/sync/sync_providers.dart';
 import '../../../core/sync/sync_state.dart';
+import '../../../core/sync/user_prefs_repository.dart';
 import '../../../core/db/database.dart';
 import '../../../core/ink/ink_stroke.dart';
 import '../../../core/models/enums.dart';
@@ -30,7 +31,7 @@ class _Edit {
 /// Stateful editor for a single document. Holds strokes for the pages loaded
 /// so far (pages load lazily as they scroll into view), persists every edit,
 /// and keeps a document-wide undo/redo history.
-class EditorController extends FamilyNotifier<EditorState, String> {
+class EditorController extends AutoDisposeFamilyNotifier<EditorState, String> {
   late final PageRepository _pages;
   late final StrokeRepository _strokes;
   late final Uuid _uuid;
@@ -39,6 +40,15 @@ class EditorController extends FamilyNotifier<EditorState, String> {
   final List<_Edit> _redo = [];
   final Map<String, int> _seqByPage = {};
   final Set<String> _loading = {};
+
+  /// Pages whose strokes are in memory, least-recently-touched first.
+  ///
+  /// Ink is loaded per page as pages scroll into view and used to be kept
+  /// forever: scrolling a 4000-page PDF end to end held every stroke of the
+  /// document in RAM, and each load re-copied a map that had grown to match.
+  /// Evicted pages reload from SQLite the moment they are needed again.
+  final List<String> _lru = [];
+  static const int _maxLoadedPages = 32;
 
   @override
   EditorState build(String documentId) {
@@ -49,6 +59,7 @@ class EditorController extends FamilyNotifier<EditorState, String> {
       if (previous?.phase == SyncPhase.syncing &&
           next.phase != SyncPhase.syncing) {
         unawaited(_reloadStrokesFromDb());
+        unawaited(_reloadToolSettingsFromPrefs());
       }
     });
     _bootstrap(documentId);
@@ -59,15 +70,40 @@ class EditorController extends FamilyNotifier<EditorState, String> {
   }
 
   Future<void> _bootstrap(String documentId) async {
+    final prefs =
+        await UserPrefsRepository(ref.read(databaseProvider)).load();
     final pages = await _pages.getPages(documentId);
-    state = state.copyWith(pages: pages, currentIndex: 0, loading: false);
+    state = state.copyWith(
+      pages: pages,
+      currentIndex: 0,
+      loading: false,
+      toolSettings: prefs.resolvedToolSettings(),
+    );
     if (pages.isNotEmpty) await ensurePageLoaded(pages.first.id);
   }
 
-  /// Loads a page's strokes if they aren't in memory yet. Safe to call often
-  /// (e.g. as pages scroll into view).
-  Future<void> ensurePageLoaded(String pageId) async {
-    if (state.strokesByPage.containsKey(pageId) || _loading.contains(pageId)) {
+  Future<void> _reloadToolSettingsFromPrefs() async {
+    final prefs =
+        await UserPrefsRepository(ref.read(databaseProvider)).load();
+    state = state.copyWith(toolSettings: prefs.resolvedToolSettings());
+  }
+
+  Future<void> _persistToolSettings() async {
+    final repo = UserPrefsRepository(ref.read(databaseProvider));
+    final current = await repo.load();
+    await repo.save(
+      current.copyWith(toolSettings: state.toolSettings),
+    );
+    ref.read(syncEngineProvider)?.scheduleSync();
+  }
+
+  /// Loads a page's strokes from SQLite. Safe to call often (e.g. as pages
+  /// scroll into view). Pass [force] after sync so a stale empty cache cannot
+  /// hide drawings that landed (or returned) in the database.
+  Future<void> ensurePageLoaded(String pageId, {bool force = false}) async {
+    if (_loading.contains(pageId)) return;
+    if (!force && state.strokesByPage.containsKey(pageId)) {
+      _touch(pageId);
       return;
     }
     _loading.add(pageId);
@@ -75,28 +111,56 @@ class EditorController extends FamilyNotifier<EditorState, String> {
       final strokes = await _strokes.getStrokes(pageId);
       _seqByPage[pageId] =
           strokes.fold<int>(0, (m, s) => s.seq > m ? s.seq : m);
-      state = state.copyWith(
-        strokesByPage: {...state.strokesByPage, pageId: strokes},
-      );
+      final next = {...state.strokesByPage, pageId: strokes};
+      _touch(pageId);
+      for (final evicted in _pagesToEvict()) {
+        next.remove(evicted);
+        _lru.remove(evicted);
+      }
+      state = state.copyWith(strokesByPage: next);
     } finally {
       _loading.remove(pageId);
     }
+  }
+
+  void _touch(String pageId) {
+    _lru.remove(pageId);
+    _lru.add(pageId);
+  }
+
+  /// Loaded pages past [_maxLoadedPages] that nothing still needs.
+  ///
+  /// Undo/redo entries are skipped: those edits are replayed against the
+  /// in-memory strokes, so dropping a page they name would leave the page
+  /// holding only the replayed strokes.
+  List<String> _pagesToEvict() {
+    if (_lru.length <= _maxLoadedPages) return const [];
+    final pinned = {
+      if (state.currentPageId != null) state.currentPageId!,
+      for (final edit in _undo) edit.pageId,
+      for (final edit in _redo) edit.pageId,
+    };
+    final drop = <String>[];
+    for (final pageId in _lru) {
+      if (_lru.length - drop.length <= _maxLoadedPages) break;
+      if (pinned.contains(pageId) || _loading.contains(pageId)) continue;
+      drop.add(pageId);
+    }
+    return drop;
   }
 
   /// Sync writes strokes into SQLite; the canvas paints from this in-memory
   /// map, which is filled once per page. Reload after a pull so ink that
   /// arrived while the editor was open actually shows up.
   Future<void> _reloadStrokesFromDb() async {
-    final ids = state.strokesByPage.keys.toList();
+    final ids = {
+      ...state.strokesByPage.keys,
+      if (state.currentPageId != null) state.currentPageId!,
+    };
     if (ids.isEmpty) return;
-    final next = Map<String, List<InkStroke>>.from(state.strokesByPage);
     for (final pageId in ids) {
-      final strokes = await _strokes.getStrokes(pageId);
-      _seqByPage[pageId] =
-          strokes.fold<int>(0, (m, s) => s.seq > m ? s.seq : m);
-      next[pageId] = strokes;
+      await ensurePageLoaded(pageId, force: true);
     }
-    state = state.copyWith(strokesByPage: next);
   }
 
   /// Called when the pages list changes (add/delete/reorder).
@@ -107,15 +171,23 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     final idx = pages.isEmpty
         ? 0
         : state.currentIndex.clamp(0, pages.length - 1);
-    state = state.copyWith(
-      pages: mergeWatchedPages(
-        local: state.pages,
-        incoming: pages,
-        previewMargins: state.previewMargins,
-        previewPageId: state.previewPageId,
-      ),
-      currentIndex: idx,
+    final merged = mergeWatchedPages(
+      local: state.pages,
+      incoming: pages,
+      previewMargins: state.previewMargins,
+      previewPageId: state.previewPageId,
     );
+    // A stroke write touches the page row for sync, which re-emits this whole
+    // list unchanged. Keep the old list so the canvas's layout cache — keyed
+    // on list identity — survives; on a long PDF that is thousands of row
+    // heights recomputed per stroke.
+    if (pagesRenderEqual(state.pages, merged)) {
+      if (idx != state.currentIndex) {
+        state = state.copyWith(currentIndex: idx);
+      }
+      return;
+    }
+    state = state.copyWith(pages: merged, currentIndex: idx);
   }
 
   /// Updates which page is considered "current" (drives page settings/margins).
@@ -151,6 +223,7 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     if (current == null) return;
     settings[state.tool] = current.copyWith(color: color);
     state = state.copyWith(toolSettings: settings);
+    unawaited(_persistToolSettings());
   }
 
   void setWidth(double width) {
@@ -159,6 +232,7 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     if (current == null) return;
     settings[state.tool] = current.copyWith(width: width);
     state = state.copyWith(toolSettings: settings);
+    unawaited(_persistToolSettings());
   }
 
   void setViewMode(PageViewMode mode) => state = state.copyWith(viewMode: mode);
@@ -169,6 +243,7 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     if (current == null) return;
     settings[state.tool] = current.copyWith(style: style);
     state = state.copyWith(toolSettings: settings);
+    unawaited(_persistToolSettings());
   }
 
   void setStrokeTip(StrokeTip tip) {
@@ -177,6 +252,7 @@ class EditorController extends FamilyNotifier<EditorState, String> {
     if (current == null) return;
     settings[state.tool] = current.copyWith(tip: tip);
     state = state.copyWith(toolSettings: settings);
+    unawaited(_persistToolSettings());
   }
 
   void setShapeOptions(ShapeOptions options) =>
@@ -247,6 +323,7 @@ class EditorController extends FamilyNotifier<EditorState, String> {
   }
 
   void _setStrokes(String pageId, List<InkStroke> strokes) {
+    _touch(pageId);
     state = state.copyWith(
       strokesByPage: {...state.strokesByPage, pageId: strokes},
     );

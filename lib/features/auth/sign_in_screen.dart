@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/design.dart';
-import '../../app/firebase_bootstrap.dart';
+import '../../app/supabase_bootstrap.dart';
 import '../../app/page_routes.dart';
+import '../settings/entitlements.dart';
 import 'data/auth_repository.dart';
 import 'providers.dart';
 
-/// Sign in or create an account. When Firebase is configured, signing in is
+/// Sign in or create an account. When Supabase is configured, signing in is
 /// required to enter the app — it also enables syncing your notes across
-/// devices. Without Firebase the app runs local-only and skips this gate
+/// devices. Without Supabase the app runs local-only and skips this gate
 /// entirely, so sign-in here is only a path to cross-device sync.
 class SignInScreen extends ConsumerStatefulWidget {
   const SignInScreen({super.key});
@@ -40,7 +42,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
   AuthRepository? get _auth => ref.read(authRepositoryProvider);
 
-  Future<void> _run(Future<void> Function(AuthRepository auth) action) async {
+  Future<void> _run(Future<AuthResult> Function(AuthRepository auth) action) async {
     final auth = _auth;
     if (auth == null) return;
     setState(() {
@@ -48,13 +50,18 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       _error = null;
     });
     try {
-      // Has to precede the sign-in call to govern the session it creates.
       await auth.applyPersistence(
         keepSignedIn: ref.read(keepSignedInProvider),
       );
-      await action(auth);
-      // On success the router's auth gate observes the resulting sign-in
-      // state and redirects to the home route — no manual navigation needed.
+      final result = await action(auth);
+      if (result.isNewUser) {
+        await ref
+            .read(entitlementServiceProvider)
+            .startRegistrationTrial(result.user.uid);
+      }
+      if (!mounted) return;
+      // Land on the library home after a successful sign-in / sign-up.
+      context.go('/');
     } on AuthFailure catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (e) {
@@ -88,20 +95,32 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     final email = await _ResetPasswordDialog.show(context, initial: _email.text);
     if (email == null || !mounted) return;
 
-    await _run((auth) async {
+    final auth = _auth;
+    if (auth == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
       await auth.sendPasswordReset(email);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Password reset link sent to $email.')),
         );
       }
-    });
+    } on AuthFailure catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final configured = firebaseReady;
+    final configured = supabaseReady;
 
     return Scaffold(
       backgroundColor: t.canvas,
@@ -664,7 +683,7 @@ class _ErrorBanner extends StatelessWidget {
   }
 }
 
-/// Shown when Firebase hasn't been wired up — the app is still fully usable,
+/// Shown when Supabase hasn't been wired up — the app is still fully usable,
 /// so this explains rather than blocks.
 class _NotConfiguredCard extends StatelessWidget {
   const _NotConfiguredCard();
@@ -696,15 +715,15 @@ class _NotConfiguredCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            firebaseError ??
-                'Firebase has not been configured for this app yet.',
+            supabaseError ??
+                'Supabase has not been configured for this app yet.',
             style: TextStyle(fontSize: 13, height: 1.5, color: t.textSecondary),
           ),
           const SizedBox(height: 8),
           Text(
-            'Your notes are safe on this device. Run `flutterfire configure` '
-            'to connect a Firebase project and accounts will become '
-            'available.',
+            'Your notes are safe on this device. Add SUPABASE_URL and '
+            'SUPABASE_ANON_KEY to .env (see .env.example), run '
+            'supabase/schema.sql, and accounts will become available.',
             style: TextStyle(fontSize: 12.5, height: 1.5, color: t.textMuted),
           ),
         ],

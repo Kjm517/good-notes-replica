@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../auth/providers.dart';
+import '../settings/entitlements.dart';
 import '../../core/db/database.dart';
 import 'data/asset_repository.dart';
 import 'data/import_service.dart';
@@ -20,7 +21,10 @@ final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {
 });
 
 final assetRepositoryProvider = Provider<AssetRepository>((ref) {
-  return AssetRepository(ref.watch(databaseProvider));
+  return AssetRepository(
+    ref.watch(databaseProvider),
+    storageQuotaBytes: ref.watch(storageQuotaBytesProvider),
+  );
 });
 
 final importServiceProvider = Provider<ImportService>((ref) {

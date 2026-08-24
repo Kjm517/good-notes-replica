@@ -9,14 +9,22 @@ import 'tables.dart';
 part 'database.g.dart';
 
 @DriftDatabase(
-  tables: [Documents, NotePages, Strokes, CanvasElements, Assets, QuizAttempts],
+  tables: [
+    Documents,
+    NotePages,
+    Strokes,
+    CanvasElements,
+    Assets,
+    UserPrefs,
+    QuizAttempts,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor])
       : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -134,6 +142,9 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(quizAttempts, quizAttempts.deletedAt);
             await m.addColumn(quizAttempts, quizAttempts.dirty);
             await m.addColumn(quizAttempts, quizAttempts.remoteUpdatedAt);
+          }
+          if (from < 16) {
+            await m.createTable(userPrefs);
           }
         },
         beforeOpen: (details) async {

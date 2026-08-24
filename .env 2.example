@@ -1,0 +1,14 @@
+# Copy to `.env` in the project root (same folder as pubspec.yaml).
+# Then run:  ./scripts/sync-env.sh
+# Or use VS Code launch configs (Android / iOS / Chrome) — they sync automatically.
+#
+# Flutter reads these at compile time via .dart_defines.json (gitignored).
+# Do not commit .env — it contains secrets.
+
+# Cloudflare Worker URL for syncing PDF/image files to R2 (optional).
+# Notes and annotations still sync via Firestore without this.
+NOTABLY_FILE_ENDPOINT=https://notably-files.notably.workers.dev
+
+# Google Gemini API key for AI-powered features (optional).
+# Get one at https://aistudio.google.com/apikey
+GEMINI_API_KEY=

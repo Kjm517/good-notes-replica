@@ -17,6 +17,11 @@ Future<Directory> _assetsDir() async {
   return dir;
 }
 
+Future<String> plannedAssetPath(String id, {String extension = 'bin'}) async {
+  final dir = await _assetsDir();
+  return p.join(dir.path, '$id.$extension');
+}
+
 Future<StoredAsset> writeAsset(
   String id,
   Uint8List bytes, {
@@ -106,4 +111,18 @@ Future<void> deleteAsset(String? localPath) async {
   if (localPath == null) return;
   final file = File(localPath);
   if (await file.exists()) await file.delete();
+}
+
+Future<String?> findStoredAssetPath(String id) async {
+  try {
+    final dir = await _assetsDir();
+    for (final ext in const ['pdf', 'img', 'bin', 'png', 'jpg', 'jpeg', 'webp']) {
+      final file = File(p.join(dir.path, '$id.$ext'));
+      if (await file.exists() && await file.length() > 0) return file.path;
+    }
+    return null;
+  } catch (_) {
+    // path_provider needs the Flutter binding; callers treat null as missing.
+    return null;
+  }
 }

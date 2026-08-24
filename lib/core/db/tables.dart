@@ -36,7 +36,7 @@ class Documents extends Table with SyncedTable {
 
   BoolColumn get starred => boolean().withDefault(const Constant(false))();
 
-  /// Firebase uid of the account this belongs to.
+  /// Supabase uid of the account this belongs to.
   ///
   /// Null means "created on this device while signed out" — those stay
   /// visible to everyone and are claimed by the first account that signs in.
@@ -215,6 +215,20 @@ class Assets extends Table with SyncedTable {
   TextColumn get remoteKey => text().nullable()();
   DateTimeColumn get createdAt =>
       dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Account-level preferences that follow the signed-in user across devices.
+///
+/// One row per device database (`id` is always `'me'`). Payload is JSON:
+/// custom sticker catalog + pen/tool presets. Synced via Supabase `user_prefs`.
+class UserPrefs extends Table with SyncedTable {
+  TextColumn get id => text()();
+
+  /// JSON object — see AccountPrefs in core/sync/account_prefs.dart.
+  TextColumn get payload => text().withDefault(const Constant('{}'))();
 
   @override
   Set<Column> get primaryKey => {id};

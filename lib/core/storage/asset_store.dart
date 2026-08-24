@@ -34,6 +34,11 @@ class CopiedAsset {
 /// True when this platform can write asset files to disk.
 bool get supportsFileStorage => impl.supportsFileStorage;
 
+/// Destination path for a newly stored asset — used by background downloads
+/// that write straight to disk instead of streaming through Dart.
+Future<String> plannedAssetPath(String id, {String extension = 'bin'}) =>
+    impl.plannedAssetPath(id, extension: extension);
+
 /// Largest asset worth pulling into a single allocation.
 ///
 /// Android caps a process well below the size of a scanned textbook — a mid
@@ -93,3 +98,9 @@ Future<Uint8List?> readAsset({String? localPath, String? base64}) =>
 
 /// Deletes the on-disk file for an asset, if any.
 Future<void> deleteAsset(String? localPath) => impl.deleteAsset(localPath);
+
+/// Path of a previously downloaded file for [id], if it is still on disk.
+///
+/// Used when the SQLite row lost [localPath] (a metadata upsert, a reinstall
+/// that kept the files directory) so the next open does not hit the network.
+Future<String?> findStoredAssetPath(String id) => impl.findStoredAssetPath(id);

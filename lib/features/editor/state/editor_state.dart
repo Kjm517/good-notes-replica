@@ -180,6 +180,38 @@ List<NotePage> mergeWatchedPages({
   ];
 }
 
+/// True when two page snapshots differ only in sync bookkeeping.
+///
+/// Every committed stroke calls `touchPageForSync`, which bumps `updatedAt` /
+/// `dirty` on the page row. Drift invalidates by table, so that write re-emits
+/// the whole page list. Nothing on screen has changed, and on a 4000-page PDF
+/// rebuilding the list would throw away the canvas's layout cache and re-run
+/// every offset — so the controller keeps the old list (and its identity)
+/// whenever this returns true.
+bool pagesRenderEqual(List<NotePage> a, List<NotePage> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (!_pageRenderEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+bool _pageRenderEqual(NotePage a, NotePage b) =>
+    a.id == b.id &&
+    a.pageIndex == b.pageIndex &&
+    a.template == b.template &&
+    a.paperColor == b.paperColor &&
+    a.marginSpec == b.marginSpec &&
+    a.pdfAssetId == b.pdfAssetId &&
+    a.pdfPageIndex == b.pdfPageIndex &&
+    a.bgAssetId == b.bgAssetId &&
+    a.pageW == b.pageW &&
+    a.pageH == b.pageH &&
+    a.bookmarkTitle == b.bookmarkTitle &&
+    a.searchText == b.searchText &&
+    a.deletedAt == b.deletedAt;
+
 NotePage _mergeWatchedPage({
   required NotePage? local,
   required NotePage incoming,

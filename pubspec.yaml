@@ -38,7 +38,9 @@ dependencies:
   go_router: ^17.3.0
   drift: ^2.34.3
   drift_flutter: ^0.3.1
-  sqlite3_flutter_libs: ^0.6.0+eol
+  # sqlite3 3.x ships native libs via Dart hooks; do not use
+  # sqlite3_flutter_libs (0.6+eol is empty and leaves Android without libsqlite3.so).
+  sqlite3: ^3.5.0
   path_provider: ^2.1.6
   path: ^1.9.1
   perfect_freehand: ^2.5.2+1
@@ -46,28 +48,25 @@ dependencies:
   collection: ^1.19.1
   google_fonts: ^8.2.0
   shared_preferences: ^2.5.5
+  shared_preferences_web: ^2.4.3
   intl: ^0.20.3
   file_picker: ^11.0.3
   pdfx: ^2.9.2
   pdf: ^3.12.0
   printing: ^5.14.3
   crypto: ^3.0.7
-  firebase_core: ^4.13.0
-  firebase_auth: ^6.5.7
-  cloud_firestore: ^6.8.0
-  google_sign_in: ^7.2.0
+  supabase_flutter: ^2.9.1
   http: ^1.6.0
   syncfusion_flutter_pdf: ^33.2.13
-<<<<<<< Updated upstream
   image_picker: ^1.2.3
   google_generative_ai: ^0.4.6
   flutter_dotenv: ^6.0.1
   connectivity_plus: ^7.3.1
   pdfrx: ^2.4.7
   url_launcher: ^6.3.2
-=======
-  share_plus: ^12.0.0
->>>>>>> Stashed changes
+  purchases_flutter: ^10.9.1
+  purchases_ui_flutter: ^10.9.1
+  share_plus: ^12.0.2
 
 dev_dependencies:
   flutter_test:
@@ -81,12 +80,37 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   drift_dev: ^2.34.0
   build_runner: ^2.15.1
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/branding/notably_logo.png
+  adaptive_icon_background: "#5257D4"
+  adaptive_icon_foreground: assets/branding/notably_logo.png
+
+flutter_native_splash:
+  color: "#EEF0F3"
+  color_dark: "#0F1119"
+  image: assets/branding/notably_logo.png
+  android_12:
+    color: "#EEF0F3"
+    color_dark: "#0F1119"
+    image: assets/branding/notably_logo.png
+  android: true
+  ios: true
+  web: false
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
+  config:
+    # Xcode 16/26 crashes resolving plugin SPM graphs
+    # (insertObjects:atIndexes count mismatch). CocoaPods is stable here.
+    enable-swift-package-manager: false
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
@@ -96,6 +120,7 @@ flutter:
   assets:
     - .env
     - assets/quiz/stop_words.txt
+    - assets/branding/notably_logo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

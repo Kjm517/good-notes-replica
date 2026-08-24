@@ -13,6 +13,9 @@ import '../../../core/db/database.dart';
 import '../../../core/models/outline_entry.dart';
 import '../../../core/network/network_status.dart';
 import '../../library/providers.dart';
+import '../../settings/entitlements.dart';
+import '../../settings/premium_plan_sheet.dart';
+import '../../settings/quiz_upgrade_sheet.dart';
 import '../pages/page_background_service.dart';
 import '../providers.dart';
 import 'quiz_align.dart';
@@ -23,6 +26,9 @@ import 'quiz_models.dart';
 import 'quiz_queue.dart';
 import 'quiz_source_locator.dart';
 import 'quiz_source_preview.dart';
+
+bool _quizIsTablet(BuildContext context) =>
+    MediaQuery.sizeOf(context).shortestSide >= AppBreakpoints.tabletShortest;
 
 /// Full-screen quiz: setup → generate from the opened file → take → score.
 ///
@@ -48,8 +54,15 @@ class QuizFlow extends ConsumerStatefulWidget {
     required String title,
     required int pageCount,
     void Function(int pageIndex)? onJumpToPage,
-  }) {
-    return Navigator.of(context).push(
+  }) async {
+    final container = ProviderScope.containerOf(context);
+    final ent = await container.read(entitlementProvider.future);
+    if (!context.mounted) return;
+    if (!ent.canGenerateQuiz) {
+      await _promptQuizUpgrade(context, ent);
+      return;
+    }
+    await Navigator.of(context).push(
       notablyRoute<void>(
         fullscreenDialog: true,
         builder: (_) => QuizFlow(
@@ -60,6 +73,20 @@ class QuizFlow extends ConsumerStatefulWidget {
         ),
       ),
     );
+  }
+
+  static Future<void> _promptQuizUpgrade(
+    BuildContext context,
+    UserEntitlement ent,
+  ) async {
+    final subtitle = ent.isTrialActive
+        ? 'You\'ve used all ${ent.quizLimit} trial quizzes. Upgrade for '
+            'unlimited AI quizzes from this document.'
+        : ent.trialExpired
+            ? 'Your free trial has ended. Upgrade to Premium for unlimited '
+                'AI quizzes from your PDFs.'
+            : null;
+    await QuizUpgradeSheet.show(context, subtitle: subtitle);
   }
 
   @override
@@ -152,6 +179,12 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   }
 
   Future<void> _generate({bool fromQueue = false}) async {
+    final ent = await ref.read(entitlementProvider.future);
+    if (!ent.canGenerateQuiz) {
+      if (!mounted) return;
+      await _showQuizLimitReached(ent);
+      return;
+    }
     final online = fromQueue || await isOnlineNow();
     if (!online) {
       await _queueCurrent();
@@ -296,6 +329,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     } catch (e) {
       debugPrint('Quiz history save failed: $e');
     }
+    ref.read(entitlementServiceProvider).refresh();
     if (!mounted) return;
     setState(() {
       _questions = questions;
@@ -711,7 +745,17 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     );
   }
 
+  Future<void> _showQuizLimitReached(UserEntitlement ent) async {
+    await QuizFlow._promptQuizUpgrade(context, ent);
+  }
+
   Future<void> _openHistory() async {
+    final ent = await ref.read(entitlementProvider.future);
+    if (!mounted) return;
+    if (!ent.canAccessQuizHistory) {
+      await PremiumPlanSheet.show(context);
+      return;
+    }
     final action = await QuizHistoryPage.open(
       context,
       documentId: widget.documentId,
@@ -789,6 +833,9 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
             ?.value
             .isNotEmpty ??
         false;
+    final entitlement = ref.watch(entitlementProvider);
+    final canAccessHistory =
+        entitlement.asData?.value.canAccessQuizHistory ?? false;
     ref.listen<AsyncValue<bool>>(onlineProvider, (prev, next) {
       final wasOnline = prev?.asData?.value;
       final isOnline = next.asData?.value ?? false;
@@ -888,6 +935,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
               online: online,
               queued: queued != null,
               hasHistory: hasHistory,
+              historyEnabled: canAccessHistory,
               onChanged: (c) => setState(() => _config = c),
               onGenerate: _generate,
               onPickSource: _pickSource,
@@ -939,10 +987,16 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   }
 }
 
-class _PremiumChip extends StatelessWidget {
+class _PremiumChip extends ConsumerWidget {
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
+    final ent = ref.watch(entitlementProvider).asData?.value;
+    final label = switch (ent?.tier) {
+      EntitlementTier.trial => 'TRIAL',
+      EntitlementTier.premium => 'PREMIUM',
+      _ => 'FREE',
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
@@ -955,7 +1009,7 @@ class _PremiumChip extends StatelessWidget {
           Icon(Icons.workspace_premium_rounded, size: 14, color: t.premiumText),
           const SizedBox(width: 4),
           Text(
-            'PREMIUM',
+            label,
             style: AppTokens.sectionLabel(t.premiumText).copyWith(fontSize: 10),
           ),
         ],
@@ -972,6 +1026,7 @@ class _SetupView extends StatelessWidget {
     required this.online,
     required this.queued,
     required this.hasHistory,
+    required this.historyEnabled,
     required this.onChanged,
     required this.onGenerate,
     required this.onPickSource,
@@ -985,6 +1040,7 @@ class _SetupView extends StatelessWidget {
   final bool online;
   final bool queued;
   final bool hasHistory;
+  final bool historyEnabled;
   final ValueChanged<QuizConfig> onChanged;
   final VoidCallback onGenerate;
   final VoidCallback onPickSource;
@@ -1041,9 +1097,12 @@ class _SetupView extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Quiz history',
-                  onPressed: onOpenHistory,
-                  icon: Icon(Icons.history_rounded, color: t.premiumText),
+                  tooltip: historyEnabled ? 'Quiz history' : 'Quiz history (Premium)',
+                  onPressed: historyEnabled ? onOpenHistory : null,
+                  icon: Icon(
+                    Icons.history_rounded,
+                    color: historyEnabled ? t.premiumText : t.textFaint,
+                  ),
                 ),
               ],
             ),
@@ -1060,6 +1119,7 @@ class _SetupView extends StatelessWidget {
               online: online,
               queued: queued,
               hasHistory: hasHistory,
+              historyEnabled: historyEnabled,
               onOpenHistory: onOpenHistory,
               onCancelQueue: onCancelQueue,
             ),
@@ -1182,6 +1242,7 @@ class _OfflineQuizBanner extends StatelessWidget {
     required this.online,
     required this.queued,
     required this.hasHistory,
+    required this.historyEnabled,
     required this.onOpenHistory,
     required this.onCancelQueue,
   });
@@ -1189,6 +1250,7 @@ class _OfflineQuizBanner extends StatelessWidget {
   final bool online;
   final bool queued;
   final bool hasHistory;
+  final bool historyEnabled;
   final VoidCallback onOpenHistory;
   final VoidCallback onCancelQueue;
 
@@ -1265,7 +1327,7 @@ class _OfflineQuizBanner extends StatelessWidget {
                 ),
               ],
             ),
-            if (!online && hasHistory) ...[
+            if (!online && hasHistory && historyEnabled) ...[
               const SizedBox(height: 4),
               TextButton(
                 onPressed: onOpenHistory,
@@ -1533,15 +1595,16 @@ class _TakingView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final tablet = _quizIsTablet(context);
     final letters = const ['A', 'B', 'C', 'D', 'E'];
     final mm = timer.inMinutes.remainder(60).toString().padLeft(2, '0');
     final ss = timer.inSeconds.remainder(60).toString().padLeft(2, '0');
     return Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
+        constraints: BoxConstraints(maxWidth: tablet ? 860 : 720),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+          padding: EdgeInsets.fromLTRB(tablet ? 28 : 20, 12, tablet ? 28 : 20, 40),
           children: [
             Row(
               children: [
@@ -1552,6 +1615,7 @@ class _TakingView extends StatelessWidget {
                     QuizKind.shortAnswer => 'Short answer',
                   },
                   style: TextStyle(
+                    fontSize: tablet ? 16 : 14,
                     fontWeight: FontWeight.w600,
                     color: t.textSecondary,
                   ),
@@ -1568,24 +1632,34 @@ class _TakingView extends StatelessWidget {
                       if (question.location != null) ...[
                         Icon(
                           Icons.brush_rounded,
-                          size: 13,
+                          size: tablet ? 16 : 13,
                           color: t.premiumText,
                         ),
                         const SizedBox(width: 4),
                       ],
                       Text(
                         'from p.${question.pageIndex + 1}',
-                        style: AppTokens.mono(size: 12, color: t.premiumText),
+                        style: AppTokens.mono(
+                          size: tablet ? 14 : 12,
+                          color: t.premiumText,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 if (showTimer) ...[
-                  Icon(Icons.timer_outlined, size: 16, color: t.premiumText),
+                  Icon(
+                    Icons.timer_outlined,
+                    size: tablet ? 18 : 16,
+                    color: t.premiumText,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '$mm:$ss',
-                    style: AppTokens.mono(size: 13, color: t.premiumText),
+                    style: AppTokens.mono(
+                      size: tablet ? 15 : 13,
+                      color: t.premiumText,
+                    ),
                   ),
                 ],
               ],
@@ -1593,13 +1667,13 @@ class _TakingView extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               question.prompt,
-              style: const TextStyle(
-                fontSize: 18,
+              style: TextStyle(
+                fontSize: tablet ? 24 : 18,
                 height: 1.35,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 18),
+            SizedBox(height: tablet ? 22 : 18),
             if (question.choices.isNotEmpty)
               for (var i = 0; i < question.choices.length; i++)
                 _ChoiceTile(
@@ -1614,6 +1688,7 @@ class _TakingView extends StatelessWidget {
               TextField(
                 controller: shortAnswer,
                 enabled: !revealed,
+                style: TextStyle(fontSize: tablet ? 20 : 16),
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => onSubmitWritten(),
                 decoration: const InputDecoration(hintText: 'Type your answer'),
@@ -1631,7 +1706,7 @@ class _TakingView extends StatelessWidget {
             if (revealed) ...[
               const SizedBox(height: 14),
               Container(
-                padding: const EdgeInsets.all(14),
+                padding: EdgeInsets.all(tablet ? 18 : 14),
                 decoration: BoxDecoration(
                   color: (answer?.correct ?? false) ? t.premiumSoft : t.fill,
                   borderRadius: BorderRadius.circular(Radii.control),
@@ -1644,6 +1719,7 @@ class _TakingView extends StatelessWidget {
                           ? 'Correct — ${question.acceptedAnswer}'
                           : 'Answer — ${question.acceptedAnswer}',
                       style: TextStyle(
+                        fontSize: tablet ? 18 : 15,
                         fontWeight: FontWeight.w700,
                         color: (answer?.correct ?? false)
                             ? t.premiumText
@@ -1655,7 +1731,7 @@ class _TakingView extends StatelessWidget {
                       'Explanation',
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
-                        fontSize: 12,
+                        fontSize: tablet ? 14 : 12,
                         color: t.textMuted,
                       ),
                     ),
@@ -1665,6 +1741,7 @@ class _TakingView extends StatelessWidget {
                       fallbackPageIndex: question.pageIndex,
                       target: question.sourceTarget,
                       onOpenPage: onOpenPage,
+                      fontSize: tablet ? 17 : 15,
                     ),
                   ],
                 ),
@@ -1675,11 +1752,18 @@ class _TakingView extends StatelessWidget {
               children: [
                 Text(
                   '$answered answered · ${total - answered} remaining',
-                  style: AppTokens.mono(size: 11, color: t.textFaint),
+                  style: AppTokens.mono(
+                    size: tablet ? 13 : 11,
+                    color: t.textFaint,
+                  ),
                 ),
                 const Spacer(),
                 FilledButton.icon(
                   onPressed: revealed ? onNext : null,
+                  style: FilledButton.styleFrom(
+                    minimumSize: Size(0, tablet ? 52 : 40),
+                    textStyle: TextStyle(fontSize: tablet ? 16 : 14),
+                  ),
                   icon: Icon(
                     index == total - 1
                         ? Icons.flag_rounded
@@ -1718,6 +1802,8 @@ class _ChoiceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final tablet = _quizIsTablet(context);
+    final badge = tablet ? 36.0 : 28.0;
     Color border = t.lineStrong;
     Color fill = t.surface;
     if (revealed && correct) {
@@ -1731,7 +1817,7 @@ class _ChoiceTile extends StatelessWidget {
       fill = t.accentSoft;
     }
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: tablet ? 12 : 10),
       child: Material(
         color: fill,
         borderRadius: BorderRadius.circular(Radii.control),
@@ -1739,7 +1825,10 @@ class _ChoiceTile extends StatelessWidget {
           onTap: revealed ? null : onTap,
           borderRadius: BorderRadius.circular(Radii.control),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            padding: EdgeInsets.symmetric(
+              horizontal: tablet ? 16 : 12,
+              vertical: tablet ? 16 : 12,
+            ),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(Radii.control),
               border: Border.all(color: border),
@@ -1747,8 +1836,8 @@ class _ChoiceTile extends StatelessWidget {
             child: Row(
               children: [
                 Container(
-                  width: 28,
-                  height: 28,
+                  width: badge,
+                  height: badge,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
@@ -1756,15 +1845,28 @@ class _ChoiceTile extends StatelessWidget {
                   ),
                   child: Text(
                     letter,
-                    style: AppTokens.mono(size: 12, color: t.textSecondary),
+                    style: AppTokens.mono(
+                      size: tablet ? 15 : 12,
+                      color: t.textSecondary,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: tablet ? 14 : 12),
                 Expanded(
-                  child: Text(label, style: const TextStyle(fontSize: 15)),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: tablet ? 19 : 15,
+                      height: 1.35,
+                    ),
+                  ),
                 ),
                 if (revealed && correct)
-                  Icon(Icons.check_circle_rounded, color: t.premium),
+                  Icon(
+                    Icons.check_circle_rounded,
+                    color: t.premium,
+                    size: tablet ? 26 : 24,
+                  ),
               ],
             ),
           ),
@@ -1792,6 +1894,7 @@ class _ResultsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final tablet = _quizIsTablet(context);
     final correct = answers.values.where((a) => a.correct).length;
     final pct = questions.isEmpty
         ? 0
@@ -1799,19 +1902,25 @@ class _ResultsView extends StatelessWidget {
     return Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
+        constraints: BoxConstraints(maxWidth: tablet ? 860 : 720),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+          padding: EdgeInsets.fromLTRB(tablet ? 28 : 20, 24, tablet ? 28 : 20, 40),
           children: [
             Text(
               '$pct%',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 56, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                fontSize: tablet ? 64 : 56,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             Text(
               '$correct of ${questions.length} correct',
               textAlign: TextAlign.center,
-              style: AppTokens.mono(size: 14, color: t.textMuted),
+              style: AppTokens.mono(
+                size: tablet ? 16 : 14,
+                color: t.textMuted,
+              ),
             ),
             const SizedBox(height: 22),
             FilledButton(
@@ -1854,10 +1963,17 @@ class _ResultsView extends StatelessWidget {
                   questions[i].prompt.split('\n').last,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: tablet ? 17 : 15,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 subtitle: Text(
                   'See page ${questions[i].pageIndex + 1} · ${questions[i].acceptedAnswer}',
-                  style: TextStyle(color: t.premiumText),
+                  style: TextStyle(
+                    fontSize: tablet ? 15 : 13,
+                    color: t.premiumText,
+                  ),
                 ),
               ),
           ],

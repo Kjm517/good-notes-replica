@@ -2,12 +2,8 @@ import 'dart:ui' show Offset;
 import 'dart:ui' as ui;
 
 import 'package:drift/drift.dart';
-<<<<<<< Updated upstream
-import 'package:image_picker/image_picker.dart';
-=======
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
->>>>>>> Stashed changes
 import 'package:uuid/uuid.dart';
 
 import '../../../core/platform/local_file.dart';
@@ -50,15 +46,6 @@ class ElementRepository {
     required double maxWidth,
     Offset? at,
   }) async {
-<<<<<<< Updated upstream
-    final shot = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (shot == null) return null;
-    final bytes = Uint8List.fromList(await shot.readAsBytes());
-    return insertImage(
-      pageId: pageId,
-      bytes: bytes,
-      filename: shot.name,
-=======
     final result = await FilePicker.pickFiles(
       type: FileType.image,
       withData: kIsWeb,
@@ -82,7 +69,6 @@ class ElementRepository {
       pageId: pageId,
       bytes: Uint8List.fromList(bytes),
       filename: file.name,
->>>>>>> Stashed changes
       maxWidth: maxWidth,
       at: at,
     );

@@ -300,30 +300,53 @@ extension AppTokensContext on BuildContext {
   AppTokens get tokens => AppTokens.of(this);
 }
 
-/// The app's brand mark — a rounded accent tile with the draw glyph — shared
-/// by the launch splash and the sign-in hero so they always match.
+/// The app's brand mark — shared by the launch splash and the sign-in hero.
 class AppMark extends StatelessWidget {
-  const AppMark({super.key});
+  const AppMark({super.key, this.size = 66});
+
+  /// Logo width and height in logical pixels.
+  final double size;
+
+  static const _asset = 'assets/branding/notably_logo.png';
 
   @override
   Widget build(BuildContext context) {
-    final t = AppTokens.of(context);
+    return Image.asset(
+      _asset,
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      semanticLabel: 'Notably',
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) {
+        debugPrint('AppMark asset failed ($_asset): $error');
+        return _AppMarkFallback(size: size);
+      },
+    );
+  }
+}
+
+/// Shown when [AppMark] cannot read the PNG (stale web build, hot reload, etc.).
+class _AppMarkFallback extends StatelessWidget {
+  const _AppMarkFallback({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
-      width: 66,
-      height: 66,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        color: t.accent,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: t.accent.withValues(alpha: 0.35),
-            blurRadius: 30,
-            offset: const Offset(0, 14),
-            spreadRadius: -10,
-          ),
-        ],
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [t.accent, t.accent.withValues(alpha: 0.82)],
+        ),
+        borderRadius: BorderRadius.circular(size * 0.22),
       ),
-      child: const Icon(Icons.draw_rounded, size: 34, color: Colors.white),
+      child: Icon(Icons.draw_rounded, size: size * 0.52, color: Colors.white),
     );
   }
 }

@@ -1,14 +1,18 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:notably/core/db/database.dart';
+import 'package:notably/core/models/enums.dart';
+import 'package:notably/core/storage/storage_quota.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:notably/core/sync/file_sync.dart';
+import 'package:notably/core/sync/remote_store.dart';
+import 'package:notably/core/sync/sync_engine.dart';
 import 'package:notably/core/sync/sync_providers.dart';
 import 'package:notably/features/library/data/asset_repository.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -148,6 +152,78 @@ void main() {
     expect(kFileEndpoint, isEmpty);
   });
 
+  test('a stranded download is retried instead of only being counted',
+      () async {
+    // Regression for "4 files still downloading" that never moved.
+    //
+    // _ensureAsset only ran for records the incremental pull happened to
+    // return. Once those pages stopped changing nothing asked R2 again — but
+    // the pending count kept rescheduling a sync every ten seconds to
+    // re-count the same files. Here the cloud has nothing to hand back at
+    // all, so if the run does not fetch the file itself, it never arrives.
+    await db.into(db.documents).insert(DocumentsCompanion.insert(
+          id: 'doc-stranded',
+          type: DocumentType.pdf,
+          title: const Value('textbook'),
+          ownerUid: const Value('user-1'),
+          dirty: const Value(false),
+        ));
+    await db.into(db.assets).insert(AssetsCompanion.insert(
+          id: 'asset-stranded',
+          kind: 1,
+          path: const Value('textbook.pdf'),
+          remoteKey: const Value('sha/stranded.pdf'),
+          sizeBytes: const Value(4),
+          mime: const Value('application/pdf'),
+          dirty: const Value(false),
+        ));
+    await db.into(db.notePages).insert(NotePagesCompanion.insert(
+          id: 'page-stranded',
+          documentId: 'doc-stranded',
+          pageIndex: 0,
+          pdfAssetId: const Value('asset-stranded'),
+          dirty: const Value(false),
+        ));
+
+    var downloads = 0;
+    final client = MockClient((request) async {
+      if (request.method == 'GET' && request.url.path == '/file') {
+        expect(
+          request.url.queryParameters['key'],
+          'sha/stranded.pdf',
+        );
+        downloads++;
+        return http.Response.bytes(
+          const [1, 2, 3, 4],
+          200,
+          headers: {'content-length': '4'},
+        );
+      }
+      return http.Response('{}', 404);
+    });
+
+    final engine = SyncEngine(
+      db: db,
+      remote: _EmptyRemoteStore(),
+      uid: 'user-1',
+      files: FileSync(
+        db: db,
+        endpoint: 'https://files.test',
+        client: client,
+        idToken: () async => 'test-token',
+      ),
+    );
+    addTearDown(engine.dispose);
+
+    await engine.syncNow();
+
+    expect(downloads, 1, reason: 'the run must fetch, not just count');
+    final asset = await (db.select(db.assets)
+          ..where((a) => a.id.equals('asset-stranded')))
+        .getSingle();
+    expect(asset.localPath, isNotNull);
+  });
+
   test('replacing a PDF queues the new bytes for upload', () async {
     final path = await writeBigFile();
     final size = await File(path).length();
@@ -163,7 +239,8 @@ void main() {
 
     final replacement = File('${temp.path}/replacement.pdf')
       ..writeAsBytesSync(List<int>.filled(2048, 3));
-    await AssetRepository(db).replaceFromFile(
+    await AssetRepository(db, storageQuotaBytes: kFreeStorageQuotaBytes)
+        .replaceFromFile(
       id: 'asset-big',
       sourcePath: replacement.path,
       kind: 1,
@@ -178,4 +255,57 @@ void main() {
     expect(pending, hasLength(1));
     expect(pending.single.id, 'asset-big');
   });
+}
+
+/// A cloud with nothing in it, so the only way a file can reach this device is
+/// if the sync run goes and gets it.
+class _EmptyRemoteStore implements RemoteStore {
+  @override
+  Future<List<RemoteRecord>> fetchChanged(
+    RemoteCollection collection, {
+    DateTime? since,
+    String? parentId,
+  }) async =>
+      const [];
+
+  @override
+  Future<void> upsert(
+    RemoteCollection collection,
+    List<RemoteRecord> records, {
+    String? parentId,
+  }) async {}
+
+  @override
+  Future<Uint8List?> fetchInk(String pageId) async => null;
+
+  @override
+  Future<List<RemoteInk>> fetchInkChanged({
+    DateTime? since,
+    int limit = 50,
+  }) async =>
+      const [];
+
+  @override
+  Future<List<RemoteInk>> fetchInkForPages(List<String> pageIds) async =>
+      const [];
+
+  @override
+  Future<bool> putInk(
+    String pageId,
+    DateTime updatedAt, {
+    Uint8List? bytes,
+    String? remoteKey,
+  }) async =>
+      true;
+
+  @override
+  Future<RemoteRecord?> fetchById(
+    RemoteCollection collection,
+    String id, {
+    String? parentId,
+  }) async =>
+      null;
+
+  @override
+  Stream<void> watchChanges() => const Stream<void>.empty();
 }

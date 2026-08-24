@@ -22,7 +22,6 @@ class EditorPrepareOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final determinate = fraction > 0 && fraction < 1;
     return Material(
       color: t.canvas.withValues(alpha: 0.92),
       child: SafeArea(
@@ -42,16 +41,6 @@ class EditorPrepareOverlay extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          color: t.accent,
-                          value: determinate ? fraction : null,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
                       Text(
                         'Getting this document ready',
                         textAlign: TextAlign.center,
@@ -78,15 +67,7 @@ class EditorPrepareOverlay extends StatelessWidget {
                         ),
                       ],
                       const SizedBox(height: 20),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          minHeight: 6,
-                          value: determinate ? fraction.clamp(0.0, 1.0) : null,
-                          color: t.accent,
-                          backgroundColor: t.fill,
-                        ),
-                      ),
+                      _SmoothLinearProgress(fraction: fraction),
                       const SizedBox(height: 8),
                       TextButton(
                         onPressed: onClose,
@@ -116,5 +97,102 @@ class EditorPrepareOverlay extends StatelessWidget {
       buf.write(s[i]);
     }
     return buf.toString();
+  }
+}
+
+/// Eases the bar forward between discrete sync ticks.
+///
+/// Null / zero / backward readings are ignored so a staged sync cursor
+/// (or a determinate↔indeterminate swap) cannot snap the fill back.
+class _SmoothLinearProgress extends StatefulWidget {
+  const _SmoothLinearProgress({required this.fraction});
+
+  final double fraction;
+
+  @override
+  State<_SmoothLinearProgress> createState() => _SmoothLinearProgressState();
+}
+
+class _SmoothLinearProgressState extends State<_SmoothLinearProgress>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late Animation<double> _animation;
+  double _displayed = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayed = widget.fraction.clamp(0.0, 1.0);
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 640),
+    );
+    _animation = AlwaysStoppedAnimation(_displayed);
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _displayed = _animation.value;
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _SmoothLinearProgress oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _animateTo(widget.fraction.clamp(0.0, 1.0));
+  }
+
+  void _animateTo(double target) {
+    final from = _controller.isAnimating ? _animation.value : _displayed;
+    // Hold through gaps; never ease backward (kind/cursor swaps).
+    if (target <= 0 || target + 0.002 < from) return;
+    if ((target - from).abs() < 0.002) return;
+    _displayed = from;
+    _animation = Tween<double>(begin: from, end: target).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
+    _controller
+      ..duration = Duration(
+        milliseconds: (360 + 500 * (target - from).abs()).round().clamp(
+              360,
+              900,
+            ),
+      )
+      ..forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        height: 6,
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) {
+            final value =
+                (_controller.isAnimating ? _animation.value : _displayed)
+                    .clamp(0.0, 1.0);
+            return ColoredBox(
+              color: t.fill,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FractionallySizedBox(
+                  widthFactor: value,
+                  heightFactor: 1,
+                  child: ColoredBox(color: t.accent),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
   }
 }

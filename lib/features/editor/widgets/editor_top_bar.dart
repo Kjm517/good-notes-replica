@@ -10,6 +10,8 @@ import '../canvas/continuous_canvas.dart';
 import '../providers.dart';
 import '../state/tool_settings.dart';
 import '../../sync/sync_indicator.dart';
+import '../../settings/entitlements.dart';
+import '../../settings/premium_providers.dart';
 import 'color_picker_sheet.dart';
 import 'export_sheet.dart';
 import 'margins_sheet.dart';
@@ -53,11 +55,28 @@ enum EditorBarLayout {
     return EditorBarLayout.single;
   }
 
+  /// Chrome the editor should paint for [size].
+  ///
+  /// Portrait tablets (iPad / Android) use the same bottom tool dock + compact
+  /// title as iPhone so colour swatches, pen options, and the quiz upsell match
+  /// the phone experience. Landscape tablets keep the side rail.
+  static EditorBarLayout chromeForSize(Size size) {
+    final base = forSize(size);
+    if (base == EditorBarLayout.tabletRail || base == EditorBarLayout.single) {
+      return base;
+    }
+    final tabletPortrait = size.shortestSide >= AppBreakpoints.tabletShortest &&
+        size.height > size.width &&
+        size.width < AppBreakpoints.desktop;
+    if (tabletPortrait) return EditorBarLayout.phone;
+    return base;
+  }
+
   /// Tools rendered in the top bar (stacked / single).
   bool get showsTools =>
       this == EditorBarLayout.stacked || this == EditorBarLayout.single;
 
-  /// Tools in the bottom dock (phone).
+  /// Tools in the bottom dock (phone + portrait tablet chrome).
   bool get showsBottomDock => this == EditorBarLayout.phone;
 
   /// Tools in the permanent left rail (landscape tablet).
@@ -69,6 +88,10 @@ enum EditorBarLayout {
 // declared height. That keeps [EditorTopBar.preferredSize] exactly equal to
 // the sum of the row heights — no off-by-one overflow is possible.
 const double _kTitleRow = 56;
+
+/// iOS phone title row — matches section 09 of the Annotate redesign.
+const double _kPhoneTitleRow = 48;
+
 const double _kToolRow = 60;
 const double _kSingleRow = 60;
 
@@ -129,7 +152,7 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
 
   @override
   Size get preferredSize => Size.fromHeight(switch (layout) {
-    EditorBarLayout.phone => _kTitleRow,
+    EditorBarLayout.phone => _kPhoneTitleRow,
     EditorBarLayout.tabletRail => _kTitleRow,
     EditorBarLayout.stacked => _kTitleRow + _kToolRow,
     EditorBarLayout.single => _kSingleRow,
@@ -148,7 +171,8 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _titleRow(context, ref),
-                  if (layout == EditorBarLayout.stacked) _toolRow(context, ref),
+                  if (layout == EditorBarLayout.stacked)
+                    _toolRow(context, ref),
                 ],
               ),
       ),
@@ -195,7 +219,7 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
           const _BarSeparator(),
           _UndoRedo(documentId: documentId),
           const _BarSeparator(),
-          ..._trailing(context),
+          ..._trailing(context, ref),
         ],
       ),
     );
@@ -207,16 +231,16 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
     final t = context.tokens;
     final phone = layout == EditorBarLayout.phone;
     return Container(
-      height: _kTitleRow,
+      height: phone ? _kPhoneTitleRow : _kTitleRow,
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: t.line)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      padding: EdgeInsets.symmetric(horizontal: phone ? 16 : 10),
       child: Row(
         children: [
           _leading(context),
           if (phone)
-            Expanded(child: _titleBlock(context))
+            Expanded(child: Center(child: _titleBlock(context, phone: true)))
           else ...[
             _flexibleTitle(context),
             const SizedBox(width: 8),
@@ -226,25 +250,44 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
               controller: canvasController,
             ),
           ],
-          if (phone) const SizedBox(width: 2),
-          ..._trailing(context),
+          if (phone) ...[
+            _BarIcon(
+              icon: sidebarOpen
+                  ? Icons.list_alt_rounded
+                  : Icons.list_alt_outlined,
+              tooltip: sidebarOpen ? 'Hide pages & outline' : 'Pages & outline',
+              onPressed: onToggleSidebar,
+              active: sidebarOpen,
+            ),
+            const SizedBox(width: 2),
+          ],
+          ..._trailing(context, ref),
         ],
       ),
     );
   }
 
   Widget _leading(BuildContext context) {
+    final phone = layout == EditorBarLayout.phone;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _BarIcon(icon: notablyBackIcon, tooltip: 'Back', onPressed: onBack),
         _BarIcon(
-          icon: sidebarOpen ? Icons.list_alt_rounded : Icons.list_alt_outlined,
-          tooltip: sidebarOpen ? 'Hide pages & outline' : 'Pages & outline',
-          onPressed: onToggleSidebar,
-          active: sidebarOpen,
+          icon: notablyBackIcon,
+          tooltip: 'Last page',
+          onPressed: onBack,
         ),
-        const SizedBox(width: 6),
+        if (!phone) ...[
+          _BarIcon(
+            icon: sidebarOpen
+                ? Icons.list_alt_rounded
+                : Icons.list_alt_outlined,
+            tooltip: sidebarOpen ? 'Hide pages & outline' : 'Pages & outline',
+            onPressed: onToggleSidebar,
+            active: sidebarOpen,
+          ),
+          const SizedBox(width: 6),
+        ],
       ],
     );
   }
@@ -260,7 +303,7 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
   }
 
   /// Title over a mono subtitle, matching the two-line header in the design.
-  Widget _titleBlock(BuildContext context) {
+  Widget _titleBlock(BuildContext context, {bool phone = false}) {
     final t = context.tokens;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: _kMaxTitleWidth),
@@ -276,24 +319,30 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                    phone ? CrossAxisAlignment.center : CrossAxisAlignment.start,
                 children: [
                   Text(
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    textAlign: phone ? TextAlign.center : TextAlign.start,
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: t.text,
-                      height: 1.2,
+                      height: 1.15,
                     ),
                   ),
                   Text(
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppTokens.mono(size: 11, color: t.textFaint),
+                    textAlign: phone ? TextAlign.center : TextAlign.start,
+                    style: AppTokens.mono(
+                      size: phone ? 10 : 11,
+                      color: t.textFaint,
+                    ),
                   ),
                 ],
               ),
@@ -304,8 +353,13 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
     );
   }
 
-  List<Widget> _trailing(BuildContext context) {
+  List<Widget> _trailing(BuildContext context, WidgetRef ref) {
+    if (layout == EditorBarLayout.phone) {
+      return _phoneTrailing(context, ref);
+    }
+
     final compact = layout != EditorBarLayout.single;
+    final quizLocked = ref.watch(quizLimitReachedProvider);
     return [
       _BarIcon(
         icon: Icons.search_rounded,
@@ -314,9 +368,13 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
       ),
       _BarIcon(
         icon: Icons.quiz_rounded,
-        tooltip: 'Quiz from this document',
+        tooltip: quizLocked
+            ? 'Quiz limit reached — upgrade for unlimited'
+            : 'Quiz from this document',
         onPressed: onQuiz,
-        color: context.tokens.premiumText,
+        color: quizLocked
+            ? context.tokens.textFaint
+            : context.tokens.premiumText,
       ),
       SyncIndicator(color: context.tokens.textSecondary),
       if (compact) ...[
@@ -335,6 +393,8 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
           showBookmark: true,
           readingMode: readingMode,
           onToggleReadingMode: onToggleReadingMode,
+          onQuiz: onQuiz,
+          quizLocked: quizLocked,
         ),
       ] else ...[
         _BarIcon(
@@ -364,10 +424,55 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
     ];
   }
 
+  /// iOS phone header — search & sync by default; undo/redo when drawing.
+  List<Widget> _phoneTrailing(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(editorControllerProvider(documentId));
+    final drawing = state.isDrawingTool;
+    final quizLocked = ref.watch(quizLimitReachedProvider);
+
+    return [
+      if (drawing)
+        _UndoRedo(documentId: documentId)
+      else ...[
+        _BarIcon(
+          icon: Icons.search_rounded,
+          tooltip: 'Find in document',
+          onPressed: onFind,
+        ),
+        _BarIcon(
+          icon: Icons.quiz_rounded,
+          tooltip: quizLocked
+              ? 'Quiz limit reached — upgrade for unlimited'
+              : 'Quiz from this document',
+          onPressed: onQuiz,
+          color: quizLocked
+              ? context.tokens.textFaint
+              : context.tokens.premiumText,
+        ),
+        SyncIndicator(color: context.tokens.textSecondary),
+      ],
+      _OverflowMenu(
+        bookmarked: bookmarked,
+        onToggleBookmark: onToggleBookmark,
+        onOpenPageSettings: onOpenPageSettings,
+        onExport: () => ExportSheet.show(
+          context,
+          documentId: documentId,
+          title: title,
+          sizeFor: pageSizeFor,
+        ),
+        readingMode: readingMode,
+        onToggleReadingMode: onToggleReadingMode,
+        horizontalIcon: true,
+      ),
+    ];
+  }
+
   // ---- Row 2 (stacked only): the tool group --------------------------------
 
   Widget _toolRow(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
+    final wide = MediaQuery.sizeOf(context).width >= 600;
     return Container(
       height: _kToolRow,
       decoration: BoxDecoration(
@@ -380,7 +485,9 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
             child: _ToolGroup(
               documentId: documentId,
               pageSizeFor: pageSizeFor,
-              showInlineSwatches: false,
+              // iPad split / narrow windows still get quick colours when space
+              // allows; otherwise a single swatch opens the full palette.
+              showInlineSwatches: wide,
             ),
           ),
           const SizedBox(width: 8),
@@ -405,13 +512,17 @@ const _kPrimaryDockTools = [
   (Icons.sticky_note_2_outlined, 'Sticky note', ToolType.sticky),
 ];
 
-/// Extra tools surfaced through the overflow sheet on phone and narrow tablets.
+/// Extra tools surfaced through the overflow sheet on *phones*. Tablets and
+/// iPads show these inline on the dock / tool group.
 const _kOverflowToolEntries = [
   (Icons.brush_outlined, 'Fountain pen', ToolType.fountainPen),
   (Icons.gesture_rounded, 'Pencil', ToolType.pencil),
   (Icons.horizontal_rule_rounded, 'Tape', ToolType.tape),
   (Icons.image_outlined, 'Image', ToolType.image),
 ];
+
+/// Primary tools in the phone dock — matches the Android bottom tool pill.
+const _kPhoneDockTools = _kPrimaryDockTools;
 
 /// The tools, in one recessed container with a raised pill on the active one.
 ///
@@ -474,6 +585,10 @@ class _ToolGroup extends ConsumerWidget {
     final state = ref.watch(editorControllerProvider(documentId));
     final controller = ref.read(editorControllerProvider(documentId).notifier);
     final drawing = state.isDrawingTool;
+    // iPad / Android tablets have the width for fountain pen, pencil, tape,
+    // image, stickers and margins — phones keep those behind More tools.
+    final allTools = showInlineSwatches ||
+        MediaQuery.sizeOf(context).shortestSide >= AppBreakpoints.tabletShortest;
 
     Widget tool(IconData icon, String label, ToolType type) => _ToolButton(
       icon: icon,
@@ -495,7 +610,7 @@ class _ToolGroup extends ConsumerWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            if (showInlineSwatches) ...[
+            if (allTools) ...[
               tool(Icons.pan_tool_alt_rounded, 'Hand', ToolType.hand),
               tool(Icons.edit_rounded, 'Pen', ToolType.pen),
               tool(Icons.brush_outlined, 'Fountain pen', ToolType.fountainPen),
@@ -666,11 +781,13 @@ class _Swatch extends StatelessWidget {
     required this.color,
     required this.selected,
     required this.onTap,
+    this.size = 20,
   });
 
   final int color;
   final bool selected;
   final VoidCallback onTap;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -679,19 +796,19 @@ class _Swatch extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: SizedBox(
-        width: 28,
-        height: 38,
+        width: size + 8,
+        height: size + 8,
         child: Center(
           child: Container(
-            width: 20,
-            height: 20,
+            width: size,
+            height: size,
             decoration: BoxDecoration(
               color: Color(color | 0xFF000000),
               shape: BoxShape.circle,
               // Ring-outside-a-gap, so the selected dot reads clearly even
               // when its colour is close to the toolbar's.
               border: Border.all(
-                color: selected ? t.surface : Colors.transparent,
+                color: selected ? t.fill : Colors.transparent,
                 width: 2,
               ),
               boxShadow: selected
@@ -711,11 +828,13 @@ class _CurrentColorButton extends StatelessWidget {
     required this.color,
     required this.onTap,
     this.showDot = true,
+    this.size = 22,
   });
 
   final int color;
   final VoidCallback onTap;
   final bool showDot;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -726,14 +845,14 @@ class _CurrentColorButton extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: SizedBox(
-          height: 38,
+          height: size + 8,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (showDot)
                 Container(
-                  width: 22,
-                  height: 22,
+                  width: size,
+                  height: size,
                   decoration: BoxDecoration(
                     color: Color(color | 0xFF000000),
                     shape: BoxShape.circle,
@@ -752,8 +871,9 @@ class _CurrentColorButton extends StatelessWidget {
 /// The "1.4 pt" chip from the design — current stroke width, opens the
 /// thickness menu.
 class _WidthChip extends ConsumerWidget {
-  const _WidthChip({required this.documentId});
+  const _WidthChip({required this.documentId, this.compact = false});
   final String documentId;
+  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -808,9 +928,9 @@ class _WidthChip extends ConsumerWidget {
         height: 30,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: t.line),
+          color: compact ? t.surfaceAlt : t.surface,
+          borderRadius: BorderRadius.circular(compact ? 9 : 8),
+          border: Border.all(color: t.lineStrong),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -861,7 +981,22 @@ class _UndoRedo extends ConsumerWidget {
 // -------------------------------------------------------------- phone dock --
 
 /// Height the phone tool dock reserves, so the canvas can be inset by it.
-const double kToolDockHeight = 132;
+const double kToolDockHeight = 120;
+
+/// Floating cluster styling from section 09 of the Annotate redesign.
+BoxDecoration _iosToolClusterDecoration(AppTokens t) => BoxDecoration(
+  color: t.fill,
+  borderRadius: BorderRadius.circular(20),
+  border: Border.all(color: t.lineStrong),
+  boxShadow: [
+    BoxShadow(
+      color: t.shadow.withValues(alpha: 0.85),
+      blurRadius: 44,
+      offset: const Offset(0, 20),
+      spreadRadius: -14,
+    ),
+  ],
+);
 
 /// The phone's tool surface: a colour strip above a floating tool pill.
 ///
@@ -885,6 +1020,9 @@ class EditorToolDock extends ConsumerWidget {
     final palette = paletteFor(state.tool);
     final selected = state.activeSettings.color;
 
+    final tablet =
+        MediaQuery.sizeOf(context).shortestSide >= AppBreakpoints.tabletShortest;
+
     Widget tool(IconData icon, String label, ToolType type) => _DockTool(
       icon: icon,
       label: label,
@@ -901,91 +1039,139 @@ class EditorToolDock extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (state.isDrawingTool)
-              Container(
-                height: 48,
-                margin: const EdgeInsets.fromLTRB(18, 0, 18, 6),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  color: t.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: t.line),
-                  boxShadow: AppTokens.elevation(
-                    t.shadow,
-                    y: 8,
-                    blur: 24,
-                    opacity: 0.16,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+                child: Material(
+                  color: t.fill,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    side: BorderSide(color: t.lineStrong),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          for (final c in palette.take(6))
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 5,
-                              ),
-                              child: _Swatch(
-                                color: c,
-                                selected: c == selected,
-                                onTap: () => controller.setColor(c),
-                              ),
-                            ),
-                          _CurrentColorButton(
-                            color: selected,
-                            showDot: !palette.take(6).contains(selected),
-                            onTap: () =>
-                                ColorPickerSheet.show(context, documentId),
-                          ),
-                        ],
+                  shadowColor: t.shadow,
+                  child: Container(
+                    height: 52,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: AppTokens.elevation(
+                        t.shadow,
+                        y: 16,
+                        blur: 34,
+                        opacity: 0.7,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    _WidthChip(documentId: documentId),
-                  ],
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                for (final c in palette)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 5,
+                                    ),
+                                    child: _Swatch(
+                                      color: c,
+                                      selected: c == selected,
+                                      onTap: () => controller.setColor(c),
+                                      size: 24,
+                                    ),
+                                  ),
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 4),
+                                  child: _CurrentColorButton(
+                                    color: selected,
+                                    showDot: false,
+                                    onTap: () => ColorPickerSheet.show(
+                                      context,
+                                      documentId,
+                                    ),
+                                    size: 24,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _WidthChip(documentId: documentId, compact: true),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
               child: Container(
-                height: 62,
-                padding: const EdgeInsets.symmetric(horizontal: 7),
-                decoration: BoxDecoration(
-                  color: t.surface,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: t.line),
-                  boxShadow: AppTokens.elevation(
-                    t.shadow,
-                    y: 12,
-                    blur: 34,
-                    opacity: 0.22,
-                  ),
-                ),
+                padding: const EdgeInsets.all(6),
+                decoration: _iosToolClusterDecoration(t),
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      for (final item in _kPrimaryDockTools)
-                        tool(item.$1, item.$2, item.$3),
-                      _DockUndoRedo(documentId: documentId),
-                      _DockTool(
-                        icon: Icons.more_horiz_rounded,
-                        label: 'More tools',
-                        selected: const {
-                          ToolType.fountainPen,
-                          ToolType.pencil,
-                          ToolType.tape,
-                          ToolType.image,
-                        }.contains(state.tool),
-                        onTap: () => _OverflowTools.show(
-                          context,
-                          ref: ref,
-                          documentId: documentId,
-                          pageSizeFor: pageSizeFor,
+                      if (tablet) ...[
+                        tool(Icons.pan_tool_alt_rounded, 'Hand', ToolType.hand),
+                        tool(Icons.edit_rounded, 'Pen', ToolType.pen),
+                        tool(Icons.brush_outlined, 'Fountain pen',
+                            ToolType.fountainPen),
+                        tool(Icons.gesture_rounded, 'Pencil', ToolType.pencil),
+                        tool(Icons.brush_rounded, 'Highlighter',
+                            ToolType.highlighter),
+                        tool(Icons.horizontal_rule_rounded, 'Tape',
+                            ToolType.tape),
+                        tool(Icons.category_outlined, 'Shape', ToolType.shape),
+                        tool(Icons.text_fields_rounded, 'Text', ToolType.text),
+                        tool(Icons.sticky_note_2_outlined, 'Sticky note',
+                            ToolType.sticky),
+                        _DockTool(
+                          icon: Icons.emoji_emotions_outlined,
+                          label: 'Stickers',
+                          selected: false,
+                          onTap: () =>
+                              _openStickers(context, ref, documentId),
                         ),
-                      ),
+                        tool(Icons.highlight_alt_rounded, 'Select',
+                            ToolType.lasso),
+                        tool(Icons.image_outlined, 'Image', ToolType.image),
+                        tool(Icons.cleaning_services_rounded, 'Eraser',
+                            ToolType.eraser),
+                        _DockTool(
+                          icon: Icons.straighten_rounded,
+                          label: 'Margins',
+                          selected: state.effectiveMargins?.enabled ?? false,
+                          onTap: () {
+                            final page = state.currentPage;
+                            if (page == null) return;
+                            MarginsSheet.show(
+                              context,
+                              documentId: documentId,
+                              pageSize: pageSizeFor(page),
+                            );
+                          },
+                        ),
+                      ] else ...[
+                        for (final item in _kPhoneDockTools)
+                          tool(item.$1, item.$2, item.$3),
+                        _DockTool(
+                          icon: Icons.more_horiz_rounded,
+                          label: 'More tools',
+                          selected: const {
+                            ToolType.fountainPen,
+                            ToolType.pencil,
+                            ToolType.tape,
+                            ToolType.image,
+                          }.contains(state.tool),
+                          onTap: () => _OverflowTools.show(
+                            context,
+                            ref: ref,
+                            documentId: documentId,
+                            pageSizeFor: pageSizeFor,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1055,37 +1241,7 @@ class _OverflowTools {
   }
 }
 
-class _DockUndoRedo extends ConsumerWidget {
-  const _DockUndoRedo({required this.documentId});
-  final String documentId;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(editorControllerProvider(documentId));
-    final controller = ref.read(editorControllerProvider(documentId).notifier);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _DockTool(
-          icon: Icons.undo_rounded,
-          label: 'Undo',
-          selected: false,
-          enabled: state.canUndo,
-          onTap: controller.undo,
-        ),
-        _DockTool(
-          icon: Icons.redo_rounded,
-          label: 'Redo',
-          selected: false,
-          enabled: state.canRedo,
-          onTap: controller.redo,
-        ),
-      ],
-    );
-  }
-}
-
-/// A tool in the phone dock — bigger touch target than its desktop twin.
+/// A tool in the phone dock — 42×42 touch targets per the iOS redesign.
 class _DockTool extends StatelessWidget {
   const _DockTool({
     required this.icon,
@@ -1116,16 +1272,16 @@ class _DockTool extends StatelessWidget {
                 ? onOptions
                 : onTap,
         child: Container(
-          width: 46,
-          height: 46,
-          margin: const EdgeInsets.symmetric(horizontal: 1),
+          width: 42,
+          height: 42,
+          margin: const EdgeInsets.symmetric(horizontal: 0.5),
           decoration: BoxDecoration(
             color: selected ? t.accent : Colors.transparent,
             borderRadius: BorderRadius.circular(13),
           ),
           child: Icon(
             icon,
-            size: 22,
+            size: 21,
             color: !enabled
                 ? t.textFaint.withValues(alpha: 0.45)
                 : selected
@@ -1169,7 +1325,7 @@ class EditorToolRail extends ConsumerWidget {
     );
 
     return Container(
-      width: 58,
+      width: 66,
       decoration: BoxDecoration(
         color: t.surfaceAlt,
         border: Border(right: BorderSide(color: t.line)),
@@ -1180,7 +1336,7 @@ class EditorToolRail extends ConsumerWidget {
           children: [
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: 16),
                 child: Column(
                   children: [
                     tool(Icons.pan_tool_alt_rounded, 'Hand', ToolType.hand),
@@ -1239,8 +1395,19 @@ class EditorToolRail extends ConsumerWidget {
             ),
             if (state.isDrawingTool) ...[
               const SizedBox(height: 6),
+              for (final c in paletteFor(state.tool).take(5))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: _Swatch(
+                    color: c,
+                    selected: c == state.activeSettings.color,
+                    onTap: () => controller.setColor(c),
+                    size: 22,
+                  ),
+                ),
               _CurrentColorButton(
                 color: state.activeSettings.color,
+                showDot: false,
                 onTap: () => ColorPickerSheet.show(context, documentId),
               ),
             ],
@@ -1276,18 +1443,18 @@ class _RailTool extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: InkWell(
           onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(Radii.inner),
+          borderRadius: BorderRadius.circular(13),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
-            width: 42,
-            height: 42,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: selected ? t.accent : Colors.transparent,
-              borderRadius: BorderRadius.circular(Radii.inner),
+              borderRadius: BorderRadius.circular(13),
             ),
             child: Icon(
               icon,
-              size: 21,
+              size: 23,
               color: !enabled
                   ? t.textFaint.withValues(alpha: 0.45)
                   : selected
@@ -1313,6 +1480,12 @@ class _OverflowMenu extends StatelessWidget {
     this.showBookmark = true,
     this.readingMode = false,
     this.onToggleReadingMode,
+    this.horizontalIcon = false,
+    this.sidebarOpen = false,
+    this.onToggleSidebar,
+    this.onQuiz,
+    this.quizLocked = false,
+    this.onMoreTools,
   });
 
   final bool bookmarked;
@@ -1322,14 +1495,20 @@ class _OverflowMenu extends StatelessWidget {
   final bool showBookmark;
   final bool readingMode;
   final VoidCallback? onToggleReadingMode;
+  final bool horizontalIcon;
+  final bool sidebarOpen;
+  final VoidCallback? onToggleSidebar;
+  final VoidCallback? onQuiz;
+  final bool quizLocked;
+  final VoidCallback? onMoreTools;
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<int>(
       tooltip: 'More',
       icon: Icon(
-        Icons.more_vert_rounded,
-        size: 20,
+        horizontalIcon ? Icons.more_horiz_rounded : Icons.more_vert_rounded,
+        size: 21,
         color: context.tokens.textSecondary,
       ),
       onSelected: (value) {
@@ -1340,11 +1519,33 @@ class _OverflowMenu extends StatelessWidget {
             onExport();
           case 2:
             onOpenPageSettings();
+          case 3:
+            onToggleSidebar?.call();
           case 4:
             onToggleReadingMode?.call();
+          case 5:
+            onQuiz?.call();
+          case 6:
+            onMoreTools?.call();
         }
       },
       itemBuilder: (context) => [
+        if (onToggleSidebar != null)
+          PopupMenuItem(
+            value: 3,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                sidebarOpen
+                    ? Icons.list_alt_rounded
+                    : Icons.list_alt_outlined,
+              ),
+              title: Text(
+                sidebarOpen ? 'Hide pages & outline' : 'Pages & outline',
+              ),
+            ),
+          ),
         if (showBookmark)
           PopupMenuItem(
             value: 0,
@@ -1373,6 +1574,33 @@ class _OverflowMenu extends StatelessWidget {
               title: Text(
                 readingMode ? 'Show annotation tools' : 'Reading mode',
               ),
+            ),
+          ),
+        if (onQuiz != null)
+          PopupMenuItem(
+            value: 5,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.quiz_rounded,
+                color: quizLocked ? context.tokens.textFaint : null,
+              ),
+              title: Text(
+                quizLocked
+                    ? 'Upgrade for more quizzes'
+                    : 'Quiz from document',
+              ),
+            ),
+          ),
+        if (onMoreTools != null)
+          PopupMenuItem(
+            value: 6,
+            child: const ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.more_horiz_rounded),
+              title: Text('More tools'),
             ),
           ),
         const PopupMenuItem(

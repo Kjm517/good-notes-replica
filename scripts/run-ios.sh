@@ -8,8 +8,12 @@ DEVICE="${1:-Notably iPhone}"
 # shellcheck source=env.sh
 source "$ROOT/scripts/env.sh"
 
+# Ensure project simulators exist (no-op if already created).
+"$ROOT/scripts/create-notably-simulators.sh" >/dev/null
+
 echo "Booting simulator: $DEVICE"
 xcrun simctl boot "$DEVICE" 2>/dev/null || true
+open -a Simulator 2>/dev/null || true
 
 cd "$ROOT"
 echo "Available devices:"
