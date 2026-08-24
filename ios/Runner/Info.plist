@@ -26,9 +26,24 @@
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLName</key>
+				<string>io.supabase.notably</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>io.supabase.notably</string>
+				</array>
+			</dict>
+		</array>
 		<key>LSApplicationQueriesSchemes</key>
 		<array>
 			<string>mailto</string>
+			<string>https</string>
+			<string>http</string>
 		</array>
 		<key>NSCameraUsageDescription</key>
 		<string>Notably uses the camera to scan pages into a document.</string>

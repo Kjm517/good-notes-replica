@@ -125,15 +125,7 @@ class _AdminHeroPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: const Icon(Icons.draw_rounded, color: Colors.white, size: 21),
-              ),
+              const AppMark(size: 36),
               const SizedBox(width: 11),
               const Text(
                 'Notably',

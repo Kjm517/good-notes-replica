@@ -9,12 +9,16 @@ class VoucherValidation {
     required this.valid,
     required this.code,
     this.discountRate,
+    this.discountKind,
+    this.discountAmountCentavos,
     this.label,
   });
 
   final bool valid;
   final String code;
   final double? discountRate;
+  final String? discountKind;
+  final int? discountAmountCentavos;
   final String? label;
 
   factory VoucherValidation.fromJson(Map<String, dynamic> json) {
@@ -22,6 +26,8 @@ class VoucherValidation {
       valid: json['valid'] as bool? ?? false,
       code: json['code'] as String? ?? '',
       discountRate: (json['discountRate'] as num?)?.toDouble(),
+      discountKind: json['discountKind'] as String?,
+      discountAmountCentavos: json['discountAmountCentavos'] as int?,
       label: json['label'] as String?,
     );
   }
@@ -37,10 +43,14 @@ class AdminVoucherRow {
     this.label,
     this.expiresAt,
     this.maxUses,
+    this.discountKind,
+    this.discountAmountCentavos,
   });
 
   final String code;
   final double discountRate;
+  final String? discountKind;
+  final int? discountAmountCentavos;
   final String? label;
   final bool active;
   final String createdAt;
@@ -48,12 +58,25 @@ class AdminVoucherRow {
   final int? maxUses;
   final int usedCount;
 
+  bool get isAmountOff =>
+      discountKind == 'amount' || (discountAmountCentavos ?? 0) > 0;
+
   int get discountPercent => (discountRate * 100).round();
+
+  String get discountLabel {
+    if (isAmountOff) {
+      final pesos = (discountAmountCentavos ?? 0) / 100.0;
+      return '₱${pesos == pesos.roundToDouble() ? pesos.toStringAsFixed(0) : pesos.toStringAsFixed(2)} off';
+    }
+    return '$discountPercent%';
+  }
 
   factory AdminVoucherRow.fromJson(Map<String, dynamic> json) {
     return AdminVoucherRow(
       code: json['code'] as String,
-      discountRate: (json['discountRate'] as num).toDouble(),
+      discountRate: (json['discountRate'] as num?)?.toDouble() ?? 0,
+      discountKind: json['discountKind'] as String?,
+      discountAmountCentavos: json['discountAmountCentavos'] as int?,
       label: json['label'] as String?,
       active: json['active'] as bool? ?? true,
       createdAt: json['createdAt'] as String? ?? '',
@@ -122,7 +145,9 @@ class VoucherAdminService {
 
   Future<AdminVoucherRow> upsertVoucher({
     required String code,
-    required int discountPercent,
+    int? discountPercent,
+    int? discountAmountCentavos,
+    String discountKind = 'percent',
     String? label,
     bool active = true,
     String? expiresAt,
@@ -136,7 +161,10 @@ class VoucherAdminService {
       headers: headers,
       body: jsonEncode({
         'code': code.trim(),
-        'discountPercent': discountPercent,
+        'discountKind': discountKind,
+        if (discountPercent != null) 'discountPercent': discountPercent,
+        if (discountAmountCentavos != null)
+          'discountAmountCentavos': discountAmountCentavos,
         if (label != null && label.trim().isNotEmpty) 'label': label.trim(),
         'active': active,
         if (clearExpiresAt)

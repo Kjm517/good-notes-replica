@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -104,12 +106,30 @@ class _BugReportSheetState extends ConsumerState<BugReportSheet> {
       ..writeln('—')
       ..writeln('Notably · $_deviceLabel · ${user.email ?? user.uid}');
 
+    final payload = <Map<String, String>>[];
+    for (final f in _attachments.take(3)) {
+      final bytes = f.bytes;
+      if (bytes == null || bytes.isEmpty || bytes.length > 1500000) continue;
+      final mime = f.extension == 'png'
+          ? 'image/png'
+          : f.extension == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
+      if (f.extension == 'pdf') continue;
+      payload.add({
+        'name': f.name,
+        'mime': mime,
+        'data': base64Encode(bytes),
+      });
+    }
+
     setState(() => _busy = true);
     final result = await UserTelemetry.submitBugReport(
       category: _category.name,
       subject: subject,
       description: body.toString(),
       device: _deviceLabel,
+      attachments: payload,
     );
     if (!mounted) return;
     setState(() => _busy = false);

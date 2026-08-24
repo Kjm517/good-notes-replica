@@ -22,10 +22,20 @@ final rcPremiumActiveProvider = StateProvider<bool>((ref) => false);
 /// Live premium flag from PayMongo wallet checkout (worker entitlement).
 final payMongoPremiumActiveProvider = StateProvider<bool>((ref) => false);
 
-/// Paid Premium — RevenueCat, PayMongo wallet, or dev prefs stub.
+/// True after at least one successful `/billing/entitlement` response for this
+/// session. While false, [isPremiumProvider] may use the local prefs cache.
+final payMongoEntitlementSyncedProvider = StateProvider<bool>((ref) => false);
+
+/// Paid Premium — RevenueCat, PayMongo server entitlement, or local prefs cache.
+///
+/// After a successful PayMongo entitlement sync, the server flag wins. That
+/// way an admin revoke cannot be overridden by a stale `is_premium` pref.
 final isPremiumProvider = Provider<bool>((ref) {
   if (ref.watch(revenueCatConfiguredProvider)) {
     if (ref.watch(rcPremiumActiveProvider)) return true;
+  }
+  if (ref.watch(payMongoEntitlementSyncedProvider)) {
+    return ref.watch(payMongoPremiumActiveProvider);
   }
   if (ref.watch(payMongoPremiumActiveProvider)) return true;
   final prefs = ref.watch(sharedPrefsProvider);
@@ -48,6 +58,7 @@ class BillingHistoryEntry {
   String get planLabel => switch (plan) {
         BillingPlan.yearly => 'Premium — Yearly',
         BillingPlan.monthly => 'Premium — Monthly',
+        BillingPlan.lifetime => 'Premium — Lifetime',
         BillingPlan.none => 'Premium',
       };
 
@@ -76,12 +87,16 @@ final billingPlanProvider =
 class BillingPlanController extends Notifier<BillingPlan> {
   @override
   BillingPlan build() {
+    // Prefs only — do NOT watch PayMongo flags here. Entitlement apply both
+    // writes those flags and updates this notifier; watching them caused
+    // CircularDependencyError during sync.
     final prefs = ref.watch(sharedPrefsProvider);
     if (prefs.getBool('is_premium') ?? false) {
       final raw = prefs.getString(_planKey);
       return switch (raw) {
         'monthly' => BillingPlan.monthly,
         'yearly' => BillingPlan.yearly,
+        'lifetime' => BillingPlan.lifetime,
         _ => BillingPlan.yearly,
       };
     }
@@ -94,11 +109,12 @@ class BillingPlanController extends Notifier<BillingPlan> {
     final paid = amountPhp ?? priceForPlan(plan);
     await prefs.setBool('is_premium', true);
     await prefs.setString(_planKey, plan.name);
-    final renew = DateTime.now().add(
-      plan == BillingPlan.yearly
-          ? const Duration(days: 365)
-          : const Duration(days: 30),
-    );
+    final now = DateTime.now();
+    final renew = switch (plan) {
+      BillingPlan.yearly => now.add(const Duration(days: 365)),
+      BillingPlan.lifetime => DateTime.utc(9999, 12, 31),
+      BillingPlan.monthly || BillingPlan.none => now.add(const Duration(days: 30)),
+    };
     await prefs.setString(_renewKey, renew.toIso8601String());
     await _appendHistory(
       prefs,
@@ -109,9 +125,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
         status: 'Paid',
       ),
     );
-    ref.invalidateSelf();
-    ref.invalidate(isPremiumProvider);
-    ref.invalidate(billingHistoryProvider);
+    state = plan;
   }
 
   /// Cache RevenueCat state locally for plan labels and renewal dates.
@@ -126,10 +140,11 @@ class BillingPlanController extends Notifier<BillingPlan> {
       if (renew != null) {
         await prefs.setString(_renewKey, renew.toIso8601String());
       }
+      state = plan;
     } else {
       await prefs.setBool('is_premium', false);
+      state = BillingPlan.none;
     }
-    ref.invalidateSelf();
   }
 
   Future<void> syncFromPayMongo({
@@ -154,8 +169,22 @@ class BillingPlanController extends Notifier<BillingPlan> {
         ),
       );
     }
-    ref.invalidateSelf();
-    ref.invalidate(billingHistoryProvider);
+    state = plan;
+  }
+
+  /// Drop local Premium cache after the worker reports no active entitlement
+  /// (admin revoke, expired plan, etc.). Leaves RevenueCat store premium alone.
+  Future<void> clearLocalPremium({bool force = false}) async {
+    if (!force &&
+        ref.read(revenueCatConfiguredProvider) &&
+        ref.read(rcPremiumActiveProvider)) {
+      return;
+    }
+    final prefs = ref.read(sharedPrefsProvider);
+    await prefs.setBool('is_premium', false);
+    await prefs.remove(_planKey);
+    await prefs.remove(_renewKey);
+    state = BillingPlan.none;
   }
 
   Future<void> recordStorePurchase({
@@ -213,10 +242,15 @@ final billingHistoryProvider = Provider<List<BillingHistoryEntry>>((ref) {
 
 final premiumRenewsAtProvider = Provider<DateTime?>((ref) {
   final prefs = ref.watch(sharedPrefsProvider);
-  final paidViaRc =
-      ref.watch(revenueCatConfiguredProvider) && ref.watch(rcPremiumActiveProvider);
-  final paidViaPayMongo = ref.watch(payMongoPremiumActiveProvider);
-  if (!paidViaRc && !paidViaPayMongo && !(prefs.getBool('is_premium') ?? false)) {
+  if (ref.watch(revenueCatConfiguredProvider) &&
+      ref.watch(rcPremiumActiveProvider)) {
+    final raw = prefs.getString(_renewKey);
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+  if (ref.watch(payMongoEntitlementSyncedProvider)) {
+    if (!ref.watch(payMongoPremiumActiveProvider)) return null;
+  } else if (!ref.watch(payMongoPremiumActiveProvider) &&
+      !(prefs.getBool('is_premium') ?? false)) {
     return null;
   }
   final raw = prefs.getString(_renewKey);

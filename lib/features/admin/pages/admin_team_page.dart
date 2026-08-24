@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/design.dart';
+import '../admin_access.dart';
 import '../admin_api.dart';
+import '../admin_dates.dart';
 import '../widgets/admin_widgets.dart';
 
 class AdminTeamPage extends ConsumerStatefulWidget {
@@ -18,6 +20,7 @@ class _AdminTeamPageState extends ConsumerState<AdminTeamPage> {
   final _name = TextEditingController();
   var _busy = false;
   var _obscure = true;
+  var _role = 'admin';
 
   @override
   void dispose() {
@@ -44,6 +47,7 @@ class _AdminTeamPageState extends ConsumerState<AdminTeamPage> {
         email: email,
         password: password,
         name: _name.text,
+        role: _role,
       );
       _email.clear();
       _password.clear();
@@ -98,6 +102,7 @@ class _AdminTeamPageState extends ConsumerState<AdminTeamPage> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final teamAsync = ref.watch(adminTeamProvider);
+    final canWrite = ref.watch(adminCanWriteProvider);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -107,10 +112,11 @@ class _AdminTeamPageState extends ConsumerState<AdminTeamPage> {
           const AdminPageHeader(
             title: 'Team',
             subtitle:
-                'Staff in the Supabase public.admins table. Create an account '
-                'here to add Auth + admin access in one step.',
+                'Staff in the Supabase public.admins table. Viewers can see the '
+                'console but cannot change users, vouchers, or team members.',
           ),
           const SizedBox(height: 16),
+          if (canWrite)
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -157,6 +163,15 @@ class _AdminTeamPageState extends ConsumerState<AdminTeamPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'admin', label: Text('Admin')),
+                    ButtonSegment(value: 'viewer', label: Text('Viewer')),
+                  ],
+                  selected: {_role},
+                  onSelectionChanged: (s) => setState(() => _role = s.first),
+                ),
+                const SizedBox(height: 12),
                 FilledButton(
                   onPressed: _busy ? null : _create,
                   child: _busy
@@ -165,7 +180,9 @@ class _AdminTeamPageState extends ConsumerState<AdminTeamPage> {
                           height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Create admin in Supabase'),
+                      : Text(_role == 'viewer'
+                          ? 'Create viewer in Supabase'
+                          : 'Create admin in Supabase'),
                 ),
               ],
             ),
@@ -178,7 +195,12 @@ class _AdminTeamPageState extends ConsumerState<AdminTeamPage> {
               onRetry: () => ref.invalidate(adminTeamProvider),
             ),
             data: (members) => AdminDataTable(
-              columns: const ['Member', 'Role', 'Added', ''],
+              columns: [
+                'Member',
+                'Role',
+                'Added',
+                if (canWrite) '',
+              ],
               // Member holds an email address and a uid; Role is one short
               // word and Added is a date, so an even split spends the width
               // where there is nothing to show and starves the one column
@@ -225,14 +247,15 @@ class _AdminTeamPageState extends ConsumerState<AdminTeamPage> {
                       color: m.role == 'admin' ? t.accentText : t.textMuted,
                     ),
                     Text(
-                      m.addedAt.length >= 10 ? m.addedAt.substring(0, 10) : m.addedAt,
+                      formatAdminWhen(m.addedAt),
                       style: AppTokens.mono(size: 11, color: t.textMuted),
                     ),
-                    IconButton(
-                      tooltip: 'Remove ${m.email ?? shortUid(m.uid)}',
-                      icon: Icon(Icons.person_remove_outlined, color: t.pdfBadge),
-                      onPressed: () => _remove(m),
-                    ),
+                    if (canWrite)
+                      IconButton(
+                        tooltip: 'Remove ${m.email ?? shortUid(m.uid)}',
+                        icon: Icon(Icons.person_remove_outlined, color: t.pdfBadge),
+                        onPressed: () => _remove(m),
+                      ),
                   ],
               ],
             ),

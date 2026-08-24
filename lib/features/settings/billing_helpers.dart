@@ -35,7 +35,7 @@ Package? packageForPlan(Offerings? offerings, BillingPlan plan) {
   return switch (plan) {
     BillingPlan.yearly => current.annual,
     BillingPlan.monthly => current.monthly,
-    BillingPlan.none => null,
+    BillingPlan.lifetime || BillingPlan.none => null,
   };
 }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/supabase_bootstrap.dart';
 
@@ -140,24 +141,79 @@ class AuthRepository {
 
   // ---- Google --------------------------------------------------------------
 
+  /// Native / mobile return URL. Must be listed in Supabase → Authentication →
+  /// URL Configuration → Redirect URLs, and registered on Android / iOS.
+  static const nativeOAuthRedirect = 'io.supabase.notably://login-callback/';
+
+  String _oauthRedirectTo() {
+    if (kIsWeb) {
+      // Same origin so the PKCE code verifier in localStorage still applies.
+      return Uri.base.origin;
+    }
+    return nativeOAuthRedirect;
+  }
+
+  bool _createdRecently(User user) {
+    final created = DateTime.tryParse(user.createdAt);
+    if (created == null) return false;
+    return DateTime.now().toUtc().difference(created.toUtc()).inMinutes.abs() <
+        10;
+  }
+
   Future<AuthResult> signInWithGoogle() async {
     try {
-      final ok = await _auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: kIsWeb ? null : 'io.supabase.notably://login-callback/',
-      );
-      if (!ok) throw const AuthFailure('Google sign-in failed.');
-      // On web, OAuth redirects; session lands via onAuthStateChange.
-      // Wait briefly for a session after mobile deep-link return.
-      for (var i = 0; i < 40; i++) {
-        final user = currentUser;
-        if (user != null) {
-          return AuthResult(user: user);
+      final pending = Completer<AuthResult>();
+      final sub = _auth.onAuthStateChange.listen((data) {
+        final raw = data.session?.user;
+        final user = _toAppUser(raw);
+        if (user != null && !pending.isCompleted) {
+          pending.complete(
+            AuthResult(user: user, isNewUser: raw != null && _createdRecently(raw)),
+          );
         }
-        await Future<void>.delayed(const Duration(milliseconds: 250));
+      });
+      try {
+        final ok = await _auth.signInWithOAuth(
+          OAuthProvider.google,
+          redirectTo: _oauthRedirectTo(),
+          authScreenLaunchMode: kIsWeb
+              ? LaunchMode.platformDefault
+              : LaunchMode.externalApplication,
+        );
+        if (!ok) throw const AuthFailure('Google sign-in was cancelled.');
+        // Web navigates away; mobile returns via the deep link.
+        return await pending.future.timeout(
+          const Duration(minutes: 2),
+          onTimeout: () => throw const AuthFailure(
+            'Google sign-in timed out. In Supabase → Authentication, enable the '
+            'Google provider and add this app’s URL under Redirect URLs '
+            '(http://localhost:<port> for Chrome, and '
+            '$nativeOAuthRedirect for iOS/Android).',
+          ),
+        );
+      } finally {
+        await sub.cancel();
       }
-      throw const AuthFailure(
-        'Complete Google sign-in in the browser, then return to Notably.',
+    } on AuthException catch (e) {
+      throw AuthFailure(_messageFor(e));
+    }
+  }
+
+  /// Finishes a PKCE redirect that landed back on this origin with `?code=`.
+  Future<AuthResult?> completeOAuthRedirect(Uri uri) async {
+    final code = uri.queryParameters['code'];
+    if (code == null || code.isEmpty) return null;
+    if (currentUser != null) {
+      return AuthResult(user: currentUser!);
+    }
+    try {
+      final result = await _auth.exchangeCodeForSession(code);
+      final raw = result.session.user;
+      final user = _toAppUser(raw);
+      if (user == null) return null;
+      return AuthResult(
+        user: user,
+        isNewUser: raw != null && _createdRecently(raw),
       );
     } on AuthException catch (e) {
       throw AuthFailure(_messageFor(e));

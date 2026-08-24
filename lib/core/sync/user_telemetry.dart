@@ -48,6 +48,7 @@ abstract final class UserTelemetry {
     required String subject,
     required String description,
     required String device,
+    List<Map<String, String>> attachments = const [],
   }) async {
     final endpoint = kFileEndpoint.trim();
     if (endpoint.isEmpty) {
@@ -73,6 +74,7 @@ abstract final class UserTelemetry {
           'subject': subject,
           'description': description,
           'device': device,
+          if (attachments.isNotEmpty) 'attachments': attachments,
         }),
       );
       if (response.statusCode < 400) {

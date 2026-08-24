@@ -304,10 +304,10 @@ extension AppTokensContext on BuildContext {
 class AppMark extends StatelessWidget {
   const AppMark({super.key, this.size = 66});
 
-  /// Logo width and height in logical pixels.
+  /// Square edge length in logical pixels.
   final double size;
 
-  static const _asset = 'assets/branding/notably_logo.png';
+  static const _asset = 'assets/branding/notably-solo-logo.png';
 
   @override
   Widget build(BuildContext context) {

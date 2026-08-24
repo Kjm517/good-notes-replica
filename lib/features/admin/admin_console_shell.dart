@@ -4,9 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/design.dart';
 import '../../app/providers.dart';
+import 'admin_access.dart';
 import 'admin_api.dart';
 import 'admin_auth_providers.dart';
 import 'admin_section.dart';
+import 'widgets/admin_widgets.dart';
 import 'pages/admin_audit_page.dart';
 import 'pages/admin_ai_page.dart';
 import 'pages/admin_bugs_page.dart';
@@ -126,6 +128,10 @@ class _AdminTopBar extends ConsumerWidget {
               color: t.text,
             ),
           ),
+          if (!(ref.watch(adminCanWriteProvider))) ...[
+            const SizedBox(width: 10),
+            AdminStatusChip(label: 'Viewer', color: t.textMuted),
+          ],
           const Spacer(),
           IconButton(
             tooltip: isDark ? 'Switch to light mode' : 'Switch to dark mode',

@@ -88,6 +88,18 @@ class AdminUserRow {
   }
 }
 
+class AdminDeleteUserResult {
+  const AdminDeleteUserResult({
+    required this.authDeleted,
+    this.deletedObjects = 0,
+    this.authError,
+  });
+
+  final bool authDeleted;
+  final int deletedObjects;
+  final String? authError;
+}
+
 class AdminSubscriptionRow {
   const AdminSubscriptionRow({
     required this.uid,
@@ -146,6 +158,26 @@ class AdminDocumentRow {
   }
 }
 
+class AdminBugAttachment {
+  const AdminBugAttachment({
+    required this.key,
+    required this.name,
+    required this.mime,
+  });
+
+  final String key;
+  final String name;
+  final String mime;
+
+  factory AdminBugAttachment.fromJson(Map<String, dynamic> json) {
+    return AdminBugAttachment(
+      key: json['key'] as String? ?? '',
+      name: json['name'] as String? ?? 'screenshot',
+      mime: json['mime'] as String? ?? 'image/jpeg',
+    );
+  }
+}
+
 class AdminBugReport {
   const AdminBugReport({
     required this.id,
@@ -158,6 +190,9 @@ class AdminBugReport {
     required this.createdAt,
     required this.updatedAt,
     this.email,
+    this.attachments = const [],
+    this.adminReply,
+    this.adminReplyAt,
   });
 
   final String id;
@@ -170,6 +205,9 @@ class AdminBugReport {
   final String status;
   final String createdAt;
   final String updatedAt;
+  final List<AdminBugAttachment> attachments;
+  final String? adminReply;
+  final String? adminReplyAt;
 
   factory AdminBugReport.fromJson(Map<String, dynamic> json) {
     return AdminBugReport(
@@ -183,6 +221,12 @@ class AdminBugReport {
       status: json['status'] as String? ?? 'open',
       createdAt: json['createdAt'] as String? ?? '',
       updatedAt: json['updatedAt'] as String? ?? '',
+      attachments: [
+        for (final e in json['attachments'] as List<dynamic>? ?? [])
+          if (e is Map<String, dynamic>) AdminBugAttachment.fromJson(e),
+      ],
+      adminReply: json['adminReply'] as String?,
+      adminReplyAt: json['adminReplyAt'] as String?,
     );
   }
 }
@@ -444,14 +488,19 @@ class AdminApiService {
     await _decode(response);
   }
 
-  /// Deletes R2 user data (+ Auth user when service role is configured).
-  Future<void> deleteUser(String uid) async {
+  /// Deletes R2 user data (+ Auth user when the admin RPC or service role works).
+  Future<AdminDeleteUserResult> deleteUser(String uid) async {
     final headers = await _authHeaders();
     final response = await _client.delete(
       _uri('/admin/users/${Uri.encodeComponent(uid)}'),
       headers: headers,
     );
-    await _decode(response);
+    final body = await _decode(response);
+    return AdminDeleteUserResult(
+      authDeleted: body['authDeleted'] as bool? ?? false,
+      deletedObjects: body['deletedObjects'] as int? ?? 0,
+      authError: body['authError'] as String?,
+    );
   }
 
   Future<List<AdminDocumentRow>> fetchDocuments() async {
@@ -461,6 +510,16 @@ class AdminApiService {
     return (body['documents'] as List<dynamic>? ?? [])
         .map((e) => AdminDocumentRow.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<int> deleteUserFiles(String uid) async {
+    final headers = await _authHeaders();
+    final response = await _client.delete(
+      _uri('/admin/documents/${Uri.encodeComponent(uid)}'),
+      headers: headers,
+    );
+    final body = await _decode(response);
+    return body['deletedObjects'] as int? ?? 0;
   }
 
   Future<List<AdminBugReport>> fetchBugs() async {
@@ -473,13 +532,36 @@ class AdminApiService {
   }
 
   Future<void> updateBugStatus(String id, String status) async {
+    await updateBug(id, status: status);
+  }
+
+  Future<void> updateBug(
+    String id, {
+    String? status,
+    String? reply,
+  }) async {
     final headers = await _authHeaders();
     final response = await _client.patch(
       _uri('/admin/bugs/${Uri.encodeComponent(id)}'),
       headers: headers,
-      body: jsonEncode({'status': status}),
+      body: jsonEncode({
+        if (status != null) 'status': status,
+        if (reply != null) 'reply': reply,
+      }),
     );
     await _decode(response);
+  }
+
+  Future<List<int>> fetchBugAttachment(String id, int index) async {
+    final headers = await _authHeaders();
+    final response = await _client.get(
+      _uri('/admin/bugs/${Uri.encodeComponent(id)}/files/$index'),
+      headers: headers,
+    );
+    if (response.statusCode >= 400) {
+      throw StateError('Could not load attachment.');
+    }
+    return response.bodyBytes;
   }
 
   Future<AdminAiUsage> fetchAiUsage({int days = 30}) async {
@@ -514,6 +596,7 @@ class AdminApiService {
     required String email,
     required String password,
     String? name,
+    String role = 'admin',
   }) async {
     final headers = await _authHeaders();
     final response = await _client.post(
@@ -523,6 +606,7 @@ class AdminApiService {
         'email': email.trim(),
         'password': password,
         if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+        'role': role,
       }),
     );
     final body = await _decode(response);
@@ -564,6 +648,13 @@ class AdminApiService {
     return (body['entries'] as List<dynamic>? ?? [])
         .map((e) => AdminAuditEntry.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<int> clearAudit() async {
+    final headers = await _authHeaders();
+    final response = await _client.delete(_uri('/admin/audit'), headers: headers);
+    final body = await _decode(response);
+    return body['cleared'] as int? ?? 0;
   }
 
   Future<List<AdminVoucherRow>> listVouchers() async {

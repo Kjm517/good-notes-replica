@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 
 import '../../../core/db/database.dart';
@@ -174,6 +175,28 @@ class DocumentTextService {
 
       final bytes = await _assets.getBytes(assetId);
       if (bytes == null) return;
+
+      // pdfrx (PDFium) works on web and is cheaper than Syncfusion for search.
+      try {
+        final copy = Uint8List.fromList(bytes);
+        final pdf = await PdfDocument.openData(copy);
+        try {
+          await _extractPages(
+            pages,
+            onProgress: onProgress,
+            read: (pdfIndex) async {
+              if (pdfIndex < 0 || pdfIndex >= pdf.pages.length) return '';
+              final structured = await pdf.pages[pdfIndex].loadStructuredText();
+              return structured.fullText;
+            },
+          );
+          return;
+        } finally {
+          pdf.dispose();
+        }
+      } catch (e) {
+        debugPrint('pdfrx text extract failed for $documentId: $e');
+      }
 
       final document = sf.PdfDocument(inputBytes: bytes);
       final extractor = sf.PdfTextExtractor(document);

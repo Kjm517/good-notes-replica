@@ -149,9 +149,18 @@ class _DocumentTransferGateState extends ConsumerState<DocumentTransferGate> {
 
     return Scaffold(
       body: EditorPrepareOverlay(
-        label: _heldLabel,
+        label: paused
+            ? 'Paused — ${_heldLabel.toLowerCase()}'
+            : _heldLabel,
         fraction: _heldFraction,
         pageCount: pageCount,
+        paused: paused,
+        onPause: paused
+            ? null
+            : () => ref.read(syncPausedProvider.notifier).setPaused(true),
+        onResume: paused
+            ? () => ref.read(syncPausedProvider.notifier).setPaused(false)
+            : null,
         onClose: () {
           if (context.canPop()) {
             context.pop();

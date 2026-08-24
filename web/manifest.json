@@ -1,12 +1,12 @@
 {
-    "name": "notably",
-    "short_name": "notably",
+    "name": "Notably",
+    "short_name": "Notably",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#0B1B4A",
+    "theme_color": "#5257D4",
+    "description": "Handwritten notes, PDFs, and quizzes.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

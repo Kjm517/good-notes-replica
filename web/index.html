@@ -18,7 +18,7 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Notably — handwritten notes, PDFs, and quizzes.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -29,10 +29,37 @@
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>notably</title>
+  <title>Notably</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      overscroll-behavior: none;
+    }
+    /* Keep pens from scrolling the page instead of drawing. */
+    flt-glass-pane, flt-scene-host {
+      touch-action: none;
+    }
+  </style>
 </head>
 <body>
+  <script>
+    window._notablyPwa = { prompt: null, installed: false };
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      window._notablyPwa.prompt = e;
+    });
+    window.addEventListener('appinstalled', function () {
+      window._notablyPwa.installed = true;
+      window._notablyPwa.prompt = null;
+    });
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js');
+      });
+    }
+  </script>
   <script src='https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs' type='module'></script>
   <script type='module'>
   var { pdfjsLib } = globalThis;

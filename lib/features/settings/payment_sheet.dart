@@ -12,13 +12,14 @@ import 'billing_helpers.dart';
 import 'billing_ladder.dart';
 import 'billing_plan.dart';
 import 'entitlements.dart';
+import 'payment_marks.dart';
 import 'paymongo_billing.dart';
 import 'premium_providers.dart';
 import 'revenuecat_billing.dart';
 import 'settings_widgets.dart';
 import '../admin/voucher_api.dart';
 
-enum _PayMethod { store, gcash, maya }
+enum _PayMethod { store, card, gcash, maya }
 
 class PaymentSheet extends ConsumerStatefulWidget {
   const PaymentSheet({
@@ -66,16 +67,17 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
   }
 
   double _discount(bool walletCheckout) {
-    final rate = _appliedVoucher?.discountRate;
-    if (rate == null) return 0;
-    if (walletCheckout || !_useStore) return _subtotal * rate;
-    return 0;
-  }
-
-  String? get _appliedVoucherLabel {
     final applied = _appliedVoucher;
-    if (applied == null || !applied.valid) return null;
-    return applied.label ?? applied.code;
+    if (applied == null || !applied.valid) return 0;
+    if (!walletCheckout && _useStore) return 0;
+    if (applied.discountKind == 'amount') {
+      final pesos = (applied.discountAmountCentavos ?? 0) / 100.0;
+      if (pesos <= 0) return 0;
+      return pesos.clamp(0, _subtotal);
+    }
+    final rate = applied.discountRate;
+    if (rate == null) return 0;
+    return _subtotal * rate;
   }
 
   @override
@@ -105,6 +107,9 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     if (_voucher.text.trim().isNotEmpty) return;
     _voucher.text = kStudentVoucherCode;
     await _applyVoucher(silent: true);
+    if (!mounted) return;
+    // Keep the code for checkout, but don't leave it sitting in the field.
+    _voucher.clear();
   }
 
   Future<void> _applyVoucher({bool silent = false}) async {
@@ -121,7 +126,9 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
         setState(() => _appliedVoucher = null);
         return;
       }
-      if (!result.valid || result.discountRate == null) {
+      if (!result.valid ||
+          (result.discountRate == null &&
+              (result.discountAmountCentavos ?? 0) <= 0)) {
         if (!silent && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Invalid or expired voucher code.')),
@@ -133,7 +140,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
       setState(() => _appliedVoucher = result);
       if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Applied ${result.label ?? result.code}.')),
+          const SnackBar(content: Text('Promo applied.')),
         );
       }
     } finally {
@@ -141,9 +148,10 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     }
   }
 
-  PayMongoWallet? get _selectedWallet => switch (_method) {
-        _PayMethod.gcash => PayMongoWallet.gcash,
-        _PayMethod.maya => PayMongoWallet.paymaya,
+  PayMongoMethod? get _selectedPayMongo => switch (_method) {
+        _PayMethod.card => PayMongoMethod.card,
+        _PayMethod.gcash => PayMongoMethod.gcash,
+        _PayMethod.maya => PayMongoMethod.paymaya,
         _ => null,
       };
 
@@ -152,8 +160,8 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     try {
       if (_method == _PayMethod.store && _useStore) {
         await _subscribeViaStore();
-      } else if (_selectedWallet != null && _useWallets) {
-        await _subscribeViaWallet(_selectedWallet!);
+      } else if (_selectedPayMongo != null && _useWallets) {
+        await _subscribeViaPayMongo(_selectedPayMongo!);
       } else if (!_useStore && !_useWallets) {
         await Future<void>.delayed(const Duration(milliseconds: 400));
         await ref.read(billingPlanProvider.notifier).activate(
@@ -197,23 +205,41 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     _finish('Premium activated — enjoy unlimited quizzes!');
   }
 
-  Future<void> _subscribeViaWallet(PayMongoWallet wallet) async {
+  Future<void> _subscribeViaPayMongo(PayMongoMethod method) async {
     final billing = ref.read(payMongoBillingServiceProvider);
     if (billing == null) {
-      throw StateError('Sign in to pay with ${wallet.label}.');
+      throw StateError('Sign in to pay with ${method.label}.');
     }
 
     final checkout = await billing.createCheckout(
       plan: widget.plan,
-      wallet: wallet,
-      voucher: _appliedVoucher?.valid == true ? _voucher.text : null,
+      method: method,
+      voucher: _appliedVoucher?.valid == true ? _appliedVoucher!.code : null,
     );
-    await billing.markPendingCheckout(checkout.paymentIntentId);
+    if (checkout.granted) {
+      await ref.read(payMongoEntitlementRefreshProvider)();
+      if (!mounted) return;
+      _finish('Premium activated — enjoy unlimited quizzes!');
+      return;
+    }
+    final redirect = checkout.redirectUrl;
+    if (redirect == null || redirect.isEmpty) {
+      throw StateError('Checkout did not return a payment URL.');
+    }
+    final pendingId = checkout.paymentIntentId;
+    if (pendingId != null && pendingId.isNotEmpty) {
+      await billing.markPendingCheckout(pendingId);
+    }
 
-    final uri = Uri.parse(checkout.redirectUrl);
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final uri = Uri.parse(redirect);
+    final launched = await launchUrl(
+      uri,
+      mode: kIsWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.externalApplication,
+    );
     if (!launched) {
-      throw StateError('Could not open ${wallet.label} checkout.');
+      throw StateError('Could not open ${method.label} checkout.');
     }
 
     if (!mounted) return;
@@ -221,7 +247,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Complete payment in ${wallet.label}, then return to Notably.',
+          'Complete payment, then return to Notably.',
         ),
         duration: const Duration(seconds: 6),
       ),
@@ -239,11 +265,11 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     if (!_defaultMethodSet) {
       _defaultMethodSet = true;
       if (!_useStore && _useWallets) {
-        _method = _PayMethod.gcash;
+        _method = _PayMethod.card;
       }
     }
     final t = context.tokens;
-    final walletCheckout = _selectedWallet != null;
+    final walletCheckout = _selectedPayMongo != null;
     final planLabel = widget.plan == BillingPlan.yearly
         ? 'Premium — Yearly'
         : 'Premium — Monthly';
@@ -306,14 +332,14 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
                 ),
                 if (_discount(walletCheckout) > 0)
                   _PriceRow(
-                    label: _appliedVoucherLabel ?? 'Discount',
+                    label: 'Discount',
                     value: '-${formatPhp(_discount(walletCheckout))}',
                     accent: t.success,
                   ),
                 if (walletCheckout || !_useStore) ...[
                   Divider(height: 20, color: t.line),
                   _PriceRow(
-                    label: 'Due today',
+                    label: 'Total',
                     value: formatPhp(due),
                     bold: true,
                   ),
@@ -322,44 +348,13 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
             ),
           ),
           if (_useWallets || (!_useStore && !_useWallets)) ...[
-            const SizedBox(height: 18),
-            Text('Voucher code', style: AppTokens.sectionLabel(t.textFaint)),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _voucher,
-                    decoration: InputDecoration(
-                      hintText: kStudentVoucherCode,
-                      suffixIcon: _voucher.text.isEmpty
-                          ? null
-                          : IconButton(
-                              tooltip: 'Clear',
-                              icon: const Icon(Icons.close_rounded, size: 18),
-                              onPressed: _clearVoucher,
-                            ),
-                    ),
-                    onChanged: (_) => setState(() => _appliedVoucher = null),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: _validatingVoucher ? null : () => _applyVoucher(),
-                  child: _validatingVoucher
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Apply'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '${studentPricingHint()} ${launchPricingHint()}',
-              style: TextStyle(fontSize: 11, color: t.textMuted, height: 1.35),
+            const SizedBox(height: 10),
+            _PromoCodeField(
+              controller: _voucher,
+              validating: _validatingVoucher,
+              onChanged: () => setState(() => _appliedVoucher = null),
+              onClear: _clearVoucher,
+              onApply: () => _applyVoucher(),
             ),
           ],
           const SizedBox(height: 18),
@@ -369,7 +364,19 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
             children: [
               if (_useStore)
                 _PayRow(
-                  icon: Icons.store_rounded,
+                  leading: SizedBox(
+                    width: PaymentMark.slotWidth,
+                    height: PaymentMark.size,
+                    child: Center(
+                      child: Icon(
+                        Icons.store_rounded,
+                        size: 22,
+                        color: _method == _PayMethod.store
+                            ? t.premiumText
+                            : t.textMuted,
+                      ),
+                    ),
+                  ),
                   label: defaultTargetPlatform == TargetPlatform.iOS
                       ? 'App Store'
                       : 'Google Play',
@@ -379,16 +386,21 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
                 ),
               if (_useWallets) ...[
                 _PayRow(
-                  icon: Icons.account_balance_wallet_outlined,
+                  leading: const PaymentMark.card(),
+                  label: 'Debit / Credit card',
+                  subtitle: PayMongoMethod.card.subtitle,
+                  selected: _method == _PayMethod.card,
+                  onTap: () => setState(() => _method = _PayMethod.card),
+                ),
+                _PayRow(
+                  leading: const PaymentMark.gcash(),
                   label: 'GCash',
-                  subtitle: 'PayMongo · instant redirect',
                   selected: _method == _PayMethod.gcash,
                   onTap: () => setState(() => _method = _PayMethod.gcash),
                 ),
                 _PayRow(
-                  icon: Icons.payments_outlined,
+                  leading: const PaymentMark.maya(),
                   label: 'Maya',
-                  subtitle: 'PayMongo · instant redirect',
                   selected: _method == _PayMethod.maya,
                   onTap: () => setState(() => _method = _PayMethod.maya),
                 ),
@@ -435,18 +447,103 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
 
   String _buttonLabel() {
     if (_method == _PayMethod.store && _useStore) return 'Start free trial';
-    if (_selectedWallet != null) return 'Pay with ${_selectedWallet!.label}';
+    if (_selectedPayMongo != null) {
+      return _selectedPayMongo == PayMongoMethod.card
+          ? 'Pay with card'
+          : 'Pay with ${_selectedPayMongo!.label}';
+    }
     return 'Activate Premium';
   }
 
   String _footnote() {
+    if (kIsWeb) {
+      return 'On the web, Premium is billed with card, GCash, or Maya.';
+    }
     if (_method == _PayMethod.store && _useStore) {
       return 'Subscriptions are managed by ${defaultTargetPlatform == TargetPlatform.iOS ? 'Apple' : 'Google'}.';
     }
-    if (_selectedWallet != null) {
-      return 'You will complete payment in ${_selectedWallet!.label}, then return here.';
+    if (_selectedPayMongo != null) {
+      return _selectedPayMongo == PayMongoMethod.card
+          ? 'You will enter card details on a secure page, then return here.'
+          : 'You will complete payment in ${_selectedPayMongo!.label}, then return here.';
     }
     return 'Dev mode — no real charge.';
+  }
+}
+
+class _PromoCodeField extends StatefulWidget {
+  const _PromoCodeField({
+    required this.controller,
+    required this.validating,
+    required this.onChanged,
+    required this.onClear,
+    required this.onApply,
+  });
+
+  final TextEditingController controller;
+  final bool validating;
+  final VoidCallback onChanged;
+  final VoidCallback onClear;
+  final VoidCallback onApply;
+
+  @override
+  State<_PromoCodeField> createState() => _PromoCodeFieldState();
+}
+
+class _PromoCodeFieldState extends State<_PromoCodeField> {
+  var _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    if (!_open) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton(
+          onPressed: () => setState(() => _open = true),
+          child: const Text('Have a promo code?'),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Promo code', style: AppTokens.sectionLabel(t.textFaint)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: widget.controller,
+                decoration: InputDecoration(
+                  hintText: 'Enter code',
+                  suffixIcon: widget.controller.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Clear',
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: widget.onClear,
+                        ),
+                ),
+                onChanged: (_) => widget.onChanged(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: widget.validating ? null : widget.onApply,
+              child: widget.validating
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Apply'),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 
@@ -485,14 +582,14 @@ class _PriceRow extends StatelessWidget {
 
 class _PayRow extends StatelessWidget {
   const _PayRow({
-    required this.icon,
+    required this.leading,
     required this.label,
     required this.selected,
     required this.onTap,
     this.subtitle,
   });
 
-  final IconData icon;
+  final Widget leading;
   final String label;
   final String? subtitle;
   final bool selected;
@@ -507,7 +604,7 @@ class _PayRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: selected ? t.premiumText : t.textMuted),
+            leading,
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -520,7 +617,7 @@ class _PayRow extends StatelessWidget {
                       fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                     ),
                   ),
-                  if (subtitle != null)
+                  if (subtitle != null && subtitle!.isNotEmpty)
                     Text(
                       subtitle!,
                       style: AppTokens.mono(size: 10, color: t.textFaint),

@@ -10,11 +10,12 @@ Cross-platform (Android/iOS/web) note-taking app built with **Flutter**, replica
 - Cloud: Firestore for notes, **Cloudflare R2 behind a Worker** (`worker/`) for binaries.
 
 ## Commands
+- Run (Chrome, loads `.env`): `./scripts/run-chrome.sh` or `./scripts/run-chrome.ps1`
 - Run: `flutter run -d <device>` (Android device/emulator recommended for stylus).
 - Analyze: `flutter analyze`
 - Tests: `flutter test test/core_logic_test.dart test/widget_test.dart test/editor_top_bar_test.dart`
   - Note: DB-backed widget tests are NOT run under `flutter test` — `sqlite3_flutter_libs` (native) isn't available there and unsettled spinners hang `pumpAndSettle`. Keep tests either pure-Dart or DB-injected.
-- Web build works, but running on web needs `sqlite3.wasm` + `drift_worker.js` in `web/` (see drift web docs).
+- Web: use the Chrome script above so `--dart-define-from-file=.dart_defines.json` is always passed. `sqlite3.wasm` + `drift_worker.js` live in `web/`.
 
 ## Architecture (feature-first)
 ```

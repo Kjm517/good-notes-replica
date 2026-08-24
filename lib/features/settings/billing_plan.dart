@@ -31,9 +31,9 @@ double get kStudentMonthlyPhp => kMonthlyPricePhp * 0.8;
 double priceForPlan(BillingPlan plan) => switch (plan) {
       BillingPlan.yearly => kYearlyPricePhp,
       BillingPlan.monthly => kMonthlyPricePhp,
-      BillingPlan.none => 0,
+      BillingPlan.lifetime || BillingPlan.none => 0,
     };
 
-enum BillingPlan { none, monthly, yearly }
+enum BillingPlan { none, monthly, yearly, lifetime }
 
 const kFreeQuizLimitPerMonth = 3;

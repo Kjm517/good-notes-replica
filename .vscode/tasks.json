@@ -5,6 +5,15 @@
       "label": "sync-env",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/sync-env.sh",
+      "windows": {
+        "options": {
+          "shell": {
+            "executable": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass"]
+          }
+        },
+        "command": "${workspaceFolder}/scripts/sync-env.ps1"
+      },
       "presentation": {
         "reveal": "silent",
         "panel": "shared"

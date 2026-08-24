@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,19 +13,37 @@ import '../../app/providers.dart';
 import '../../core/sync/sync_providers.dart';
 import '../../core/sync/sync_state.dart';
 import '../auth/providers.dart';
+import '../legal/legal_copy.dart';
+import '../legal/legal_sheet.dart';
 import 'entitlements.dart';
 import 'about_notably_sheet.dart';
-import 'billing_plan.dart';
 import 'bug_report_sheet.dart';
+import 'paymongo_billing.dart';
 import 'premium_plan_sheet.dart';
 import 'premium_providers.dart';
 import 'settings_widgets.dart';
+import '../pwa/pwa_install.dart';
 
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Re-check worker entitlement whenever Settings opens so an admin revoke
+    // shows up without requiring a full app restart.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ref.read(payMongoEntitlementRefreshProvider)());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final t = context.tokens;
     final entitlement = ref.watch(entitlementProvider);
     final ent = entitlement.asData?.value;
@@ -75,6 +95,38 @@ class SettingsScreen extends ConsumerWidget {
                   label: 'Support',
                   child: _SupportSection(),
                 ),
+                if (kIsWeb)
+                  SettingsSection(
+                    label: 'App',
+                    child: SettingsGroupCard(
+                      children: [
+                        SettingsRow(
+                          icon: Icons.install_desktop_outlined,
+                          title: pwaIsStandalone()
+                              ? 'Installed'
+                              : 'Install Notably',
+                          subtitle: pwaIsStandalone()
+                              ? 'Running as an installed app'
+                              : pwaInstallAvailable()
+                                  ? 'Add to your home screen or apps list'
+                                  : 'Chrome menu → Cast, save, and share → Install Notably',
+                          onTap: pwaIsStandalone()
+                              ? null
+                              : () async {
+                                  final ok = await promptPwaInstall();
+                                  if (!context.mounted || ok) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Use the Chrome install icon in the address bar, or the browser menu.',
+                                      ),
+                                    ),
+                                  );
+                                },
+                        ),
+                      ],
+                    ),
+                  ),
                 if (kIsWeb)
                   SettingsSection(
                     label: 'Admin',
@@ -275,11 +327,14 @@ class _GoPremiumCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             trialExpired
-                ? 'Your 7-day trial has ended. Premium from ${monthlyPriceLabel()} '
-                    '(students ${formatPhp(kStudentMonthlyPhp)}/mo) keeps AI quizzes, '
-                    'history, and 15 GB storage.'
-                : 'Start a 7-day trial with $kTrialQuizLimit AI quizzes, or go Premium from '
-                    '${monthlyPriceLabel()} — ${yearlyPriceLabel()} ${yearlySavingsLabel().toLowerCase()}.',
+                ? (kIsWeb
+                    ? 'Your trial has ended. On the web, Premium is card, GCash, or Maya from ${monthlyPriceLabel()}.'
+                    : 'Your 7-day trial has ended. Premium from ${monthlyPriceLabel()} '
+                        'keeps unlimited AI quizzes, history, and 15 GB storage.')
+                : (kIsWeb
+                    ? 'Premium on the web is billed with card, GCash, or Maya from ${monthlyPriceLabel()} — not Google Play.'
+                    : 'Start a 7-day trial with $kTrialQuizLimit AI quizzes, or go Premium from '
+                        '${monthlyPriceLabel()} — ${yearlyPriceLabel()} ${yearlySavingsLabel().toLowerCase()}.'),
             style: TextStyle(fontSize: 13, color: t.textSecondary, height: 1.4),
           ),
           const SizedBox(height: 16),
@@ -310,10 +365,17 @@ class _ActivePlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final planName = plan == BillingPlan.monthly ? 'Monthly' : 'Yearly';
-    final renewLabel = renewsAt == null
-        ? 'Active subscription'
-        : 'Renews ${DateFormat.yMMMd().format(renewsAt!)}';
+    final planName = switch (plan) {
+      BillingPlan.monthly => 'Monthly',
+      BillingPlan.yearly => 'Yearly',
+      BillingPlan.lifetime => 'Lifetime',
+      BillingPlan.none => 'Premium',
+    };
+    final renewLabel = plan == BillingPlan.lifetime
+        ? 'Does not expire'
+        : renewsAt == null
+            ? 'Active subscription'
+            : 'Renews ${DateFormat.yMMMd().format(renewsAt!)}';
 
     return PremiumGradientCard(
       child: Column(
@@ -497,6 +559,18 @@ class _AboutSection extends StatelessWidget {
           subtitle: 'Version $kAppVersion',
           trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
           onTap: () => AboutNotablySheet.show(context),
+        ),
+        SettingsRow(
+          icon: Icons.description_outlined,
+          title: 'Terms of Use',
+          trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
+          onTap: () => LegalSheet.show(context, initial: LegalDoc.terms),
+        ),
+        SettingsRow(
+          icon: Icons.privacy_tip_outlined,
+          title: 'Privacy Policy',
+          trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
+          onTap: () => LegalSheet.show(context, initial: LegalDoc.privacy),
         ),
       ],
     );
