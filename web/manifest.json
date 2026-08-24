@@ -5,7 +5,7 @@
     "display": "standalone",
     "background_color": "#0B1B4A",
     "theme_color": "#5257D4",
-    "description": "Handwritten notes, PDFs, and quizzes.",
+    "description": "Take notes comfortably. Think notably — handwriting, PDFs, and quizzes on every device.",
     "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
