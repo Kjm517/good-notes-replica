@@ -41,6 +41,15 @@ class EditorController extends AutoDisposeFamilyNotifier<EditorState, String> {
   final Map<String, int> _seqByPage = {};
   final Set<String> _loading = {};
 
+  /// Pages whose strokes are in memory, least-recently-touched first.
+  ///
+  /// Ink is loaded per page as pages scroll into view and used to be kept
+  /// forever: scrolling a 4000-page PDF end to end held every stroke of the
+  /// document in RAM, and each load re-copied a map that had grown to match.
+  /// Evicted pages reload from SQLite the moment they are needed again.
+  final List<String> _lru = [];
+  static const int _maxLoadedPages = 32;
+
   @override
   EditorState build(String documentId) {
     _pages = ref.read(pageRepositoryProvider);
@@ -93,18 +102,51 @@ class EditorController extends AutoDisposeFamilyNotifier<EditorState, String> {
   /// hide drawings that landed (or returned) in the database.
   Future<void> ensurePageLoaded(String pageId, {bool force = false}) async {
     if (_loading.contains(pageId)) return;
-    if (!force && state.strokesByPage.containsKey(pageId)) return;
+    if (!force && state.strokesByPage.containsKey(pageId)) {
+      _touch(pageId);
+      return;
+    }
     _loading.add(pageId);
     try {
       final strokes = await _strokes.getStrokes(pageId);
       _seqByPage[pageId] =
           strokes.fold<int>(0, (m, s) => s.seq > m ? s.seq : m);
-      state = state.copyWith(
-        strokesByPage: {...state.strokesByPage, pageId: strokes},
-      );
+      final next = {...state.strokesByPage, pageId: strokes};
+      _touch(pageId);
+      for (final evicted in _pagesToEvict()) {
+        next.remove(evicted);
+        _lru.remove(evicted);
+      }
+      state = state.copyWith(strokesByPage: next);
     } finally {
       _loading.remove(pageId);
     }
+  }
+
+  void _touch(String pageId) {
+    _lru.remove(pageId);
+    _lru.add(pageId);
+  }
+
+  /// Loaded pages past [_maxLoadedPages] that nothing still needs.
+  ///
+  /// Undo/redo entries are skipped: those edits are replayed against the
+  /// in-memory strokes, so dropping a page they name would leave the page
+  /// holding only the replayed strokes.
+  List<String> _pagesToEvict() {
+    if (_lru.length <= _maxLoadedPages) return const [];
+    final pinned = {
+      if (state.currentPageId != null) state.currentPageId!,
+      for (final edit in _undo) edit.pageId,
+      for (final edit in _redo) edit.pageId,
+    };
+    final drop = <String>[];
+    for (final pageId in _lru) {
+      if (_lru.length - drop.length <= _maxLoadedPages) break;
+      if (pinned.contains(pageId) || _loading.contains(pageId)) continue;
+      drop.add(pageId);
+    }
+    return drop;
   }
 
   /// Sync writes strokes into SQLite; the canvas paints from this in-memory
@@ -129,15 +171,23 @@ class EditorController extends AutoDisposeFamilyNotifier<EditorState, String> {
     final idx = pages.isEmpty
         ? 0
         : state.currentIndex.clamp(0, pages.length - 1);
-    state = state.copyWith(
-      pages: mergeWatchedPages(
-        local: state.pages,
-        incoming: pages,
-        previewMargins: state.previewMargins,
-        previewPageId: state.previewPageId,
-      ),
-      currentIndex: idx,
+    final merged = mergeWatchedPages(
+      local: state.pages,
+      incoming: pages,
+      previewMargins: state.previewMargins,
+      previewPageId: state.previewPageId,
     );
+    // A stroke write touches the page row for sync, which re-emits this whole
+    // list unchanged. Keep the old list so the canvas's layout cache — keyed
+    // on list identity — survives; on a long PDF that is thousands of row
+    // heights recomputed per stroke.
+    if (pagesRenderEqual(state.pages, merged)) {
+      if (idx != state.currentIndex) {
+        state = state.copyWith(currentIndex: idx);
+      }
+      return;
+    }
+    state = state.copyWith(pages: merged, currentIndex: idx);
   }
 
   /// Updates which page is considered "current" (drives page settings/margins).
@@ -273,6 +323,7 @@ class EditorController extends AutoDisposeFamilyNotifier<EditorState, String> {
   }
 
   void _setStrokes(String pageId, List<InkStroke> strokes) {
+    _touch(pageId);
     state = state.copyWith(
       strokesByPage: {...state.strokesByPage, pageId: strokes},
     );

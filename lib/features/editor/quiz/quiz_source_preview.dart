@@ -440,6 +440,7 @@ class QuizExplanationText extends StatelessWidget {
     required this.fallbackPageIndex,
     required this.onOpenPage,
     this.target,
+    this.fontSize,
   });
 
   final String explanation;
@@ -450,6 +451,9 @@ class QuizExplanationText extends StatelessWidget {
   /// The answer the preview should highlight, whichever page it opens.
   final QuizSourceTarget? target;
   final void Function(int pageIndex, [QuizSourceTarget? target]) onOpenPage;
+
+  /// Body size. Defaults to the theme body size (~14) when omitted.
+  final double? fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -467,9 +471,14 @@ class QuizExplanationText extends StatelessWidget {
         ),
       ];
     }
-    final bodyStyle = TextStyle(height: 1.45, color: t.textSecondary);
+    final bodySize = fontSize ?? 14;
+    final bodyStyle = TextStyle(
+      height: 1.45,
+      color: t.textSecondary,
+      fontSize: bodySize,
+    );
     final linkStyle = AppTokens.mono(
-      size: 13,
+      size: bodySize - 1,
       color: t.premiumText,
       weight: FontWeight.w700,
     ).copyWith(

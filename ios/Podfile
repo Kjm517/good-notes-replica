@@ -1,15 +1,15 @@
 # CocoaPods setup for the iOS build.
 #
 # Committed rather than left to CocoaPods to generate, because two of this
-# app's dependencies need settings the generated default does not have, and
-# both failures look like "the package does not support iOS" rather than a
-# configuration problem:
+# app's dependencies need settings the generated default does not have:
 #
-#   * Firebase (core / auth / firestore) declares a minimum deployment target
-#     of iOS 15.0. `pod install` refuses outright if the project asks for less,
-#     with an error naming the pod rather than the version mismatch.
+#   * Several plugins declare a minimum of iOS 15.0. `pod install` refuses
+#     outright if the project asks for less.
 #   * `printing` requires Swift, which means `use_frameworks!` on the Runner
 #     target. Without it the build fails on missing module maps.
+#
+# Flutter Swift Package Manager is disabled in pubspec.yaml — Xcode 16/26
+# crashes resolving plugin graphs after Firebase was removed.
 platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously, which slows every
@@ -44,10 +44,8 @@ require File.expand_path(
 flutter_ios_podfile_setup
 
 target 'Runner' do
-  # Static linkage is the combination Firebase's Flutter plugins expect: plain
-  # dynamic `use_frameworks!` builds, then crashes at launch on missing
-  # Firebase symbols. Static keeps `printing`'s Swift requirement satisfied
-  # without that.
+  # Static linkage keeps Swift modules (`printing`) working without the
+  # launch-time missing-symbol crashes that dynamic `use_frameworks!` hit.
   use_frameworks! :linkage => :static
   use_modular_headers!
 

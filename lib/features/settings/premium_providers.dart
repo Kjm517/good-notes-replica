@@ -109,13 +109,16 @@ class BillingPlanController extends Notifier<BillingPlan> {
     final paid = amountPhp ?? priceForPlan(plan);
     await prefs.setBool('is_premium', true);
     await prefs.setString(_planKey, plan.name);
-    final now = DateTime.now();
-    final renew = switch (plan) {
-      BillingPlan.yearly => now.add(const Duration(days: 365)),
-      BillingPlan.lifetime => DateTime.utc(9999, 12, 31),
-      BillingPlan.monthly || BillingPlan.none => now.add(const Duration(days: 30)),
-    };
-    await prefs.setString(_renewKey, renew.toIso8601String());
+    if (plan == BillingPlan.lifetime) {
+      await prefs.setString(_renewKey, DateTime.utc(9999, 12, 31).toIso8601String());
+    } else {
+      final renew = DateTime.now().add(
+        plan == BillingPlan.yearly
+            ? const Duration(days: 365)
+            : const Duration(days: 30),
+      );
+      await prefs.setString(_renewKey, renew.toIso8601String());
+    }
     await _appendHistory(
       prefs,
       BillingHistoryEntry(
@@ -155,7 +158,9 @@ class BillingPlanController extends Notifier<BillingPlan> {
     final prefs = ref.read(sharedPrefsProvider);
     await prefs.setBool('is_premium', true);
     await prefs.setString(_planKey, plan.name);
-    if (expiresAt != null) {
+    if (plan == BillingPlan.lifetime || expiresAt == null) {
+      await prefs.remove(_renewKey);
+    } else {
       await prefs.setString(_renewKey, expiresAt.toIso8601String());
     }
     if (amountPhp != null) {
@@ -185,6 +190,16 @@ class BillingPlanController extends Notifier<BillingPlan> {
     await prefs.remove(_planKey);
     await prefs.remove(_renewKey);
     state = BillingPlan.none;
+  }
+
+  /// Drop locally cached PayMongo/admin premium after the worker says free.
+  Future<void> clearFromPayMongo() async {
+    final prefs = ref.read(sharedPrefsProvider);
+    await prefs.setBool('is_premium', false);
+    await prefs.remove(_planKey);
+    await prefs.remove(_renewKey);
+    ref.invalidateSelf();
+    ref.invalidate(billingHistoryProvider);
   }
 
   Future<void> recordStorePurchase({

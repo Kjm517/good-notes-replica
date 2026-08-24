@@ -163,7 +163,10 @@ class _AccountHeader extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final user = ref.watch(authStateProvider).asData?.value;
-    final tier = entitlement?.tierLabel ?? 'Free';
+    final plan = ref.watch(billingPlanProvider);
+    final tier = entitlement?.isPremium == true && plan == BillingPlan.lifetime
+        ? 'Lifetime'
+        : (entitlement?.tierLabel ?? 'Free');
     final premiumBadge = entitlement?.isPremium == true || entitlement?.isTrialActive == true;
 
     if (user == null) {
@@ -180,12 +183,16 @@ class _AccountHeader extends ConsumerWidget {
         ),
         title: const Text(
           'Not signed in',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
           supabaseReady
               ? 'Sign in to sync your notes and start your 7-day trial'
               : 'Sync is not set up — notes stay on this device',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 12.5, color: t.textMuted),
         ),
         trailing: TierBadge(label: tier, premium: premiumBadge),
@@ -210,10 +217,14 @@ class _AccountHeader extends ConsumerWidget {
       ),
       title: Text(
         user.label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
         user.email ?? 'Signed in',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: AppTokens.mono(size: 11, color: t.textMuted),
       ),
       trailing: TierBadge(label: tier, premium: premiumBadge),
@@ -365,14 +376,10 @@ class _ActivePlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final planName = switch (plan) {
-      BillingPlan.monthly => 'Monthly',
-      BillingPlan.yearly => 'Yearly',
-      BillingPlan.lifetime => 'Lifetime',
-      BillingPlan.none => 'Premium',
-    };
-    final renewLabel = plan == BillingPlan.lifetime
-        ? 'Does not expire'
+    final planName = billingPlanLabel(plan);
+    final lifetime = plan == BillingPlan.lifetime;
+    final renewLabel = lifetime
+        ? 'Never expires'
         : renewsAt == null
             ? 'Active subscription'
             : 'Renews ${DateFormat.yMMMd().format(renewsAt!)}';

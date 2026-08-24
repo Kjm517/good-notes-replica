@@ -34,6 +34,11 @@ class CopiedAsset {
 /// True when this platform can write asset files to disk.
 bool get supportsFileStorage => impl.supportsFileStorage;
 
+/// Destination path for a newly stored asset — used by background downloads
+/// that write straight to disk instead of streaming through Dart.
+Future<String> plannedAssetPath(String id, {String extension = 'bin'}) =>
+    impl.plannedAssetPath(id, extension: extension);
+
 /// Largest asset worth pulling into a single allocation.
 ///
 /// Android caps a process well below the size of a scanned textbook — a mid

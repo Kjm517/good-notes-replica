@@ -45,6 +45,9 @@ Future<CopiedAsset> copyAssetFromFile(
 Future<CopiedAsset> probeFile(String sourcePath) =>
     throw UnsupportedError('Asset files are not available on web');
 
+Future<String> plannedAssetPath(String id, {String extension = 'bin'}) =>
+    throw UnsupportedError('Asset files are not available on web');
+
 Future<bool> assetExists({
   String? localPath,
   bool hasInlineData = false,

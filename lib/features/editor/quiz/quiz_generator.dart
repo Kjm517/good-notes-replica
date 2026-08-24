@@ -21,7 +21,18 @@ bool shouldUsePageImages({
   return compactText.length < 2 || chars < 500;
 }
 
+/// Extra items requested on the first pass so the exam-style filter can drop
+/// a few without shrinking a 25-question quiz to 5–8.
+int quizOversampleCount(int wanted) {
+  if (wanted <= 0) return 0;
+  return max(wanted, (wanted * 1.4).ceil());
+}
+
 /// Builds an exam-style quiz with Gemini. Offline requests are queued in the UI.
+///
+/// Gemini often returns fewer than asked (thinking tokens, truncated JSON),
+/// and [keepExamStyle] drops stems that fail the exam-style rules. We oversample
+/// and top up so the student actually gets [QuizConfig.count].
 Future<List<QuizQuestion>> generateExamQuiz({
   required List<SourcePassage> passages,
   required QuizConfig config,
@@ -36,29 +47,67 @@ Future<List<QuizQuestion>> generateExamQuiz({
     );
   }
   await loadQuizStopWords();
-  final questions = keepExamStyle(
-    alignQuestionsToSource(
-      await ai.generate(
-        textPages: pages,
-        images: images,
-        config: config,
-        additionalInstructions: additionalInstructions,
-      ),
-      pages,
-    ),
-  );
-  if (questions.isEmpty) {
+
+  final wanted = config.count;
+  final kept = <QuizQuestion>[];
+  final seen = <String>{};
+
+  for (var round = 0; round < 3 && kept.length < wanted; round++) {
+    final need = wanted - kept.length;
+    final ask = round == 0 ? quizOversampleCount(wanted) : min(wanted, need + 4);
+    var extra = additionalInstructions;
+    if (seen.isNotEmpty) {
+      final avoid = seen.take(24).map((p) => '- $p').join('\n');
+      extra = [
+        if (additionalInstructions != null &&
+            additionalInstructions.trim().isNotEmpty)
+          additionalInstructions.trim(),
+        'Do not repeat these questions:\n$avoid',
+        'Write $ask NEW questions. Return exactly $ask items.',
+      ].join('\n\n');
+    }
+    final raw = await ai.generate(
+      textPages: pages,
+      images: images,
+      config: config.copyWith(count: ask),
+      additionalInstructions: extra,
+    );
+    final batch = keepRequestedKinds(
+      keepExamStyle(alignQuestionsToSource(raw, pages)),
+      config.kinds,
+    );
+    debugPrint(
+      'Quiz round ${round + 1}: asked $ask, parsed ${raw.length}, '
+      'usable ${batch.length}',
+    );
+    for (final q in batch) {
+      final key = q.prompt.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (key.isEmpty || !seen.add(key)) continue;
+      kept.add(q);
+      if (kept.length >= wanted) break;
+    }
+  }
+
+  if (kept.isEmpty) {
     throw StateError(
       'Gemini did not return usable exam questions. Try again.',
     );
   }
-  return questions.take(config.count).toList();
+  return kept.take(wanted).toList();
 }
 
 List<QuizQuestion> keepExamStyle(List<QuizQuestion> questions) => [
       for (final q in questions)
         if (isExamStyleQuestion(q)) q,
     ];
+
+List<QuizQuestion> keepRequestedKinds(
+  List<QuizQuestion> questions,
+  Set<QuizKind> kinds,
+) {
+  if (kinds.isEmpty) return questions;
+  return [for (final q in questions) if (kinds.contains(q.kind)) q];
+}
 
 List<QuizSourcePage> compactQuizPages(
   List<SourcePassage> passages, {
@@ -146,22 +195,9 @@ class AiQuizGenerator {
 
   /// Parses the JSON array returned by Gemini into [QuizQuestion] objects.
   List<QuizQuestion> _parseResponse(String text, QuizConfig config) {
-    var cleaned = text.trim();
-    if (cleaned.startsWith('```')) {
-      cleaned = cleaned
-          .replaceFirst(RegExp(r'^```\w*\n?'), '')
-          .replaceFirst(RegExp(r'\n?```$'), '')
-          .trim();
-    }
-    final start = cleaned.indexOf('[');
-    final end = cleaned.lastIndexOf(']');
-    if (start >= 0 && end > start) {
-      cleaned = cleaned.substring(start, end + 1);
-    }
-
-    final decoded = jsonDecode(cleaned);
-    if (decoded is! List) {
-      throw FormatException('Expected JSON array, got ${decoded.runtimeType}');
+    final decoded = decodeQuizQuestionArray(text);
+    if (decoded.isEmpty) {
+      throw FormatException('Expected JSON array of quiz questions');
     }
 
     final questions = <QuizQuestion>[];
@@ -485,3 +521,36 @@ bool answersMatch(String written, String accepted) {
 
 String _norm(String s) =>
     s.toLowerCase().replaceAll(RegExp(r"[^\w]+"), ' ').trim();
+
+/// Pulls a JSON array of question objects out of Gemini output.
+///
+/// Thinking models often hit MAX_TOKENS mid-array. The last object is
+/// incomplete; every complete `{...}` before that is still usable.
+List<dynamic> decodeQuizQuestionArray(String text) {
+  var cleaned = text.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned
+        .replaceFirst(RegExp(r'^```\w*\n?'), '')
+        .replaceFirst(RegExp(r'\n?```$'), '')
+        .trim();
+  }
+  final start = cleaned.indexOf('[');
+  if (start < 0) return const [];
+
+  final end = cleaned.lastIndexOf(']');
+  if (end > start) {
+    try {
+      final decoded = jsonDecode(cleaned.substring(start, end + 1));
+      if (decoded is List && decoded.isNotEmpty) return decoded;
+    } catch (_) {}
+  }
+
+  final slice = cleaned.substring(start);
+  final lastComplete = slice.lastIndexOf('}');
+  if (lastComplete < 0) return const [];
+  try {
+    final decoded = jsonDecode('${slice.substring(0, lastComplete + 1)}]');
+    if (decoded is List) return decoded;
+  } catch (_) {}
+  return const [];
+}

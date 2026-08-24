@@ -34,6 +34,13 @@ double priceForPlan(BillingPlan plan) => switch (plan) {
       BillingPlan.lifetime || BillingPlan.none => 0,
     };
 
+String billingPlanLabel(BillingPlan plan) => switch (plan) {
+      BillingPlan.monthly => 'Monthly',
+      BillingPlan.yearly => 'Yearly',
+      BillingPlan.lifetime => 'Lifetime',
+      BillingPlan.none => 'Free',
+    };
+
 enum BillingPlan { none, monthly, yearly, lifetime }
 
 const kFreeQuizLimitPerMonth = 3;

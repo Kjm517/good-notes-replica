@@ -7,8 +7,8 @@ import 'page_render_cache_io.dart'
 /// Disk cache of already-rendered PDF page images.
 ///
 /// The original PDF stays on disk as the source of truth. The first time a
-/// page is drawn we JPEG it here; later opens decode that file instead of
-/// running PdfRenderer again. Not synced — these are local speed copies only.
+/// page is drawn we store an image here; later opens decode that file instead
+/// of running PDFium again. Not synced — these are local speed copies only.
 /// Web has no filesystem, so every call is a no-op there.
 const String kPageRenderFull = 'full';
 

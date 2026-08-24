@@ -122,7 +122,9 @@ class _AdminSubscriptionsPageState extends ConsumerState<AdminSubscriptionsPage>
                             color: s.isPremium ? t.success : t.textMuted,
                           ),
                           Text(
-                            s.expiresAt?.substring(0, 10) ?? '—',
+                            s.plan == 'lifetime'
+                                ? 'Never'
+                                : s.expiresAt?.substring(0, 10) ?? '—',
                             style: AppTokens.mono(size: 11, color: t.textMuted),
                           ),
                           Text(formatPhp(s.mrrPhp.round()), style: TextStyle(color: t.textSecondary)),

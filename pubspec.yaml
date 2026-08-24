@@ -115,6 +115,10 @@ flutter_native_splash:
 
 # The following section is specific to Flutter packages.
 flutter:
+  config:
+    # Xcode 16/26 crashes resolving plugin SPM graphs
+    # (insertObjects:atIndexes count mismatch). CocoaPods is stable here.
+    enable-swift-package-manager: false
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

@@ -206,4 +206,81 @@ void main() {
       expect(merged.single.marginSpec, previewSpec);
     });
   });
+
+  group('pagesRenderEqual', () {
+    NotePage page({
+      required String id,
+      required int pageIndex,
+      required DateTime updatedAt,
+      bool dirty = true,
+      MarginSpec marginSpec = MarginSpec.none,
+      String? bookmarkTitle,
+    }) {
+      return NotePage(
+        updatedAt: updatedAt,
+        dirty: dirty,
+        id: id,
+        documentId: 'doc',
+        pageIndex: pageIndex,
+        template: PaperTemplate.lined,
+        paperColor: PaperColor.white,
+        marginSpec: marginSpec,
+        bookmarkTitle: bookmarkTitle,
+        createdAt: DateTime.utc(2026, 8, 16),
+      );
+    }
+
+    final t = DateTime.utc(2026, 8, 16, 12);
+
+    test('a sync touch alone does not count as a change', () {
+      final before = [
+        page(id: 'a', pageIndex: 0, updatedAt: t, dirty: false),
+        page(id: 'b', pageIndex: 1, updatedAt: t, dirty: false),
+      ];
+      final afterStroke = [
+        page(id: 'a', pageIndex: 0, updatedAt: t.add(const Duration(seconds: 5))),
+        page(id: 'b', pageIndex: 1, updatedAt: t, dirty: false),
+      ];
+
+      expect(pagesRenderEqual(before, afterStroke), isTrue);
+    });
+
+    test('a margin edit, reorder, insert or bookmark does count', () {
+      final before = [
+        page(id: 'a', pageIndex: 0, updatedAt: t),
+        page(id: 'b', pageIndex: 1, updatedAt: t),
+      ];
+
+      expect(
+        pagesRenderEqual(before, [
+          page(
+            id: 'a',
+            pageIndex: 0,
+            updatedAt: t,
+            marginSpec: const MarginSpec(enabled: true, left: 40),
+          ),
+          before[1],
+        ]),
+        isFalse,
+      );
+      expect(
+        pagesRenderEqual(before, [before[1], before[0]]),
+        isFalse,
+      );
+      expect(
+        pagesRenderEqual(before, [
+          ...before,
+          page(id: 'c', pageIndex: 2, updatedAt: t),
+        ]),
+        isFalse,
+      );
+      expect(
+        pagesRenderEqual(before, [
+          page(id: 'a', pageIndex: 0, updatedAt: t, bookmarkTitle: 'Intro'),
+          before[1],
+        ]),
+        isFalse,
+      );
+    });
+  });
 }

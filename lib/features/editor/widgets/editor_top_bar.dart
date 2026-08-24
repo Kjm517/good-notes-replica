@@ -512,7 +512,8 @@ const _kPrimaryDockTools = [
   (Icons.sticky_note_2_outlined, 'Sticky note', ToolType.sticky),
 ];
 
-/// Extra tools surfaced through the overflow sheet on phone and narrow tablets.
+/// Extra tools surfaced through the overflow sheet on *phones*. Tablets and
+/// iPads show these inline on the dock / tool group.
 const _kOverflowToolEntries = [
   (Icons.brush_outlined, 'Fountain pen', ToolType.fountainPen),
   (Icons.gesture_rounded, 'Pencil', ToolType.pencil),
@@ -584,6 +585,10 @@ class _ToolGroup extends ConsumerWidget {
     final state = ref.watch(editorControllerProvider(documentId));
     final controller = ref.read(editorControllerProvider(documentId).notifier);
     final drawing = state.isDrawingTool;
+    // iPad / Android tablets have the width for fountain pen, pencil, tape,
+    // image, stickers and margins — phones keep those behind More tools.
+    final allTools = showInlineSwatches ||
+        MediaQuery.sizeOf(context).shortestSide >= AppBreakpoints.tabletShortest;
 
     Widget tool(IconData icon, String label, ToolType type) => _ToolButton(
       icon: icon,
@@ -605,7 +610,7 @@ class _ToolGroup extends ConsumerWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            if (showInlineSwatches) ...[
+            if (allTools) ...[
               tool(Icons.pan_tool_alt_rounded, 'Hand', ToolType.hand),
               tool(Icons.edit_rounded, 'Pen', ToolType.pen),
               tool(Icons.brush_outlined, 'Fountain pen', ToolType.fountainPen),
@@ -1015,6 +1020,9 @@ class EditorToolDock extends ConsumerWidget {
     final palette = paletteFor(state.tool);
     final selected = state.activeSettings.color;
 
+    final tablet =
+        MediaQuery.sizeOf(context).shortestSide >= AppBreakpoints.tabletShortest;
+
     Widget tool(IconData icon, String label, ToolType type) => _DockTool(
       icon: icon,
       label: label,
@@ -1104,24 +1112,66 @@ class EditorToolDock extends ConsumerWidget {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      for (final item in _kPhoneDockTools)
-                        tool(item.$1, item.$2, item.$3),
-                      _DockTool(
-                        icon: Icons.more_horiz_rounded,
-                        label: 'More tools',
-                        selected: const {
-                          ToolType.fountainPen,
-                          ToolType.pencil,
-                          ToolType.tape,
-                          ToolType.image,
-                        }.contains(state.tool),
-                        onTap: () => _OverflowTools.show(
-                          context,
-                          ref: ref,
-                          documentId: documentId,
-                          pageSizeFor: pageSizeFor,
+                      if (tablet) ...[
+                        tool(Icons.pan_tool_alt_rounded, 'Hand', ToolType.hand),
+                        tool(Icons.edit_rounded, 'Pen', ToolType.pen),
+                        tool(Icons.brush_outlined, 'Fountain pen',
+                            ToolType.fountainPen),
+                        tool(Icons.gesture_rounded, 'Pencil', ToolType.pencil),
+                        tool(Icons.brush_rounded, 'Highlighter',
+                            ToolType.highlighter),
+                        tool(Icons.horizontal_rule_rounded, 'Tape',
+                            ToolType.tape),
+                        tool(Icons.category_outlined, 'Shape', ToolType.shape),
+                        tool(Icons.text_fields_rounded, 'Text', ToolType.text),
+                        tool(Icons.sticky_note_2_outlined, 'Sticky note',
+                            ToolType.sticky),
+                        _DockTool(
+                          icon: Icons.emoji_emotions_outlined,
+                          label: 'Stickers',
+                          selected: false,
+                          onTap: () =>
+                              _openStickers(context, ref, documentId),
                         ),
-                      ),
+                        tool(Icons.highlight_alt_rounded, 'Select',
+                            ToolType.lasso),
+                        tool(Icons.image_outlined, 'Image', ToolType.image),
+                        tool(Icons.cleaning_services_rounded, 'Eraser',
+                            ToolType.eraser),
+                        _DockTool(
+                          icon: Icons.straighten_rounded,
+                          label: 'Margins',
+                          selected: state.effectiveMargins?.enabled ?? false,
+                          onTap: () {
+                            final page = state.currentPage;
+                            if (page == null) return;
+                            MarginsSheet.show(
+                              context,
+                              documentId: documentId,
+                              pageSize: pageSizeFor(page),
+                            );
+                          },
+                        ),
+                      ] else ...[
+                        for (final item in _kPhoneDockTools)
+                          tool(item.$1, item.$2, item.$3),
+                        _DockTool(
+                          icon: Icons.more_horiz_rounded,
+                          label: 'More tools',
+                          selected: const {
+                            ToolType.fountainPen,
+                            ToolType.pencil,
+                            ToolType.tape,
+                            ToolType.image,
+                          }.contains(state.tool),
+                          onTap: () => _OverflowTools.show(
+                            context,
+                            ref: ref,
+                            documentId: documentId,
+                            pageSizeFor: pageSizeFor,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

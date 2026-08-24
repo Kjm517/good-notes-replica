@@ -1,12 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:drift/drift.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:pdfx/pdfx.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/db/database.dart';
@@ -243,52 +243,59 @@ class ImportService {
     onProgress?.call(0, 'Opening PDF ($mb MB)…');
 
     // Read page sizes up front (may detach `bytes`; `stored` is unaffected).
-    final doc = await PdfDocument.openData(bytes);
-    final count = doc.pagesCount;
+    final doc = await PdfDocument.openData(
+      bytes,
+      sourceName: name,
+      useProgressiveLoading: false,
+    );
+    try {
+      final count = doc.pages.length;
 
-    // Render the cover now, while the document is already open. Doing it later
-    // would mean re-opening the whole file just to draw a card-sized preview.
-    final coverThumb = await _renderPdfCover(doc);
+      // Render the cover now, while the document is already open. Doing it later
+      // would mean re-opening the whole file just to draw a card-sized preview.
+      final coverThumb = await _renderPdfCover(doc);
 
-    final sizes = await _measurePages(doc, count, onProgress);
-    await doc.close();
-    onProgress?.call(0.9, 'Saving $count pages…');
+      final sizes = await _measurePages(doc, onProgress);
+      onProgress?.call(0.9, 'Saving $count pages…');
 
-    await _db.transaction(() async {
-      await _db.into(_db.documents).insert(DocumentsCompanion.insert(
-            id: docId,
-            type: DocumentType.pdf,
-            title: Value(title),
-            parentId: Value(parentId),
-            coverThumb: Value(coverThumb),
-            ownerUid: Value(ownerUid),
-          ));
-      await _assets.store(
-        id: assetId,
-        bytes: stored,
-        kind: 1,
-        filename: file.name,
-        mime: 'application/pdf',
-      );
-      // One batched insert instead of 4,895 round-trips.
-      await _db.batch((batch) {
-        batch.insertAll(_db.notePages, [
-          for (var i = 0; i < sizes.length; i++)
-            NotePagesCompanion.insert(
-              id: _uuid.v4(),
-              documentId: docId,
-              pageIndex: i,
-              template: const Value(PaperTemplate.blank),
-              pdfAssetId: Value(assetId),
-              pdfPageIndex: Value(i),
-              pageW: Value(sizes[i].width),
-              pageH: Value(sizes[i].height),
-            ),
-        ]);
+      await _db.transaction(() async {
+        await _db.into(_db.documents).insert(DocumentsCompanion.insert(
+              id: docId,
+              type: DocumentType.pdf,
+              title: Value(title),
+              parentId: Value(parentId),
+              coverThumb: Value(coverThumb),
+              ownerUid: Value(ownerUid),
+            ));
+        await _assets.store(
+          id: assetId,
+          bytes: stored,
+          kind: 1,
+          filename: file.name,
+          mime: 'application/pdf',
+        );
+        // One batched insert instead of thousands of round-trips.
+        await _db.batch((batch) {
+          batch.insertAll(_db.notePages, [
+            for (var i = 0; i < sizes.length; i++)
+              NotePagesCompanion.insert(
+                id: _uuid.v4(),
+                documentId: docId,
+                pageIndex: i,
+                template: const Value(PaperTemplate.blank),
+                pdfAssetId: Value(assetId),
+                pdfPageIndex: Value(i),
+                pageW: Value(sizes[i].width),
+                pageH: Value(sizes[i].height),
+              ),
+          ]);
+        });
       });
-    });
-    onProgress?.call(1, 'Done');
-    return docId;
+      onProgress?.call(1, 'Done');
+      return docId;
+    } finally {
+      await doc.dispose();
+    }
   }
 
   /// Imports a PDF that is already on disk, streaming it into asset storage.
@@ -307,12 +314,20 @@ class ImportService {
     final title = _titleFrom(name);
 
     onProgress?.call(0, 'Opening PDF…');
-    final doc = await PdfDocument.openFile(path);
-    final count = doc.pagesCount;
-
-    final coverThumb = await _renderPdfCover(doc);
-    final sizes = await _measurePages(doc, count, onProgress);
-    await doc.close();
+    final doc = await PdfDocument.openFile(
+      path,
+      useProgressiveLoading: false,
+    );
+    late final List<ui.Size> sizes;
+    late final String? coverThumb;
+    late final int count;
+    try {
+      count = doc.pages.length;
+      coverThumb = await _renderPdfCover(doc);
+      sizes = await _measurePages(doc, onProgress);
+    } finally {
+      await doc.dispose();
+    }
 
     onProgress?.call(0.9, 'Saving $count pages…');
     // Copy outside the transaction: it is the slow part for a large file, and
@@ -357,71 +372,88 @@ class ImportService {
 
   /// Page dimensions for every page.
   ///
-  /// Opening 4,895 pages one at a time to read their size dominated import —
-  /// minutes of work for information that is almost always identical on every
-  /// page. So sample a handful first; if they agree, reuse that size for the
-  /// whole document and only fall back to measuring each page when the
-  /// document genuinely has mixed page sizes.
+  /// PDFium already has the page tree in memory after open, so width/height
+  /// are a dictionary read — not opening a renderer per page. The old pdfx
+  /// path did `getPage` + `close` for mixed-size books (a cover that is not
+  /// the same as the rest), which is 2–3 seconds × thousands of pages.
   Future<List<ui.Size>> _measurePages(
     PdfDocument doc,
-    int count,
     ImportProgress? onProgress,
   ) async {
-    onProgress?.call(0.05, 'Checking page sizes…');
+    final pages = doc.pages;
+    final count = pages.length;
+    if (count == 0) return const [];
+    onProgress?.call(0.08, 'Reading $count page sizes…');
 
-    final probeIndexes = <int>{1, 2, (count / 2).ceil(), count}
-        .where((i) => i >= 1 && i <= count)
-        .toList();
-
-    ui.Size? first;
-    var uniform = true;
-    for (final index in probeIndexes) {
-      final page = await doc.getPage(index);
-      final size = ui.Size(page.width, page.height);
-      await page.close();
-      first ??= size;
-      if (size != first) uniform = false;
+    if (pages.every((page) => page.isLoaded)) {
+      onProgress?.call(0.85, 'Ready to save $count pages');
+      return [for (final page in pages) ui.Size(page.width, page.height)];
     }
 
-    if (uniform && first != null) {
-      onProgress?.call(0.85, 'All $count pages are the same size');
-      return List<ui.Size>.filled(count, first);
-    }
-
-    // Mixed sizes: measure properly.
-    final sizes = <ui.Size>[];
-    for (var i = 1; i <= count; i++) {
-      final page = await doc.getPage(i);
-      sizes.add(ui.Size(page.width, page.height));
-      await page.close();
-      if (i % 25 == 0 || i == count) {
-        onProgress?.call(0.05 + (i / count) * 0.8, 'Reading page $i of $count');
+    final sizes = List<ui.Size>.filled(count, ui.Size.zero);
+    for (var i = 0; i < count; i++) {
+      var page = pages[i];
+      if (!page.isLoaded) page = await page.ensureLoaded();
+      sizes[i] = ui.Size(page.width, page.height);
+      if (i % 250 == 0 || i == count - 1) {
+        onProgress?.call(
+          0.08 + (i / count) * 0.75,
+          'Reading page ${i + 1} of $count',
+        );
+        await Future<void>.delayed(Duration.zero);
       }
     }
+    onProgress?.call(0.85, 'Ready to save $count pages');
     return sizes;
   }
 
   /// A small PNG of page 1, base64 encoded, for the library card.
   Future<String?> _renderPdfCover(PdfDocument doc) async {
+    if (doc.pages.isEmpty) return null;
     try {
-      final page = await doc.getPage(1);
+      var page = doc.pages.first;
+      if (!page.isLoaded) page = await page.ensureLoaded();
+      const targetWidth = 320.0;
+      final scale = targetWidth / page.width;
+      final rendered = await page.render(
+        fullWidth: page.width * scale,
+        fullHeight: page.height * scale,
+        backgroundColor: 0xffffffff,
+      );
+      if (rendered == null) return null;
       try {
-        const targetWidth = 320.0;
-        final scale = targetWidth / page.width;
-        final rendered = await page.render(
-          width: page.width * scale,
-          height: page.height * scale,
-          format: PdfPageImageFormat.png,
-          backgroundColor: '#FFFFFF',
+        final pixels = Uint8List.fromList(rendered.pixels);
+        final image = await _imageFromBgra(
+          rendered.width,
+          rendered.height,
+          pixels,
         );
-        return rendered == null ? null : base64Encode(rendered.bytes);
+        try {
+          final png = await image.toByteData(format: ui.ImageByteFormat.png);
+          if (png == null) return null;
+          return base64Encode(png.buffer.asUint8List());
+        } finally {
+          image.dispose();
+        }
       } finally {
-        await page.close();
+        rendered.dispose();
       }
     } catch (e) {
       debugPrint('Cover render failed: $e');
       return null;
     }
+  }
+
+  Future<ui.Image> _imageFromBgra(int width, int height, Uint8List bgra) {
+    final done = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      bgra,
+      width,
+      height,
+      ui.PixelFormat.bgra8888,
+      done.complete,
+    );
+    return done.future;
   }
 
   Future<ui.Size> _imageSize(Uint8List bytes) async {

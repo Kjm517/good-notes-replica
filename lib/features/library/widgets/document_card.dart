@@ -110,42 +110,13 @@ class DocumentCard extends ConsumerWidget {
                         const Positioned(
                             left: 8, bottom: 8, child: _PdfBadge()),
                       if (badgeLabel != null)
-                        ColoredBox(
-                          color: Colors.transparent,
-                          child: Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: t.surface.withValues(alpha: 0.92),
-                                  borderRadius:
-                                      BorderRadius.circular(Radii.inner),
-                                  border: Border.all(color: t.line),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      transferIcon ?? Icons.cloud_outlined,
-                                      size: 14,
-                                      color: t.textSecondary,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      badgeLabel,
-                                      style: AppTokens.mono(
-                                        size: 11,
-                                        color: t.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                            child: CoverTransferBadge(
+                              icon: transferIcon ?? Icons.cloud_outlined,
+                              label: badgeLabel,
                             ),
                           ),
                         ),
@@ -212,6 +183,47 @@ class DocumentCard extends ConsumerWidget {
       DocumentType.notebook => 'Notebook$pp · $when',
       DocumentType.pdf => 'PDF$pp · $when',
     };
+  }
+}
+
+/// Sync chip on a library cover. The grid tile can be ~130px wide on iPad,
+/// so the label ellipsizes instead of painting overflow stripes.
+class CoverTransferBadge extends StatelessWidget {
+  const CoverTransferBadge({
+    super.key,
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: t.surface.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(Radii.inner),
+        border: Border.all(color: t.line),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: t.textSecondary),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTokens.mono(size: 11, color: t.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -80,11 +80,15 @@ class PayMongoCheckout {
 
 const _pendingCheckoutKey = 'paymongo_pending_checkout';
 
-/// Whether wallet billing can run (worker endpoint + signed-in user).
-final payMongoAvailableProvider = Provider<bool>((ref) {
-  final endpoint = kFileEndpoint.trim();
-  if (endpoint.isEmpty) return false;
+/// Whether a signed-in user can fetch worker billing entitlement.
+final payMongoSignedInProvider = Provider<bool>((ref) {
+  if (kFileEndpoint.trim().isEmpty) return false;
   return ref.watch(authStateProvider).asData?.value != null;
+});
+
+/// Whether wallet checkout can run (native + signed-in user).
+final payMongoAvailableProvider = Provider<bool>((ref) {
+  return ref.watch(payMongoSignedInProvider);
 });
 
 /// Active PayMongo premium from the worker entitlement API.
@@ -103,9 +107,12 @@ final payMongoBillingServiceProvider = Provider<PayMongoBillingService?>((ref) {
   );
 });
 
-/// Polls PayMongo entitlement when wallet billing is available.
+/// Polls worker entitlement while signed in so admin grants apply without
+/// restarting the app.
+const _entitlementPollInterval = Duration(seconds: 12);
+
 final payMongoSyncProvider = Provider<void>((ref) {
-  if (!ref.watch(payMongoAvailableProvider)) return;
+  if (!ref.watch(payMongoSignedInProvider)) return;
 
   ref.listen<AsyncValue<AppUser?>>(authStateProvider, (prev, next) {
     final prevUid = prev?.asData?.value?.uid;
@@ -120,9 +127,20 @@ final payMongoSyncProvider = Provider<void>((ref) {
     }
   });
 
-  Future.microtask(() {
-    unawaited(ref.read(payMongoEntitlementRefreshProvider)());
-  });
+  var inFlight = false;
+  Future<void> tick() async {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      await ref.read(payMongoEntitlementRefreshProvider)();
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  unawaited(tick());
+  final timer = Timer.periodic(_entitlementPollInterval, (_) => unawaited(tick()));
+  ref.onDispose(timer.cancel);
 });
 
 /// Refreshes PayMongo premium state from the worker (safe from widgets & providers).

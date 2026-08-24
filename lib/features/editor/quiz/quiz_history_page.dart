@@ -759,11 +759,18 @@ class _ReviewQuestion extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final tablet =
+        MediaQuery.sizeOf(context).shortestSide >= AppBreakpoints.tabletShortest;
     final ok = answer?.correct ?? false;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        padding: EdgeInsets.fromLTRB(
+          tablet ? 16 : 12,
+          tablet ? 16 : 12,
+          tablet ? 16 : 12,
+          tablet ? 14 : 10,
+        ),
         decoration: BoxDecoration(
           color: t.surface,
           borderRadius: BorderRadius.circular(Radii.control),
@@ -776,14 +783,17 @@ class _ReviewQuestion extends StatelessWidget {
               children: [
                 Icon(
                   ok ? Icons.check_circle_rounded : Icons.cancel_outlined,
-                  size: 18,
+                  size: tablet ? 22 : 18,
                   color: ok ? t.premium : t.pdfBadge,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     question.prompt.split('\n').last,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: tablet ? 18 : 15,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -793,6 +803,7 @@ class _ReviewQuestion extends StatelessWidget {
               explanation: question.explanation,
               fallbackPageIndex: question.pageIndex,
               target: question.sourceTarget,
+              fontSize: tablet ? 17 : 15,
               onOpenPage: (page, [target]) {
                 onOpenPage?.call(page, target);
               },

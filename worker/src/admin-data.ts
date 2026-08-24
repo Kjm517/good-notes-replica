@@ -1,4 +1,11 @@
-import { readBillingRecord, type BillingRecord, type BillingPlan, LIFETIME_EXPIRES_AT } from './billing';
+import {
+  isLifetimeExpiry,
+  isLifetimeRecord,
+  LIFETIME_EXPIRES_AT,
+  readBillingRecord,
+  type BillingRecord,
+  type BillingPlan,
+} from './billing';
 import {
   appendAudit,
   type AiUsageEvent,
@@ -137,7 +144,10 @@ async function loadUserRows(bucket: R2Bucket): Promise<AdminUserRow[]> {
     profile.fileCount = storage.fileCount;
     const billing = await readBillingRecord(bucket, uid);
     const premium = billing?.isPremium === true &&
-      (!billing.expiresAt || new Date(billing.expiresAt) > new Date());
+      (!billing.expiresAt ||
+        isLifetimeRecord(billing) ||
+        new Date(billing.expiresAt) > new Date());
+    const lifetime = premium && billing != null && isLifetimeRecord(billing);
     rows.push({
       uid,
       email: profile.email,
@@ -146,8 +156,8 @@ async function loadUserRows(bucket: R2Bucket): Promise<AdminUserRow[]> {
       storageBytes: storage.storageBytes,
       fileCount: storage.fileCount,
       isPremium: premium,
-      plan: premium ? billing?.plan ?? null : null,
-      premiumExpiresAt: billing?.expiresAt ?? null,
+      plan: lifetime ? 'lifetime' : premium ? billing?.plan ?? null : null,
+      premiumExpiresAt: lifetime ? null : (billing?.expiresAt ?? null),
     });
   }
 
@@ -163,6 +173,7 @@ export async function getOverview(
   const rows = await loadUserRows(bucket);
   const premium = rows.filter((r) => r.isPremium);
   const mrrPhp = premium.reduce((sum, r) => {
+    if (r.plan === 'lifetime') return sum;
     if (r.plan === 'yearly') return sum + PLAN_MRR_CENTAVOS.yearly / 100;
     if (r.plan === 'monthly') return sum + PLAN_MRR_CENTAVOS.monthly / 100;
     return sum;
@@ -250,11 +261,13 @@ export async function listSubscriptions(
       source: 'paymongo',
       updatedAt: r.lastSeenAt ?? '',
       mrrPhp: r.isPremium
-        ? (r.plan === 'yearly'
-            ? PLAN_MRR_CENTAVOS.yearly
-            : r.plan === 'monthly'
-              ? PLAN_MRR_CENTAVOS.monthly
-              : 0) / 100
+        ? (r.plan === 'lifetime'
+            ? 0
+            : r.plan === 'yearly'
+              ? PLAN_MRR_CENTAVOS.yearly
+              : r.plan === 'monthly'
+                ? PLAN_MRR_CENTAVOS.monthly
+                : 0) / 100
         : 0,
     }));
 }
@@ -278,8 +291,7 @@ export async function setSubscription(
       throw new Error('plan must be monthly, yearly, or lifetime.');
     }
     let expiresAt: string;
-    if (body.expiresAt === null || plan === 'lifetime') {
-      // Explicit clear, or lifetime — still premium until revoked.
+    if (plan === 'lifetime' || body.expiresAt === null) {
       expiresAt = LIFETIME_EXPIRES_AT;
     } else if (body.expiresAt) {
       const parsed = new Date(body.expiresAt);
@@ -294,7 +306,7 @@ export async function setSubscription(
     }
     record = {
       isPremium: true,
-      plan,
+      plan: plan === 'lifetime' || isLifetimeExpiry(expiresAt) ? 'lifetime' : plan,
       expiresAt,
       source: 'paymongo',
       updatedAt: now.toISOString(),

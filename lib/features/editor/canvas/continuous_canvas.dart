@@ -591,7 +591,8 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   (CanvasElement, int)? _findSelectedElement() {
     final id = widget.selectedElementId;
     if (id == null) return null;
-    for (var i = 0; i < widget.pages.length; i++) {
+    final (start, end) = _visiblePageRange();
+    for (var i = start; i < end; i++) {
       final elements = widget.elementsFor?.call(widget.pages[i].id) ?? const [];
       for (final element in elements) {
         if (element.id == id) return (element, i);
@@ -764,6 +765,42 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     return _kPageGap + _scaledRowStart(row);
   }
 
+  /// The row containing content-Y [y], by binary search over the prefix sums.
+  int _rowAt(double y) {
+    _ensureLayoutCache();
+    var lo = 0;
+    var hi = _rowCount - 1;
+    while (lo < hi) {
+      final mid = (lo + hi) ~/ 2;
+      if (_kPageGap + _scaledRowStart(mid + 1) <= y) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  /// Page indices currently on screen, plus [pad] rows of slack either side.
+  ///
+  /// Element hit tests and drop resolution walk this instead of the whole
+  /// document: [widget.elementsFor] costs a provider read per page, so a
+  /// 4000-page notebook must not pay for every page on every pointer-down.
+  /// Anything the pointer can touch is on screen by definition.
+  (int start, int end) _visiblePageRange({int pad = 2}) {
+    final rows = _rowCount;
+    if (rows == 0 || widget.pages.isEmpty) return (0, 0);
+    final top = _vertical.hasClients ? _vertical.offset : 0.0;
+    final bottom = top + (_viewport.height > 0 ? _viewport.height : 0);
+    final firstRow = (_rowAt(top) - pad).clamp(0, rows - 1);
+    final lastRow = (_rowAt(bottom) + pad).clamp(0, rows - 1);
+    final perRow = widget.twoPageSpread ? 2 : 1;
+    return (
+      firstRow * perRow,
+      ((lastRow + 1) * perRow).clamp(0, widget.pages.length),
+    );
+  }
+
   double get _contentWidth => _contentWidthAt(_scale);
 
   double _contentWidthAt(double scale) {
@@ -815,8 +852,9 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   /// On finger-up, if the object was dragged onto another page, rewrite its
   /// coordinates into that page's content space so it stays visible.
   ({Rect rect, String? pageId}) _resolveDrop(String id, Rect rect) {
+    final (start, end) = _visiblePageRange();
     int? srcIndex;
-    for (var i = 0; i < widget.pages.length; i++) {
+    for (var i = start; i < end; i++) {
       final elements = widget.elementsFor?.call(widget.pages[i].id) ?? const [];
       if (elements.any((e) => e.id == id)) {
         srcIndex = i;
@@ -830,7 +868,7 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
     final global = _pageOriginInContent(srcIndex) + centerSheet * _scale;
 
     int? destIndex;
-    for (var i = 0; i < widget.pages.length; i++) {
+    for (var i = start; i < end; i++) {
       final origin = _pageOriginInContent(i);
       final size = _sheetSize(widget.pages[i]);
       final pageRect = origin & Size(size.width * _scale, size.height * _scale);
@@ -1091,7 +1129,8 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   /// if the page handler's hit test used slightly different coordinates.
   bool _pointerHitsAnyElement(Offset rootLocal) {
     if (widget.elementsFor == null || widget.pages.isEmpty) return false;
-    for (var i = 0; i < widget.pages.length; i++) {
+    final (start, end) = _visiblePageRange();
+    for (var i = start; i < end; i++) {
       final page = widget.pages[i];
       final origin = _pageOriginInContent(i);
       final sheet = ((rootLocal + _scrollOffset) - origin) / _scale;

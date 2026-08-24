@@ -163,7 +163,13 @@ bool isExamStyleQuestion(QuizQuestion question) {
   if (_pastedPredicateStem.hasMatch(prompt)) return false;
   if (question.explanation.trim().length < 40) return false;
   if (_metaExplain.hasMatch(question.explanation)) return false;
-  if (!_teaching.hasMatch(question.explanation)) return false;
+  // Long factual explanations don't always use "because" / "fact". Only
+  // reject short ones that also lack a teaching cue — that filter was
+  // dropping most of a 25-question set.
+  if (question.explanation.trim().length < 80 &&
+      !_teaching.hasMatch(question.explanation)) {
+    return false;
+  }
 
   if (question.kind == QuizKind.multipleChoice) {
     if (question.choices.length != 4) return false;
