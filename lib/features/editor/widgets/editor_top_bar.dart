@@ -10,6 +10,7 @@ import '../canvas/continuous_canvas.dart';
 import '../providers.dart';
 import '../state/tool_settings.dart';
 import '../../sync/sync_indicator.dart';
+import '../../settings/entitlements.dart';
 import '../../settings/premium_providers.dart';
 import 'color_picker_sheet.dart';
 import 'export_sheet.dart';
@@ -54,11 +55,28 @@ enum EditorBarLayout {
     return EditorBarLayout.single;
   }
 
+  /// Chrome the editor should paint for [size].
+  ///
+  /// Portrait tablets (iPad / Android) use the same bottom tool dock + compact
+  /// title as iPhone so colour swatches, pen options, and the quiz upsell match
+  /// the phone experience. Landscape tablets keep the side rail.
+  static EditorBarLayout chromeForSize(Size size) {
+    final base = forSize(size);
+    if (base == EditorBarLayout.tabletRail || base == EditorBarLayout.single) {
+      return base;
+    }
+    final tabletPortrait = size.shortestSide >= AppBreakpoints.tabletShortest &&
+        size.height > size.width &&
+        size.width < AppBreakpoints.desktop;
+    if (tabletPortrait) return EditorBarLayout.phone;
+    return base;
+  }
+
   /// Tools rendered in the top bar (stacked / single).
   bool get showsTools =>
       this == EditorBarLayout.stacked || this == EditorBarLayout.single;
 
-  /// Tools in the bottom dock (phone).
+  /// Tools in the bottom dock (phone + portrait tablet chrome).
   bool get showsBottomDock => this == EditorBarLayout.phone;
 
   /// Tools in the permanent left rail (landscape tablet).
@@ -254,7 +272,11 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _BarIcon(icon: notablyBackIcon, tooltip: 'Back', onPressed: onBack),
+        _BarIcon(
+          icon: notablyBackIcon,
+          tooltip: 'Last page',
+          onPressed: onBack,
+        ),
         if (!phone) ...[
           _BarIcon(
             icon: sidebarOpen
@@ -450,6 +472,7 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
 
   Widget _toolRow(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
+    final wide = MediaQuery.sizeOf(context).width >= 600;
     return Container(
       height: _kToolRow,
       decoration: BoxDecoration(
@@ -462,7 +485,9 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
             child: _ToolGroup(
               documentId: documentId,
               pageSizeFor: pageSizeFor,
-              showInlineSwatches: false,
+              // iPad split / narrow windows still get quick colours when space
+              // allows; otherwise a single swatch opens the full palette.
+              showInlineSwatches: wide,
             ),
           ),
           const SizedBox(width: 8),
@@ -1006,51 +1031,68 @@ class EditorToolDock extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (state.isDrawingTool)
-              Container(
-                margin: const EdgeInsets.fromLTRB(18, 0, 18, 8),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                decoration: BoxDecoration(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+                child: Material(
                   color: t.fill,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: t.lineStrong),
-                  boxShadow: AppTokens.elevation(
-                    t.shadow,
-                    y: 16,
-                    blur: 34,
-                    opacity: 0.7,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    side: BorderSide(color: t.lineStrong),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          for (final c in palette.take(6))
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                              ),
-                              child: _Swatch(
-                                color: c,
-                                selected: c == selected,
-                                onTap: () => controller.setColor(c),
-                                size: 22,
-                              ),
-                            ),
-                          _CurrentColorButton(
-                            color: selected,
-                            showDot: !palette.take(6).contains(selected),
-                            onTap: () =>
-                                ColorPickerSheet.show(context, documentId),
-                            size: 22,
-                          ),
-                        ],
+                  shadowColor: t.shadow,
+                  child: Container(
+                    height: 52,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: AppTokens.elevation(
+                        t.shadow,
+                        y: 16,
+                        blur: 34,
+                        opacity: 0.7,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    _WidthChip(documentId: documentId, compact: true),
-                  ],
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                for (final c in palette)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 5,
+                                    ),
+                                    child: _Swatch(
+                                      color: c,
+                                      selected: c == selected,
+                                      onTap: () => controller.setColor(c),
+                                      size: 24,
+                                    ),
+                                  ),
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 4),
+                                  child: _CurrentColorButton(
+                                    color: selected,
+                                    showDot: false,
+                                    onTap: () => ColorPickerSheet.show(
+                                      context,
+                                      documentId,
+                                    ),
+                                    size: 24,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _WidthChip(documentId: documentId, compact: true),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             Padding(
@@ -1303,8 +1345,19 @@ class EditorToolRail extends ConsumerWidget {
             ),
             if (state.isDrawingTool) ...[
               const SizedBox(height: 6),
+              for (final c in paletteFor(state.tool).take(5))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: _Swatch(
+                    color: c,
+                    selected: c == state.activeSettings.color,
+                    onTap: () => controller.setColor(c),
+                    size: 22,
+                  ),
+                ),
               _CurrentColorButton(
                 color: state.activeSettings.color,
+                showDot: false,
                 onTap: () => ColorPickerSheet.show(context, documentId),
               ),
             ],

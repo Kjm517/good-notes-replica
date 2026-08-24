@@ -63,8 +63,25 @@ class ToolOptionsSheet extends ConsumerWidget {
     final settings = state.activeSettings;
     final presets = kThicknessPresets[tool] ?? const [2.0, 4.0, 6.0];
     final (minW, maxW) = kWidthRange[tool] ?? (0.5, 20.0);
+    final palette = paletteFor(tool);
+    final onWhite = tool == ToolType.highlighter || tool == ToolType.tape;
 
     return [
+      _label(context, 'Colour'),
+      Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        children: [
+          for (final c in palette)
+            _ColourSwatch(
+              color: c,
+              selected: c == settings.color,
+              onWhite: onWhite,
+              onTap: () => controller.setColor(c),
+            ),
+        ],
+      ),
+      const SizedBox(height: 8),
       _label(context, 'Size'),
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -278,6 +295,57 @@ class ToolOptionsSheet extends ConsumerWidget {
                   fontWeight: FontWeight.w700,
                 )),
       );
+}
+
+class _ColourSwatch extends StatelessWidget {
+  const _ColourSwatch({
+    required this.color,
+    required this.selected,
+    required this.onTap,
+    required this.onWhite,
+  });
+
+  final int color;
+  final bool selected;
+  final bool onWhite;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fill = Color(onWhite ? color : (color | 0xFF000000));
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: onWhite ? Colors.white : null,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? scheme.primary : scheme.outlineVariant,
+            width: selected ? 3 : 1,
+          ),
+        ),
+        child: Center(
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
+            child: selected
+                ? Icon(
+                    Icons.check_rounded,
+                    size: 18,
+                    color: fill.computeLuminance() > 0.5
+                        ? Colors.black87
+                        : Colors.white,
+                  )
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _SizePreset extends StatelessWidget {

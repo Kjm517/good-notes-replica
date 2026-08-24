@@ -480,7 +480,7 @@ class Document extends DataClass implements Insertable<Document> {
   final PageSizePreset pageSize;
   final bool starred;
 
-  /// Firebase uid of the account this belongs to.
+  /// Supabase uid of the account this belongs to.
   ///
   /// Null means "created on this device while signed out" — those stay
   /// visible to everyone and are claimed by the first account that signs in.
@@ -4908,6 +4908,423 @@ class AssetsCompanion extends UpdateCompanion<Asset> {
   }
 }
 
+class $UserPrefsTable extends UserPrefs
+    with TableInfo<$UserPrefsTable, UserPref> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $UserPrefsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _remoteUpdatedAtMeta = const VerificationMeta(
+    'remoteUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> remoteUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'remote_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _payloadMeta = const VerificationMeta(
+    'payload',
+  );
+  @override
+  late final GeneratedColumn<String> payload = GeneratedColumn<String>(
+    'payload',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('{}'),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    updatedAt,
+    deletedAt,
+    dirty,
+    remoteUpdatedAt,
+    id,
+    payload,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'user_prefs';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<UserPref> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    if (data.containsKey('remote_updated_at')) {
+      context.handle(
+        _remoteUpdatedAtMeta,
+        remoteUpdatedAt.isAcceptableOrUnknown(
+          data['remote_updated_at']!,
+          _remoteUpdatedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('payload')) {
+      context.handle(
+        _payloadMeta,
+        payload.isAcceptableOrUnknown(data['payload']!, _payloadMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  UserPref map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return UserPref(
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+      remoteUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}remote_updated_at'],
+      ),
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      payload: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payload'],
+      )!,
+    );
+  }
+
+  @override
+  $UserPrefsTable createAlias(String alias) {
+    return $UserPrefsTable(attachedDatabase, alias);
+  }
+}
+
+class UserPref extends DataClass implements Insertable<UserPref> {
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final bool dirty;
+  final DateTime? remoteUpdatedAt;
+  final String id;
+
+  /// JSON object — see AccountPrefs in core/sync/account_prefs.dart.
+  final String payload;
+  const UserPref({
+    required this.updatedAt,
+    this.deletedAt,
+    required this.dirty,
+    this.remoteUpdatedAt,
+    required this.id,
+    required this.payload,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['dirty'] = Variable<bool>(dirty);
+    if (!nullToAbsent || remoteUpdatedAt != null) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt);
+    }
+    map['id'] = Variable<String>(id);
+    map['payload'] = Variable<String>(payload);
+    return map;
+  }
+
+  UserPrefsCompanion toCompanion(bool nullToAbsent) {
+    return UserPrefsCompanion(
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      dirty: Value(dirty),
+      remoteUpdatedAt: remoteUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteUpdatedAt),
+      id: Value(id),
+      payload: Value(payload),
+    );
+  }
+
+  factory UserPref.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return UserPref(
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+      remoteUpdatedAt: serializer.fromJson<DateTime?>(json['remoteUpdatedAt']),
+      id: serializer.fromJson<String>(json['id']),
+      payload: serializer.fromJson<String>(json['payload']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'dirty': serializer.toJson<bool>(dirty),
+      'remoteUpdatedAt': serializer.toJson<DateTime?>(remoteUpdatedAt),
+      'id': serializer.toJson<String>(id),
+      'payload': serializer.toJson<String>(payload),
+    };
+  }
+
+  UserPref copyWith({
+    DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    bool? dirty,
+    Value<DateTime?> remoteUpdatedAt = const Value.absent(),
+    String? id,
+    String? payload,
+  }) => UserPref(
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    dirty: dirty ?? this.dirty,
+    remoteUpdatedAt: remoteUpdatedAt.present
+        ? remoteUpdatedAt.value
+        : this.remoteUpdatedAt,
+    id: id ?? this.id,
+    payload: payload ?? this.payload,
+  );
+  UserPref copyWithCompanion(UserPrefsCompanion data) {
+    return UserPref(
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+      remoteUpdatedAt: data.remoteUpdatedAt.present
+          ? data.remoteUpdatedAt.value
+          : this.remoteUpdatedAt,
+      id: data.id.present ? data.id.value : this.id,
+      payload: data.payload.present ? data.payload.value : this.payload,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('UserPref(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
+          ..write('id: $id, ')
+          ..write('payload: $payload')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(updatedAt, deletedAt, dirty, remoteUpdatedAt, id, payload);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is UserPref &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.dirty == this.dirty &&
+          other.remoteUpdatedAt == this.remoteUpdatedAt &&
+          other.id == this.id &&
+          other.payload == this.payload);
+}
+
+class UserPrefsCompanion extends UpdateCompanion<UserPref> {
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<bool> dirty;
+  final Value<DateTime?> remoteUpdatedAt;
+  final Value<String> id;
+  final Value<String> payload;
+  final Value<int> rowid;
+  const UserPrefsCompanion({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
+    this.id = const Value.absent(),
+    this.payload = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  UserPrefsCompanion.insert({
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.remoteUpdatedAt = const Value.absent(),
+    required String id,
+    this.payload = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id);
+  static Insertable<UserPref> custom({
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<bool>? dirty,
+    Expression<DateTime>? remoteUpdatedAt,
+    Expression<String>? id,
+    Expression<String>? payload,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (dirty != null) 'dirty': dirty,
+      if (remoteUpdatedAt != null) 'remote_updated_at': remoteUpdatedAt,
+      if (id != null) 'id': id,
+      if (payload != null) 'payload': payload,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  UserPrefsCompanion copyWith({
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<bool>? dirty,
+    Value<DateTime?>? remoteUpdatedAt,
+    Value<String>? id,
+    Value<String>? payload,
+    Value<int>? rowid,
+  }) {
+    return UserPrefsCompanion(
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      dirty: dirty ?? this.dirty,
+      remoteUpdatedAt: remoteUpdatedAt ?? this.remoteUpdatedAt,
+      id: id ?? this.id,
+      payload: payload ?? this.payload,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (remoteUpdatedAt.present) {
+      map['remote_updated_at'] = Variable<DateTime>(remoteUpdatedAt.value);
+    }
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (payload.present) {
+      map['payload'] = Variable<String>(payload.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('UserPrefsCompanion(')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('dirty: $dirty, ')
+          ..write('remoteUpdatedAt: $remoteUpdatedAt, ')
+          ..write('id: $id, ')
+          ..write('payload: $payload, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $QuizAttemptsTable extends QuizAttempts
     with TableInfo<$QuizAttemptsTable, QuizAttempt> {
   @override
@@ -5854,6 +6271,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $StrokesTable strokes = $StrokesTable(this);
   late final $CanvasElementsTable canvasElements = $CanvasElementsTable(this);
   late final $AssetsTable assets = $AssetsTable(this);
+  late final $UserPrefsTable userPrefs = $UserPrefsTable(this);
   late final $QuizAttemptsTable quizAttempts = $QuizAttemptsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
@@ -5865,6 +6283,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     strokes,
     canvasElements,
     assets,
+    userPrefs,
     quizAttempts,
   ];
   @override
@@ -8865,6 +9284,221 @@ typedef $$AssetsTableProcessedTableManager =
       Asset,
       PrefetchHooks Function()
     >;
+typedef $$UserPrefsTableCreateCompanionBuilder =
+    UserPrefsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
+      required String id,
+      Value<String> payload,
+      Value<int> rowid,
+    });
+typedef $$UserPrefsTableUpdateCompanionBuilder =
+    UserPrefsCompanion Function({
+      Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<bool> dirty,
+      Value<DateTime?> remoteUpdatedAt,
+      Value<String> id,
+      Value<String> payload,
+      Value<int> rowid,
+    });
+
+class $$UserPrefsTableFilterComposer
+    extends Composer<_$AppDatabase, $UserPrefsTable> {
+  $$UserPrefsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get payload => $composableBuilder(
+    column: $table.payload,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$UserPrefsTableOrderingComposer
+    extends Composer<_$AppDatabase, $UserPrefsTable> {
+  $$UserPrefsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get payload => $composableBuilder(
+    column: $table.payload,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$UserPrefsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $UserPrefsTable> {
+  $$UserPrefsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get remoteUpdatedAt => $composableBuilder(
+    column: $table.remoteUpdatedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get payload =>
+      $composableBuilder(column: $table.payload, builder: (column) => column);
+}
+
+class $$UserPrefsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $UserPrefsTable,
+          UserPref,
+          $$UserPrefsTableFilterComposer,
+          $$UserPrefsTableOrderingComposer,
+          $$UserPrefsTableAnnotationComposer,
+          $$UserPrefsTableCreateCompanionBuilder,
+          $$UserPrefsTableUpdateCompanionBuilder,
+          (UserPref, BaseReferences<_$AppDatabase, $UserPrefsTable, UserPref>),
+          UserPref,
+          PrefetchHooks Function()
+        > {
+  $$UserPrefsTableTableManager(_$AppDatabase db, $UserPrefsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$UserPrefsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$UserPrefsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$UserPrefsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
+                Value<String> id = const Value.absent(),
+                Value<String> payload = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => UserPrefsCompanion(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
+                id: id,
+                payload: payload,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<DateTime?> remoteUpdatedAt = const Value.absent(),
+                required String id,
+                Value<String> payload = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => UserPrefsCompanion.insert(
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                dirty: dirty,
+                remoteUpdatedAt: remoteUpdatedAt,
+                id: id,
+                payload: payload,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$UserPrefsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $UserPrefsTable,
+      UserPref,
+      $$UserPrefsTableFilterComposer,
+      $$UserPrefsTableOrderingComposer,
+      $$UserPrefsTableAnnotationComposer,
+      $$UserPrefsTableCreateCompanionBuilder,
+      $$UserPrefsTableUpdateCompanionBuilder,
+      (UserPref, BaseReferences<_$AppDatabase, $UserPrefsTable, UserPref>),
+      UserPref,
+      PrefetchHooks Function()
+    >;
 typedef $$QuizAttemptsTableCreateCompanionBuilder =
     QuizAttemptsCompanion Function({
       Value<DateTime> updatedAt,
@@ -9421,6 +10055,8 @@ class $AppDatabaseManager {
       $$CanvasElementsTableTableManager(_db, _db.canvasElements);
   $$AssetsTableTableManager get assets =>
       $$AssetsTableTableManager(_db, _db.assets);
+  $$UserPrefsTableTableManager get userPrefs =>
+      $$UserPrefsTableTableManager(_db, _db.userPrefs);
   $$QuizAttemptsTableTableManager get quizAttempts =>
       $$QuizAttemptsTableTableManager(_db, _db.quizAttempts);
 }

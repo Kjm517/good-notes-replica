@@ -50,10 +50,17 @@ void main() {
       expect(_bar(EditorBarLayout.tabletRail).preferredSize.height, 56);
     });
 
-    test('the tool row is exactly what stacked adds over phone', () {
+    // Phone title is the compact 48pt Annotate row; stacked keeps the
+    // 56 + 60 title/tool pair — so the delta is not just the tool row.
+    test('stacked is taller than phone by the tool row plus title delta', () {
       final stacked = _bar(EditorBarLayout.stacked).preferredSize.height;
       final phone = _bar(EditorBarLayout.phone).preferredSize.height;
-      expect(stacked - phone, 60);
+      expect(stacked - phone, 116 - 48);
+      expect(
+        _bar(EditorBarLayout.stacked).preferredSize.height -
+            _bar(EditorBarLayout.tabletRail).preferredSize.height,
+        60,
+      );
     });
   });
 
@@ -99,6 +106,27 @@ void main() {
       expect(
         EditorBarLayout.forSize(const Size(2560, 1440)),
         EditorBarLayout.single,
+      );
+    });
+
+    test('portrait iPad chrome uses the phone bottom dock', () {
+      // iPad Pro 12.9 portrait — same colour strip / tool pill as iPhone.
+      expect(
+        EditorBarLayout.chromeForSize(const Size(1024, 1366)),
+        EditorBarLayout.phone,
+      );
+      expect(
+        EditorBarLayout.chromeForSize(const Size(1024, 1366)).showsBottomDock,
+        isTrue,
+      );
+      // Landscape iPad keeps the left tool rail.
+      expect(
+        EditorBarLayout.chromeForSize(const Size(1366, 1024)),
+        EditorBarLayout.tabletRail,
+      );
+      expect(
+        EditorBarLayout.chromeForSize(const Size(390, 844)),
+        EditorBarLayout.phone,
       );
     });
 

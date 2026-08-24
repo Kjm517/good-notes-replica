@@ -36,6 +36,10 @@ class EditorScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final docAsync = ref.watch(documentStreamProvider(documentId));
+    final pageCount =
+        ref.watch(documentPageCountProvider(documentId)).asData?.value;
+    final doc = docAsync.asData?.value;
     final transfer = documentTransferState(
       documentId: documentId,
       pendingUpload:
@@ -45,15 +49,18 @@ class EditorScreen extends ConsumerWidget {
               const {},
       status: ref.watch(syncStatusProvider),
       paused: ref.watch(syncPausedProvider),
+      documentType: doc?.type ?? DocumentType.notebook,
+      pageCount: pageCount,
+      hasCoverPreview: (doc?.coverThumb ?? '').isNotEmpty,
     );
     if (transfer.locked) {
       return DocumentTransferGate(
+        key: ValueKey(documentId),
         documentId: documentId,
         transfer: transfer,
       );
     }
 
-    final docAsync = ref.watch(documentStreamProvider(documentId));
     return docAsync.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
@@ -151,10 +158,10 @@ class _EditorState extends ConsumerState<_Editor> {
     final needsFile = pages.any(
       (p) => p.pdfAssetId != null || p.bgAssetId != null,
     );
-    _setPrepare('Downloading files…', 0.04);
+    _setPrepare('Opening…', 0.08);
     final engine = ref.read(syncEngineProvider);
     if (engine != null) {
-      await engine.ensureDocumentAssets(widget.document.id);
+      await engine.ensureDocumentContent(widget.document.id);
     }
     if (!mounted) return;
     if (widget.document.type == DocumentType.pdf) {
@@ -180,7 +187,7 @@ class _EditorState extends ConsumerState<_Editor> {
       if (!mounted) return;
 
       // The cloud holds the file, so this device fetches it rather than asking
-      // for it back. ensureDocumentAssets has already tried, so arriving here
+      // for it back. ensureDocumentContent has already tried, so arriving here
       // with a remote copy on record means the download has not finished —
       // almost always because there is no connection.
       final record = await assets.get(id);
@@ -278,11 +285,23 @@ class _EditorState extends ConsumerState<_Editor> {
         missingLocal: missing,
         status: status,
         paused: ref.read(syncPausedProvider),
+        documentType: widget.document.type,
+        pageCount: ref
+            .read(documentPageCountProvider(widget.document.id))
+            .asData
+            ?.value,
+        hasCoverPreview: (widget.document.coverThumb ?? '').isNotEmpty,
       );
       final pct = transfer.percent(status);
+      final progress = transfer.progressFraction(status);
+      final label = switch (transfer.kind) {
+        DocumentTransferKind.syncingPages =>
+          pct != null ? 'Syncing pages… $pct%' : 'Syncing pages…',
+        _ => pct != null ? 'Downloading file… $pct%' : 'Downloading file…',
+      };
       _setPrepare(
-        pct != null ? 'Downloading file… $pct%' : 'Downloading file…',
-        pct != null ? 0.04 + (pct / 100) * 0.06 : 0.04,
+        label,
+        progress != null ? 0.04 + progress * 0.06 : 0.04,
       );
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
@@ -391,13 +410,13 @@ class _EditorState extends ConsumerState<_Editor> {
   }
 
   bool _usesOverlaySidebar(Size screenSize) {
-    final layout = EditorBarLayout.forSize(screenSize);
+    final chrome = EditorBarLayout.chromeForSize(screenSize);
     final wideScreen = screenSize.width >= AppBreakpoints.editorSidebar;
     final tabletPortrait =
         screenSize.shortestSide >= AppBreakpoints.tabletShortest &&
             screenSize.height > screenSize.width &&
             screenSize.width < AppBreakpoints.desktop;
-    return layout == EditorBarLayout.phone || tabletPortrait || !wideScreen;
+    return chrome == EditorBarLayout.phone || tabletPortrait || !wideScreen;
   }
 
   bool _isSidebarOpen(Size screenSize) {
@@ -428,6 +447,20 @@ class _EditorState extends ConsumerState<_Editor> {
       return true;
     }
     return _pageHistory.isNotEmpty;
+  }
+
+  /// Toolbar ← restores the last page jumped to (thumbnail, outline, find,
+  /// page field). It does not undo ink, dismiss the sidebar, or clear a
+  /// selection — those are activities, not navigation.
+  void _handleToolbarBack() {
+    if (_pageHistory.isNotEmpty) {
+      final index = _pageHistory.removeLast();
+      _restoringPage = true;
+      _canvasController.jumpToPage(index);
+      _restoringPage = false;
+      return;
+    }
+    _leaveDocument();
   }
 
   /// Unwinds the last overlay, page jump, or route — same as the system back.
@@ -559,6 +592,8 @@ class _EditorState extends ConsumerState<_Editor> {
     final screenSize = MediaQuery.sizeOf(context);
     final wideScreen = screenSize.width >= AppBreakpoints.editorSidebar;
     final layout = EditorBarLayout.forSize(screenSize);
+    // iPhone + portrait iPad (and Android tablets) share phone dock chrome.
+    final chrome = EditorBarLayout.chromeForSize(screenSize);
     final tabletPortrait =
         screenSize.shortestSide >= AppBreakpoints.tabletShortest &&
         screenSize.height > screenSize.width &&
@@ -569,7 +604,7 @@ class _EditorState extends ConsumerState<_Editor> {
     // drawer so it doesn't crush the canvas. Landscape tablets/desktop keep
     // the persistent rail.
     final overlaySidebar =
-        layout == EditorBarLayout.phone || tabletPortrait || !wideScreen;
+        chrome == EditorBarLayout.phone || tabletPortrait || !wideScreen;
     final drawerWidth = (screenSize.width * 0.86).clamp(240.0, 320.0);
     // Default open on tablet/desktop; phones start closed so the PDF is full
     // width until the user taps Pages & outline.
@@ -591,7 +626,7 @@ class _EditorState extends ConsumerState<_Editor> {
       onKeyEvent: _onShortcut,
       child: Scaffold(
         backgroundColor: context.tokens.canvas,
-        appBar: _readingMode && layout == EditorBarLayout.phone
+        appBar: _readingMode && chrome == EditorBarLayout.phone
             ? null
             : EditorTopBar(
                 documentId: documentId,
@@ -616,7 +651,7 @@ class _EditorState extends ConsumerState<_Editor> {
                         documentId: documentId,
                         pageSize: _sizeFor(page),
                       ),
-                layout: layout,
+                layout: chrome,
                 onFind: () => setState(() => _searchOpen = !_searchOpen),
                 onQuiz: () => QuizFlow.open(
                   context,
@@ -625,18 +660,18 @@ class _EditorState extends ConsumerState<_Editor> {
                   pageCount: state.pages.length,
                   onJumpToPage: _canvasController.jumpToPage,
                 ),
-                onBack: _handleBack,
+                onBack: _handleToolbarBack,
                 readingMode: _readingMode,
-                onToggleReadingMode: layout == EditorBarLayout.phone
+                onToggleReadingMode: chrome == EditorBarLayout.phone
                     ? () {
                         controller.setTool(ToolType.hand);
                         setState(() => _readingMode = !_readingMode);
                       }
                     : null,
               ),
-        // On a phone the tools live at the bottom, within thumb reach.
+        // iPhone, Android phones, and portrait iPad/tablets — thumb-reach dock.
         bottomNavigationBar: _preparing ||
-                !layout.showsBottomDock ||
+                !chrome.showsBottomDock ||
                 state.pages.isEmpty ||
                 _readingMode
             ? null
@@ -783,17 +818,20 @@ class _EditorState extends ConsumerState<_Editor> {
                       ),
                     ),
                   // Pinch works directly on the canvas; the slider remains
-                  // visible as a precise and accessible alternative.
+                  // visible as a precise and accessible alternative. Keep it
+                  // clear of the colour strip above the phone/iPad tool dock.
                   if (!_readingMode)
                     Positioned(
-                      right: layout == EditorBarLayout.phone ? 12 : 24,
-                      bottom: layout == EditorBarLayout.phone ? 12 : 24,
+                      right: chrome.showsBottomDock ? 12 : 24,
+                      bottom: chrome.showsBottomDock
+                          ? (state.isDrawingTool ? 72 : 12)
+                          : 24,
                       child: ZoomCluster(controller: _canvasController),
                     ),
                   if (_searchOpen)
                     Positioned(
                       top: 12,
-                      left: layout == EditorBarLayout.phone ? 12 : null,
+                      left: chrome.showsBottomDock ? 12 : null,
                       right: 16,
                       child: DocumentSearchPanel(
                         documentId: documentId,
@@ -1154,18 +1192,21 @@ class _TabletDocumentRow extends ConsumerWidget {
         ref.watch(missingLocalFileDocumentsProvider).asData?.value ?? const {};
     final paused = ref.watch(syncPausedProvider);
     final status = ref.watch(syncStatusProvider);
+    final count = ref
+        .watch(documentPageCountProvider(document.id))
+        .asData
+        ?.value;
     final transfer = documentTransferState(
       documentId: document.id,
       pendingUpload: pendingUpload,
       missingLocal: missingLocal,
       status: status,
       paused: paused,
+      documentType: document.type,
+      pageCount: count,
+      hasCoverPreview: (document.coverThumb ?? '').isNotEmpty,
     );
     final locked = transfer.locked;
-    final count = ref
-        .watch(documentPageCountProvider(document.id))
-        .asData
-        ?.value;
     final badgeLabel = transfer.listBadgeLabel(status);
     return Opacity(
       opacity: locked ? 0.45 : 1,
@@ -1191,8 +1232,16 @@ class _TabletDocumentRow extends ConsumerWidget {
                 border: Border.all(color: t.line),
               ),
               child: Icon(
-                locked && transfer.kind == DocumentTransferKind.downloading
-                    ? Icons.cloud_download_outlined
+                locked
+                    ? switch (transfer.kind) {
+                        DocumentTransferKind.downloading =>
+                          Icons.cloud_download_outlined,
+                        DocumentTransferKind.uploading =>
+                          Icons.cloud_upload_outlined,
+                        DocumentTransferKind.syncingPages =>
+                          Icons.cloud_sync_outlined,
+                        DocumentTransferKind.none => Icons.cloud_outlined,
+                      }
                     : document.type == DocumentType.pdf
                         ? Icons.picture_as_pdf_rounded
                         : Icons.description_outlined,

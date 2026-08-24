@@ -93,3 +93,9 @@ Future<Uint8List?> readAsset({String? localPath, String? base64}) =>
 
 /// Deletes the on-disk file for an asset, if any.
 Future<void> deleteAsset(String? localPath) => impl.deleteAsset(localPath);
+
+/// Path of a previously downloaded file for [id], if it is still on disk.
+///
+/// Used when the SQLite row lost [localPath] (a metadata upsert, a reinstall
+/// that kept the files directory) so the next open does not hit the network.
+Future<String?> findStoredAssetPath(String id) => impl.findStoredAssetPath(id);

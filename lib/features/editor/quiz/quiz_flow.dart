@@ -15,6 +15,7 @@ import '../../../core/network/network_status.dart';
 import '../../library/providers.dart';
 import '../../settings/entitlements.dart';
 import '../../settings/premium_plan_sheet.dart';
+import '../../settings/quiz_upgrade_sheet.dart';
 import '../pages/page_background_service.dart';
 import '../providers.dart';
 import 'quiz_align.dart';
@@ -50,8 +51,15 @@ class QuizFlow extends ConsumerStatefulWidget {
     required String title,
     required int pageCount,
     void Function(int pageIndex)? onJumpToPage,
-  }) {
-    return Navigator.of(context).push(
+  }) async {
+    final container = ProviderScope.containerOf(context);
+    final ent = await container.read(entitlementProvider.future);
+    if (!context.mounted) return;
+    if (!ent.canGenerateQuiz) {
+      await _promptQuizUpgrade(context, ent);
+      return;
+    }
+    await Navigator.of(context).push(
       notablyRoute<void>(
         fullscreenDialog: true,
         builder: (_) => QuizFlow(
@@ -62,6 +70,20 @@ class QuizFlow extends ConsumerStatefulWidget {
         ),
       ),
     );
+  }
+
+  static Future<void> _promptQuizUpgrade(
+    BuildContext context,
+    UserEntitlement ent,
+  ) async {
+    final subtitle = ent.isTrialActive
+        ? 'You\'ve used all ${ent.quizLimit} trial quizzes. Upgrade for '
+            'unlimited AI quizzes from this document.'
+        : ent.trialExpired
+            ? 'Your free trial has ended. Upgrade to Premium for unlimited '
+                'AI quizzes from your PDFs.'
+            : null;
+    await QuizUpgradeSheet.show(context, subtitle: subtitle);
   }
 
   @override
@@ -721,31 +743,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
   }
 
   Future<void> _showQuizLimitReached(UserEntitlement ent) async {
-    final message = ent.isTrialActive
-        ? 'You\'ve used all ${ent.quizLimit} trial quizzes. Upgrade for unlimited access.'
-        : ent.trialExpired
-            ? 'You\'ve used your ${ent.quizLimit} free quizzes this month. Upgrade for unlimited access.'
-            : 'You\'ve reached your quiz limit. Sign in to start a trial or upgrade to Premium.';
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Quiz limit reached'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Not now'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              PremiumPlanSheet.show(context);
-            },
-            child: const Text('See plans'),
-          ),
-        ],
-      ),
-    );
+    await QuizFlow._promptQuizUpgrade(context, ent);
   }
 
   Future<void> _openHistory() async {

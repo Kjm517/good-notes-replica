@@ -49,9 +49,24 @@ create table if not exists public.quizzes (
 create table if not exists public.ink (
   page_id text not null,
   user_id uuid not null references auth.users(id) on delete cascade,
-  bytes bytea not null,
+  bytes bytea not null default '\x',
+  storage text not null default 'inline' check (storage in ('inline', 'r2')),
+  remote_key text,
   updated_at timestamptz not null default now(),
   primary key (user_id, page_id)
+);
+
+-- Existing installs: add R2 pointer columns (safe to re-run).
+alter table public.ink add column if not exists storage text;
+alter table public.ink add column if not exists remote_key text;
+update public.ink set storage = 'inline' where storage is null;
+
+create table if not exists public.user_prefs (
+  id text primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  data jsonb not null default '{}',
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
 );
 
 create index if not exists documents_user_updated on public.documents (user_id, updated_at);
@@ -60,6 +75,7 @@ create index if not exists elements_user_page_updated on public.elements (user_i
 create index if not exists assets_user_updated on public.assets (user_id, updated_at);
 create index if not exists quizzes_user_updated on public.quizzes (user_id, updated_at);
 create index if not exists ink_user_updated on public.ink (user_id, updated_at);
+create index if not exists user_prefs_user_updated on public.user_prefs (user_id, updated_at);
 
 alter table public.documents enable row level security;
 alter table public.pages enable row level security;
@@ -67,6 +83,7 @@ alter table public.elements enable row level security;
 alter table public.assets enable row level security;
 alter table public.quizzes enable row level security;
 alter table public.ink enable row level security;
+alter table public.user_prefs enable row level security;
 
 drop policy if exists "own documents" on public.documents;
 drop policy if exists "own pages" on public.pages;
@@ -74,6 +91,7 @@ drop policy if exists "own elements" on public.elements;
 drop policy if exists "own assets" on public.assets;
 drop policy if exists "own quizzes" on public.quizzes;
 drop policy if exists "own ink" on public.ink;
+drop policy if exists "own user_prefs" on public.user_prefs;
 
 create policy "own documents" on public.documents
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -87,6 +105,8 @@ create policy "own quizzes" on public.quizzes
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "own ink" on public.ink
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own user_prefs" on public.user_prefs
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Table privileges (RLS alone is not enough — roles need GRANT)
 grant usage on schema public to anon, authenticated, service_role;
@@ -97,6 +117,7 @@ grant select, insert, update, delete on public.elements to authenticated;
 grant select, insert, update, delete on public.assets to authenticated;
 grant select, insert, update, delete on public.quizzes to authenticated;
 grant select, insert, update, delete on public.ink to authenticated;
+grant select, insert, update, delete on public.user_prefs to authenticated;
 
 grant all on public.documents to service_role;
 grant all on public.pages to service_role;
@@ -104,6 +125,7 @@ grant all on public.elements to service_role;
 grant all on public.assets to service_role;
 grant all on public.quizzes to service_role;
 grant all on public.ink to service_role;
+grant all on public.user_prefs to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Admins table — single source of truth for staff console access

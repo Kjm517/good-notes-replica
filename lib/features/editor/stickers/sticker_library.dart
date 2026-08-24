@@ -6,15 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/sync/account_prefs.dart';
+import '../../../core/sync/sync_providers.dart';
+import '../../../core/sync/user_prefs_repository.dart';
 import '../../library/providers.dart';
 
-/// A sticker the user added from their own PNG / GIF / WebP file.
-///
-/// The bytes live in the shared asset store (deduped by content hash), so here
-/// we only keep a light reference — the asset id plus a display name — in
-/// preferences. That's enough for the picker to show "your stickers" again on
-/// a later launch, and it means a GIF added once can be dropped onto any page.
-typedef CustomSticker = ({String assetId, String name});
+export '../../../core/sync/account_prefs.dart' show CustomSticker;
 
 /// The built-in sticker set, expressed as emoji and rendered to transparent
 /// PNGs on demand (see [renderEmojiSticker]) so nothing has to be shipped as a
@@ -51,20 +48,34 @@ Future<Uint8List> renderEmojiSticker(String emoji, {int size = 256}) async {
   }
 }
 
-/// The user's own stickers, persisted in SharedPreferences (most-recent first).
+/// The user's own stickers — local Drift + cloud via [UserPrefsRepository].
 final stickerLibraryProvider =
     NotifierProvider<StickerLibrary, List<CustomSticker>>(StickerLibrary.new);
 
 class StickerLibrary extends Notifier<List<CustomSticker>> {
-  static const _key = 'custom_stickers';
+  static const _legacyPrefsKey = 'custom_stickers';
+
+  UserPrefsRepository get _repo =>
+      UserPrefsRepository(ref.read(databaseProvider));
 
   @override
   List<CustomSticker> build() {
-    final raw = ref.watch(sharedPrefsProvider).getString(_key);
-    if (raw == null || raw.isEmpty) return const [];
+    final sub = _repo.watch().listen((prefs) {
+      state = prefs.stickers;
+    });
+    ref.onDispose(sub.cancel);
+    Future.microtask(_migrateLegacyIfNeeded);
+    return const [];
+  }
+
+  Future<void> _migrateLegacyIfNeeded() async {
+    final existing = await _repo.load();
+    if (existing.stickers.isNotEmpty) return;
+    final raw = ref.read(sharedPrefsProvider).getString(_legacyPrefsKey);
+    if (raw == null || raw.isEmpty) return;
     try {
       final list = jsonDecode(raw) as List;
-      return [
+      final migrated = [
         for (final item in list)
           if (item is Map)
             (
@@ -72,19 +83,17 @@ class StickerLibrary extends Notifier<List<CustomSticker>> {
               name: item['n'] as String? ?? 'Sticker',
             ),
       ].where((s) => s.assetId.isNotEmpty).toList();
-    } catch (_) {
-      return const [];
-    }
+      if (migrated.isEmpty) return;
+      await _persist(migrated);
+      await ref.read(sharedPrefsProvider).remove(_legacyPrefsKey);
+    } catch (_) {}
   }
 
   Future<void> _persist(List<CustomSticker> stickers) async {
     state = stickers;
-    await ref.read(sharedPrefsProvider).setString(
-          _key,
-          jsonEncode([
-            for (final s in stickers) {'a': s.assetId, 'n': s.name},
-          ]),
-        );
+    final current = await _repo.load();
+    await _repo.save(current.copyWith(stickers: stickers));
+    ref.read(syncEngineProvider)?.scheduleSync();
   }
 
   /// Stores [bytes] as an asset and remembers it as a reusable sticker,

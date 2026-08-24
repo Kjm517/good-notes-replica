@@ -220,6 +220,20 @@ class Assets extends Table with SyncedTable {
   Set<Column> get primaryKey => {id};
 }
 
+/// Account-level preferences that follow the signed-in user across devices.
+///
+/// One row per device database (`id` is always `'me'`). Payload is JSON:
+/// custom sticker catalog + pen/tool presets. Synced via Supabase `user_prefs`.
+class UserPrefs extends Table with SyncedTable {
+  TextColumn get id => text()();
+
+  /// JSON object — see AccountPrefs in core/sync/account_prefs.dart.
+  TextColumn get payload => text().withDefault(const Constant('{}'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 /// A finished quiz run, kept locally and synced when signed in.
 class QuizAttempts extends Table with SyncedTable {
   TextColumn get id => text()();

@@ -54,3 +54,5 @@ Future<Uint8List?> readAsset({String? localPath, String? base64}) async =>
     base64 == null ? null : base64Decode(base64);
 
 Future<void> deleteAsset(String? localPath) async {}
+
+Future<String?> findStoredAssetPath(String id) async => null;

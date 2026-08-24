@@ -44,10 +44,18 @@ class AssetRepository {
               ..where(_db.assets.id.equals(id)))
             .getSingleOrNull();
     if (row == null) return false;
-    return assetExists(
+    if (await assetExists(
       localPath: row.read(_db.assets.localPath),
       hasInlineData: row.read(hasInline) ?? false,
+    )) {
+      return true;
+    }
+    final recovered = await findStoredAssetPath(id);
+    if (recovered == null) return false;
+    await (_db.update(_db.assets)..where((a) => a.id.equals(id))).write(
+      AssetsCompanion(localPath: Value(recovered)),
     );
+    return true;
   }
 
   /// Stored size of [id] in bytes, for deciding whether it can be held in

@@ -276,8 +276,8 @@ class _GoPremiumCard extends StatelessWidget {
           Text(
             trialExpired
                 ? 'Your 7-day trial has ended. Premium from ${monthlyPriceLabel()} '
-                    '(students ${formatPhp(kStudentMonthlyPhp)}/mo) or continue with '
-                    '$kFreeQuizLimitPerMonth free quizzes per month on 5 GB storage.'
+                    '(students ${formatPhp(kStudentMonthlyPhp)}/mo) keeps AI quizzes, '
+                    'history, and 15 GB storage.'
                 : 'Start a 7-day trial with $kTrialQuizLimit AI quizzes, or go Premium from '
                     '${monthlyPriceLabel()} — ${yearlyPriceLabel()} ${yearlySavingsLabel().toLowerCase()}.',
             style: TextStyle(fontSize: 13, color: t.textSecondary, height: 1.4),

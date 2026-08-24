@@ -37,7 +37,14 @@ class UserEntitlement {
   bool get isTrialActive => tier == EntitlementTier.trial;
   bool get isFree => tier == EntitlementTier.free;
   bool get hasPremiumFeatures => isPremium || isTrialActive;
-  bool get canGenerateQuiz => isPremium || quizUsed < quizLimit;
+
+  /// Premium: unlimited. Active trial: up to [quizLimit]. Free: locked — upgrade.
+  bool get canGenerateQuiz {
+    if (isPremium) return true;
+    if (isTrialActive) return quizUsed < quizLimit;
+    return false;
+  }
+
   bool get canAccessQuizHistory => hasPremiumFeatures;
 
   bool get hadTrial => trialStartedAt != null;
@@ -61,7 +68,7 @@ class UserEntitlement {
     if (isTrialActive) {
       return '$quizUsed of $quizLimit trial quizzes used';
     }
-    return '$quizUsed of $quizLimit free quizzes used this month';
+    return 'Included with Premium or during your free trial';
   }
 }
 
@@ -140,6 +147,14 @@ final hasPremiumFeaturesProvider = Provider<bool>((ref) {
       );
 });
 
+/// True when the user cannot start another AI quiz (free/trial cap hit).
+final quizLimitReachedProvider = Provider<bool>((ref) {
+  return ref.watch(entitlementProvider).maybeWhen(
+        data: (e) => !e.canGenerateQuiz,
+        orElse: () => false,
+      );
+});
+
 /// Import/storage ceiling — 5 GB for free and trial accounts, 15 GB for paid Premium only.
 final storageQuotaBytesProvider = Provider<int>((ref) {
   ref.watch(entitlementProvider);
@@ -171,6 +186,7 @@ class EntitlementService {
     _ref.invalidate(entitlementProvider);
     _ref.invalidate(isPremiumProvider);
     _ref.invalidate(hasPremiumFeaturesProvider);
+    _ref.invalidate(quizLimitReachedProvider);
     _ref.invalidate(storageQuotaBytesProvider);
     _ref.invalidate(monthlyQuizUsageProvider);
     _ref.invalidate(quizStatsProvider);
@@ -204,7 +220,7 @@ class TrialExpiredDialog extends ConsumerWidget {
       ),
       content: Text(
         'Upgrade to Premium for unlimited AI quizzes, quiz history, cloud sync, and 15 GB storage. '
-        'Without Premium you can still use the app with $kFreeQuizLimitPerMonth quizzes per month.',
+        'Free accounts can still take notes and sync — AI quizzes unlock with Premium or a trial.',
         style: TextStyle(fontSize: 14, height: 1.45, color: t.textSecondary),
       ),
       actions: [

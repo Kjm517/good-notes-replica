@@ -93,7 +93,9 @@ final payMongoBillingServiceProvider = Provider<PayMongoBillingService?>((ref) {
 /// Polls PayMongo entitlement when wallet billing is available.
 final payMongoSyncProvider = Provider<void>((ref) {
   if (!ref.watch(payMongoAvailableProvider)) return;
-  unawaited(ref.read(payMongoEntitlementRefreshProvider)());
+  Future.microtask(() {
+    unawaited(ref.read(payMongoEntitlementRefreshProvider)());
+  });
 });
 
 /// Refreshes PayMongo premium state from the worker (safe from widgets & providers).

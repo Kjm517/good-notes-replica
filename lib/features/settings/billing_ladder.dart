@@ -32,7 +32,7 @@ String launchPricingHint() =>
     'your first month (GCash & Maya).';
 
 String freeTierSummary() =>
-    '$kFreeQuizLimitPerMonth free AI quizzes per month · 5 GB storage';
+    '5 GB storage · AI quizzes unlock with Premium or trial';
 
 String premiumTierSummary() =>
     'Unlimited AI quizzes · quiz history · cloud sync · 15 GB storage';

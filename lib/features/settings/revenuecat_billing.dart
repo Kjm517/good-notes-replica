@@ -62,11 +62,22 @@ final revenueCatSyncProvider = Provider<void>((ref) {
     unawaited(_syncAuth(ref, next.asData?.value));
   });
 
-  Purchases.addCustomerInfoUpdateListener((info) {
-    ref.read(customerInfoProvider.notifier).apply(info);
+  void onCustomerInfo(CustomerInfo info) {
+    // Listener can fire during provider init — defer so we don't modify
+    // [customerInfoProvider] while another provider is still building.
+    Future.microtask(() {
+      ref.read(customerInfoProvider.notifier).apply(info);
+    });
+  }
+
+  Purchases.addCustomerInfoUpdateListener(onCustomerInfo);
+  ref.onDispose(() {
+    Purchases.removeCustomerInfoUpdateListener(onCustomerInfo);
   });
 
-  unawaited(ref.read(customerInfoProvider.notifier).refresh());
+  Future.microtask(() {
+    unawaited(ref.read(customerInfoProvider.notifier).refresh());
+  });
 });
 
 Future<void> _syncAuth(Ref ref, AppUser? user) async {

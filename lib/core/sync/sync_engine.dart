@@ -5,16 +5,19 @@ import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 
 import '../db/database.dart';
+import '../db/sync_touch.dart';
 import '../ink/ink_page_codec.dart';
 import '../models/enums.dart';
 import '../models/image_element.dart';
 import '../models/margin_spec.dart';
 import '../network/network_status.dart';
 import '../storage/asset_store.dart';
+import 'account_prefs.dart';
 import 'file_sync.dart';
 import 'remote_store.dart';
 import 'sync_fields.dart';
 import 'sync_state.dart';
+import 'user_prefs_repository.dart';
 
 /// Pushes local changes to the cloud and pulls remote ones back.
 ///
@@ -54,9 +57,21 @@ class SyncEngine {
   DateTime? _lastSyncedAt;
   bool _running = false;
 
+  /// Pages whose ink was successfully pushed during the current [syncNow].
+  /// The following pull must not re-apply that echo: a corrupt or empty
+  /// round-trip through Postgres bytea would delete-and-replace local strokes
+  /// and make drawings vanish the moment the green cloud appears.
+  final Set<String> _inkPagesPushedThisRun = {};
+
   /// Why the last file upload failed, if it did. Surfaced in the sync status
   /// so a stuck upload explains itself rather than looking merely slow.
   String? _lastUploadError;
+
+  /// Why the last file download failed (timeout, 404, auth, …).
+  String? _lastDownloadError;
+
+  /// Why ink failed to leave this device (oversized without R2, etc.).
+  String? _lastInkError;
   bool _paused = false;
   Timer? _debounce;
   StreamSubscription<void>? _watch;
@@ -72,14 +87,44 @@ class SyncEngine {
   /// Last progress fraction emitted — reused when tagging a file download.
   double _lastProgress = 0;
 
+  /// Documents whose pages are still being pulled this run, and the one
+  /// currently in [_pullPages]. Library cards key off these so a PDF that
+  /// already has some local pages stays gray until the rest arrive.
+  final Set<String> _pullingDocumentIds = {};
+  String? _pullingDocumentId;
+  double? _pullingDocumentProgress;
+
   /// Per-asset backoff after a failed R2 download so we don't hammer the
   /// worker every quiet period.
   final Map<String, DateTime> _downloadBackoffUntil = {};
+
+  /// Consecutive failures per asset, so a file the worker will never serve
+  /// backs off towards [_downloadBackoffMax] instead of being retried at a
+  /// fixed 45 seconds until the battery runs out.
+  final Map<String, int> _downloadAttempts = {};
+
+  /// Consecutive runs that ended with work still outstanding. Each one pushes
+  /// the follow-up further out; a clean run resets it.
+  int _pendingRuns = 0;
+
+  /// Where [_pullInkChanged] stopped when it hit its per-run ceiling.
+  ///
+  /// Without this the next run starts from [_lastSyncedAt], which is *later*
+  /// than the backlog it never reached — so on a device syncing a large
+  /// notebook for the first time, every page of ink past the cap was skipped
+  /// permanently.
+  DateTime? _inkResumeCursor;
 
   /// How long to wait after the last change before syncing. Long enough that a
   /// burst of strokes becomes one upload, short enough to feel automatic.
   static const Duration _quietPeriod = Duration(milliseconds: 500);
   static const Duration _downloadBackoff = Duration(seconds: 45);
+  static const Duration _downloadBackoffMax = Duration(minutes: 10);
+
+  /// Follow-up delay when a run leaves work behind, doubling per consecutive
+  /// pending run up to [_pendingRetryMax].
+  static const Duration _pendingRetryBase = Duration(seconds: 10);
+  static const Duration _pendingRetryMax = Duration(minutes: 5);
 
   /// Watches the database and syncs after any change, so callers never have to
   /// remember to trigger it.
@@ -95,6 +140,7 @@ class SyncEngine {
           _db.strokes,
           _db.canvasElements,
           _db.assets,
+          _db.userPrefs,
           _db.quizAttempts,
         ]))
         .listen((_) {
@@ -192,6 +238,11 @@ class SyncEngine {
         ));
       }
     }
+    // "Sync now" means try again now — wipe download backoff so a stuck
+    // textbook isn't waiting another ten minutes for the next attempt.
+    _downloadBackoffUntil.clear();
+    _downloadAttempts.clear();
+    _pendingRuns = 0;
     return syncNow(full: full);
   }
 
@@ -238,6 +289,7 @@ class SyncEngine {
       return;
     }
     _running = true;
+    _inkPagesPushedThisRun.clear();
     if (_files != null && !_files.enabled) {
       debugPrint(
         'File sync disabled (empty NOTABLY_FILE_ENDPOINT) — '
@@ -254,7 +306,11 @@ class SyncEngine {
       await _pull(full: full);
       _lastSyncedAt = startedAt;
       final pendingUploads = await _pendingFileUploadCount();
-      final pendingDownloads = await _pendingFileDownloadCount();
+      final missingFiles = await _missingAssets();
+      final pendingDownloads = missingFiles.length;
+      final pendingPages = await _pendingDirtyPageCount();
+      final pendingInk = await _pendingDirtyInkPageCount();
+      final pendingPrefs = await _pendingDirtyPrefsCount();
       if (pendingUploads > 0) {
         // Notes may be idle while a large PDF is still waiting on R2 — don't
         // claim "fully synced" or the library card stays stuck on Uploading.
@@ -271,20 +327,64 @@ class SyncEngine {
                   ? '1 file still uploading'
                   : '$pendingUploads files still uploading',
         ));
-        scheduleSync(delay: const Duration(seconds: 12));
+        _scheduleRetry();
+      } else if (pendingPages > 0) {
+        _emit(SyncStatus(
+          phase: SyncPhase.pending,
+          pendingChanges: pendingPages,
+          lastSyncedAt: _lastSyncedAt,
+          message: pendingPages == 1
+              ? '1 page still uploading'
+              : '$pendingPages pages still uploading',
+        ));
+        _scheduleRetry();
+      } else if (pendingInk > 0) {
+        _emit(SyncStatus(
+          phase: SyncPhase.pending,
+          pendingChanges: pendingInk,
+          lastSyncedAt: _lastSyncedAt,
+          message: _lastInkError ??
+              (pendingInk == 1
+                  ? '1 page of drawings still uploading'
+                  : '$pendingInk pages of drawings still uploading'),
+        ));
+        _scheduleRetry();
+      } else if (pendingPrefs > 0) {
+        _emit(SyncStatus(
+          phase: SyncPhase.pending,
+          pendingChanges: pendingPrefs,
+          lastSyncedAt: _lastSyncedAt,
+          message: 'Stickers & pen settings still uploading',
+        ));
+        _scheduleRetry();
       } else if (pendingDownloads > 0) {
-        // Waiting on R2 keys from another device, or a download that needs a
-        // retry after backoff — keep the UI honest and try again shortly.
+        // Two very different situations used to share one message. A file
+        // whose R2 key exists is genuinely mid-download and worth retrying
+        // soon; one with no key anywhere is waiting on the device that
+        // imported it, and nothing this device does will speed it up. Saying
+        // "still downloading" for the second is what made sync look hung.
+        final fetchable =
+            missingFiles.where((a) => a.hasRemoteCopy).length;
+        final waiting = pendingDownloads - fetchable;
         _emit(SyncStatus(
           phase: SyncPhase.pending,
           pendingChanges: pendingDownloads,
           lastSyncedAt: _lastSyncedAt,
-          message: pendingDownloads == 1
-              ? '1 file still downloading'
-              : '$pendingDownloads files still downloading',
+          message: _lastDownloadError != null && fetchable > 0
+              ? 'Download failed: $_lastDownloadError'
+              : fetchable > 0
+                  ? (fetchable == 1
+                      ? '1 file still downloading'
+                      : '$fetchable files still downloading')
+                  : (waiting == 1
+                      ? '1 file is still uploading from your other device'
+                      : '$waiting files are still uploading from your '
+                          'other device'),
         ));
-        scheduleSync(delay: const Duration(seconds: 10));
+        _scheduleRetry();
       } else {
+        _pendingRuns = 0;
+        _lastDownloadError = null;
         _emit(SyncStatus(
           phase: SyncPhase.idle,
           lastSyncedAt: _lastSyncedAt,
@@ -301,7 +401,10 @@ class SyncEngine {
           message: '$e',
           lastSyncedAt: _lastSyncedAt,
         ));
-        scheduleSync(delay: const Duration(seconds: 8));
+        // Same backoff as a pending run: an error that repeats (a bad
+        // endpoint, a revoked token) should not retry every eight seconds
+        // for the rest of the session.
+        _scheduleRetry();
       }
     } finally {
       _running = false;
@@ -318,6 +421,18 @@ class SyncEngine {
 
   void _emit(SyncStatus status) => onStatus?.call(status);
 
+  /// Schedules the follow-up run after a sync that left work behind.
+  ///
+  /// A fixed ten-second retry is fine while something is actually moving and
+  /// pure waste once it is not — a file the other device has not uploaded yet
+  /// kept this one waking up six times a minute, forever, to re-count it.
+  void _scheduleRetry() {
+    _pendingRuns++;
+    var delay = _pendingRetryBase * (1 << (_pendingRuns - 1).clamp(0, 5));
+    if (delay > _pendingRetryMax) delay = _pendingRetryMax;
+    scheduleSync(delay: delay);
+  }
+
   void _emitProgress(
     double progress,
     String message, {
@@ -329,6 +444,9 @@ class SyncEngine {
       progress: _lastProgress,
       progressMessage: message,
       activeAssetId: activeAssetId,
+      pullingDocumentIds: Set<String>.from(_pullingDocumentIds),
+      pullingDocumentId: _pullingDocumentId,
+      pullingDocumentProgress: _pullingDocumentProgress,
     ));
   }
 
@@ -347,6 +465,8 @@ class SyncEngine {
     await _pushElements();
     _emitProgress(0.50, 'Uploading quizzes…');
     await _pushQuizzes();
+    _emitProgress(0.53, 'Uploading preferences…');
+    await _pushUserPrefs();
     _emitProgress(0.55, 'Uploading ink…');
     await _pushInk();
   }
@@ -427,11 +547,16 @@ class SyncEngine {
     return (await query.getSingle()).read(count) ?? 0;
   }
 
-  /// Source PDFs/images referenced by pages that still lack local bytes.
-  Future<int> _pendingFileDownloadCount() async {
-    if (_files == null || !_files.enabled) return 0;
+  /// Every asset id this account's content refers to: page backgrounds, PDF
+  /// sources, canvas images and the sticker library.
+  ///
+  /// [documentId] narrows it to one notebook, which is what opening a
+  /// document needs; omitting it covers the whole library.
+  Future<Set<String>> _referencedAssetIds({String? documentId}) async {
     final pages = await (_db.select(_db.notePages)
-          ..where((p) => p.deletedAt.isNull()))
+          ..where((p) => documentId == null
+              ? p.deletedAt.isNull()
+              : p.documentId.equals(documentId) & p.deletedAt.isNull()))
         .get();
     final assetIds = <String>{
       for (final p in pages) ...[
@@ -439,22 +564,105 @@ class SyncEngine {
         if (p.bgAssetId != null) p.bgAssetId!,
       ],
     };
-    var missing = 0;
-    for (final id in assetIds) {
+    final pageIds = [for (final p in pages) p.id];
+    if (pageIds.isNotEmpty) {
+      final elements = await (_db.select(_db.canvasElements)
+            ..where((e) =>
+                e.pageId.isIn(pageIds) &
+                e.deletedAt.isNull() &
+                e.type.equals(ElementType.image.index)))
+          .get();
+      for (final element in elements) {
+        try {
+          final assetId = ImageElementData.fromJson(element.data).assetId;
+          if (assetId.isNotEmpty) assetIds.add(assetId);
+        } catch (_) {}
+      }
+    }
+    if (documentId == null) {
+      // Sticker library assets (may not be placed on a page yet).
+      final prefs = await UserPrefsRepository(_db).load();
+      for (final sticker in prefs.stickers) {
+        assetIds.add(sticker.assetId);
+      }
+    }
+    return assetIds;
+  }
+
+  /// Source PDFs/images referenced by pages **or** canvas stickers/images
+  /// that still lack local bytes, and whether the cloud has a copy to fetch.
+  Future<List<_MissingAsset>> _missingAssets({String? documentId}) async {
+    if (_files == null || !_files.enabled) return const [];
+    final missing = <_MissingAsset>[];
+    for (final id in await _referencedAssetIds(documentId: documentId)) {
       final asset = await (_db.select(_db.assets)
             ..where((a) => a.id.equals(id) & a.deletedAt.isNull()))
           .getSingleOrNull();
       if (asset == null) {
-        missing++;
+        // No row at all: the metadata has not reached this device, so there
+        // is nothing to fetch from R2 with either.
+        missing.add(_MissingAsset(id, hasRemoteCopy: false));
         continue;
       }
       final hasBytes = await assetExists(
         localPath: asset.localPath,
         hasInlineData: asset.data != null && asset.data!.isNotEmpty,
       );
-      if (!hasBytes) missing++;
+      if (hasBytes) continue;
+      final recovered = await findStoredAssetPath(id);
+      if (recovered != null) {
+        await (_db.update(_db.assets)..where((a) => a.id.equals(id))).write(
+          AssetsCompanion(localPath: Value(recovered)),
+        );
+        continue;
+      }
+      missing.add(
+        _MissingAsset(id, hasRemoteCopy: asset.remoteKey != null),
+      );
     }
     return missing;
+  }
+
+  /// Actually fetches the files [_missingAssets] just found.
+  ///
+  /// Counting them without retrying them is what left the cloud menu on
+  /// "4 files still downloading" forever: [_ensureAsset] only ran for records
+  /// the *incremental* pull happened to return, so once those pages stopped
+  /// changing nothing ever asked R2 again — while the count kept rescheduling
+  /// a sync every ten seconds to re-count the same four files.
+  Future<void> _drainPendingDownloads() async {
+    final files = _files;
+    if (files == null || !files.enabled) return;
+    final missing = await _missingAssets();
+    if (missing.isEmpty) return;
+    _emitProgress(0.95, 'Downloading files…');
+    for (final asset in missing) {
+      await _ensureAsset(asset.id);
+    }
+  }
+
+  Future<int> _pendingDirtyInkPageCount() async {
+    final rows = await (_db.select(_db.strokes)
+          ..where((s) => s.dirty.equals(true)))
+        .get();
+    return rows.map((s) => s.pageId).toSet().length;
+  }
+
+  Future<int> _pendingDirtyPageCount() async {
+    final count = _db.notePages.id.count();
+    final query = _db.selectOnly(_db.notePages)
+      ..addColumns([count])
+      ..where(_db.notePages.dirty.equals(true) &
+          _db.notePages.deletedAt.isNull());
+    return (await query.getSingle()).read(count) ?? 0;
+  }
+
+  Future<int> _pendingDirtyPrefsCount() async {
+    final row = await (_db.select(_db.userPrefs)
+          ..where((p) =>
+              p.id.equals(kUserPrefsRowId) & p.dirty.equals(true)))
+        .getSingleOrNull();
+    return row == null ? 0 : 1;
   }
 
   /// Records assets in the cloud and uploads any bytes not there yet.
@@ -611,28 +819,85 @@ class SyncEngine {
   }
 
   /// Uploads ink for every page that has dirty strokes — one blob per page.
+  ///
+  /// Blobs under [kInkInlineMaxBytes] go straight into Supabase; larger ones
+  /// upload to R2 first, then store only the object key in `ink`.
   Future<void> _pushInk() async {
     final dirtyStrokes =
         await (_db.select(_db.strokes)..where((s) => s.dirty.equals(true)))
             .get();
-    if (dirtyStrokes.isEmpty) return;
+    if (dirtyStrokes.isEmpty) {
+      _lastInkError = null;
+      return;
+    }
 
     final pageIds = dirtyStrokes.map((s) => s.pageId).toSet();
     final uploadedIds = <String>{};
+    String? lastError;
     for (final pageId in pageIds) {
       final strokes = await (_db.select(_db.strokes)
             ..where((s) => s.pageId.equals(pageId) & s.deletedAt.isNull())
             ..orderBy([(s) => OrderingTerm.asc(s.seq)]))
           .get();
       final blob = encodeInkPage(strokes);
-      final ok = await _remote.putInk(pageId, blob, DateTime.now());
+      final stamp = DateTime.now();
+      var ok = false;
+      if (blob.lengthInBytes > kInkInlineMaxBytes) {
+        final files = _files;
+        if (files == null || !files.enabled) {
+          lastError =
+              'Drawing too large to sync without file storage';
+          debugPrint(
+            'Ink for $pageId is ${blob.lengthInBytes} bytes — '
+            'needs R2 (NOTABLY_FILE_ENDPOINT)',
+          );
+        } else {
+          final key = 'ink/$uid/$pageId.bin';
+          try {
+            await files.putBytes(key, blob, mime: 'application/octet-stream');
+            ok = await _remote.putInk(pageId, stamp, remoteKey: key);
+          } catch (e) {
+            lastError = 'Drawing upload failed: $e';
+            debugPrint('R2 ink upload failed for $pageId: $e');
+          }
+        }
+      } else {
+        ok = await _remote.putInk(pageId, stamp, bytes: blob);
+      }
       if (ok) {
+        _inkPagesPushedThisRun.add(pageId);
         uploadedIds.addAll(
           dirtyStrokes.where((s) => s.pageId == pageId).map((s) => s.id),
         );
       }
     }
+    _lastInkError = uploadedIds.length == dirtyStrokes.length
+        ? null
+        : lastError;
     await _clearDirty(_db.strokes, uploadedIds);
+  }
+
+  Future<void> _pushUserPrefs() async {
+    final row = await (_db.select(_db.userPrefs)
+          ..where((p) =>
+              p.id.equals(kUserPrefsRowId) & p.dirty.equals(true)))
+        .getSingleOrNull();
+    if (row == null) return;
+
+    // Decode once so sticker asset ids stay typed for R2 ensure below.
+    final prefs = AccountPrefs.fromJson(row.payload);
+    await _remote.upsert(
+      RemoteCollection.userPrefs,
+      [
+        RemoteRecord(
+          id: uid,
+          updatedAt: row.updatedAt,
+          deletedAt: row.deletedAt,
+          data: prefs.toMap(),
+        ),
+      ],
+    );
+    await _clearDirty(_db.userPrefs, [row.id]);
   }
 
   Future<void> _clearDirty(TableInfo table, Iterable<String> ids) async {
@@ -674,78 +939,144 @@ class SyncEngine {
     await _pullDocuments(since);
     _emitProgress(0.75, 'Downloading elements…');
     await _pullElements(since: since);
+    _emitProgress(0.82, 'Downloading preferences…');
+    await _pullUserPrefs(since);
     _emitProgress(0.85, 'Downloading drawings…');
-    await _pullInkChanged(since);
-    _emitProgress(0.95, 'Downloading quizzes…');
+    await _pullInkChanged(since, full: full);
+    _emitProgress(0.92, 'Downloading quizzes…');
     await _pullQuizzes(since);
+    // Last, because it is the slowest and depends on everything above having
+    // told us which files this device is missing.
+    await _drainPendingDownloads();
+  }
+
+  Future<void> _pullUserPrefs(DateTime? since) async {
+    final records = await _remote.fetchChanged(
+      RemoteCollection.userPrefs,
+      since: since,
+    );
+    if (records.isEmpty) return;
+    // One row per account; take the newest.
+    records.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final record = records.first;
+    final local = await (_db.select(_db.userPrefs)
+          ..where((p) => p.id.equals(kUserPrefsRowId)))
+        .getSingleOrNull();
+    if (local != null &&
+        !remoteWins(
+          localUpdatedAt: local.updatedAt,
+          remoteUpdatedAt: record.updatedAt,
+          remoteDeletedAt: record.deletedAt,
+        )) {
+      return;
+    }
+    if (record.isDeleted) return;
+
+    final prefs = AccountPrefs.fromMap(
+      Map<String, dynamic>.from(record.data),
+    );
+    await UserPrefsRepository(_db).applyRemote(
+      payload: prefs.toJson(),
+      updatedAt: record.updatedAt,
+    );
+    for (final sticker in prefs.stickers) {
+      await _ensureAsset(sticker.assetId);
+    }
   }
 
   Future<void> _pullDocuments(DateTime? since) async {
     final remoteDocs =
         await _remote.fetchChanged(RemoteCollection.documents, since: since);
 
-    for (final record in remoteDocs) {
-      final local = await (_db.select(_db.documents)
-            ..where((d) => d.id.equals(record.id)))
-          .getSingleOrNull();
+    _pullingDocumentIds
+      ..clear()
+      ..addAll([
+        for (final record in remoteDocs)
+          if (!record.isDeleted && _remoteDocumentType(record) != DocumentType.folder)
+            record.id,
+      ]);
+    _pullingDocumentId = null;
+    _pullingDocumentProgress = null;
+    if (_pullingDocumentIds.isNotEmpty) {
+      _emitProgress(_lastProgress, 'Downloading documents…');
+    }
 
-      if (local != null &&
-          !remoteWins(
-            localUpdatedAt: local.updatedAt,
-            remoteUpdatedAt: record.updatedAt,
-            remoteDeletedAt: record.deletedAt,
-          )) {
-        // The notebook row itself lost last-write-wins (title, cover, …) but
-        // drawings and stickers live on pages — still walk children.
+    try {
+      for (final record in remoteDocs) {
+        final local = await (_db.select(_db.documents)
+              ..where((d) => d.id.equals(record.id)))
+            .getSingleOrNull();
+
+        if (local != null &&
+            !remoteWins(
+              localUpdatedAt: local.updatedAt,
+              remoteUpdatedAt: record.updatedAt,
+              remoteDeletedAt: record.deletedAt,
+            )) {
+          // The notebook row itself lost last-write-wins (title, cover, …) but
+          // drawings and stickers live on pages — still walk children.
+          final pageCount = await _livePageCount(record.id);
+          await _pullPages(
+            record.id,
+            pageCount == 0 ? null : since,
+          );
+          continue;
+        }
+
+        // A thumb absent from the payload leaves the column alone rather than
+        // clearing it: an older client that doesn't send one shouldn't wipe the
+        // cover this device already rendered.
+        final thumb = record.data['coverThumb'] as String?;
+        final createdAt = _millis(record.data['createdAt']);
+
+        final companion = DocumentsCompanion.insert(
+          id: record.id,
+          type: DocumentType.values[(record.data['type'] as num?)?.toInt() ?? 1],
+          title: Value(record.data['title'] as String? ?? 'Untitled'),
+          parentId: Value(record.data['parentId'] as String?),
+          coverStyle: Value((record.data['coverStyle'] as num?)?.toInt() ?? 0),
+          orientation: Value(PageOrientation
+              .values[(record.data['orientation'] as num?)?.toInt() ?? 0]),
+          pageSize: Value(PageSizePreset
+              .values[(record.data['pageSize'] as num?)?.toInt() ?? 0]),
+          starred: Value(record.data['starred'] as bool? ?? false),
+          coverThumb: thumb == null ? const Value.absent() : Value(thumb),
+          trashedAt: Value(_millis(record.data['trashedAt'])),
+          sortIndex: Value((record.data['sortIndex'] as num?)?.toInt() ?? 0),
+          createdAt:
+              createdAt == null ? const Value.absent() : Value(createdAt),
+          ownerUid: Value(uid),
+          updatedAt: Value(record.updatedAt),
+          deletedAt: Value(record.deletedAt),
+          dirty: const Value(false),
+          remoteUpdatedAt: Value(record.updatedAt),
+        );
+        await _db.into(_db.documents).insertOnConflictUpdate(companion);
+
+        // A document this device has never seen (or one whose pages never
+        // arrived) must fetch the full page list. Incremental `since` skips
+        // pages older than the last cursor — that's how a PDF card can land
+        // with no pages, or never land if we only look at changed documents
+        // after a gapped cursor.
         final pageCount = await _livePageCount(record.id);
         await _pullPages(
           record.id,
-          pageCount == 0 ? null : since,
+          local == null || pageCount == 0 ? null : since,
         );
-        continue;
       }
-
-      // A thumb absent from the payload leaves the column alone rather than
-      // clearing it: an older client that doesn't send one shouldn't wipe the
-      // cover this device already rendered.
-      final thumb = record.data['coverThumb'] as String?;
-      final createdAt = _millis(record.data['createdAt']);
-
-      final companion = DocumentsCompanion.insert(
-        id: record.id,
-        type: DocumentType.values[(record.data['type'] as num?)?.toInt() ?? 1],
-        title: Value(record.data['title'] as String? ?? 'Untitled'),
-        parentId: Value(record.data['parentId'] as String?),
-        coverStyle: Value((record.data['coverStyle'] as num?)?.toInt() ?? 0),
-        orientation: Value(PageOrientation
-            .values[(record.data['orientation'] as num?)?.toInt() ?? 0]),
-        pageSize: Value(PageSizePreset
-            .values[(record.data['pageSize'] as num?)?.toInt() ?? 0]),
-        starred: Value(record.data['starred'] as bool? ?? false),
-        coverThumb: thumb == null ? const Value.absent() : Value(thumb),
-        trashedAt: Value(_millis(record.data['trashedAt'])),
-        sortIndex: Value((record.data['sortIndex'] as num?)?.toInt() ?? 0),
-        createdAt:
-            createdAt == null ? const Value.absent() : Value(createdAt),
-        ownerUid: Value(uid),
-        updatedAt: Value(record.updatedAt),
-        deletedAt: Value(record.deletedAt),
-        dirty: const Value(false),
-        remoteUpdatedAt: Value(record.updatedAt),
-      );
-      await _db.into(_db.documents).insertOnConflictUpdate(companion);
-
-      // A document this device has never seen (or one whose pages never
-      // arrived) must fetch the full page list. Incremental `since` skips
-      // pages older than the last cursor — that's how a PDF card can land
-      // with no pages, or never land if we only look at changed documents
-      // after a gapped cursor.
-      final pageCount = await _livePageCount(record.id);
-      await _pullPages(
-        record.id,
-        local == null || pageCount == 0 ? null : since,
-      );
+    } finally {
+      _pullingDocumentIds.clear();
+      _pullingDocumentId = null;
+      _pullingDocumentProgress = null;
     }
+  }
+
+  DocumentType _remoteDocumentType(RemoteRecord record) {
+    final index = (record.data['type'] as num?)?.toInt() ?? 1;
+    if (index < 0 || index >= DocumentType.values.length) {
+      return DocumentType.notebook;
+    }
+    return DocumentType.values[index];
   }
 
   Future<int> _livePageCount(String documentId) async {
@@ -759,71 +1090,104 @@ class SyncEngine {
   }
 
   Future<void> _pullPages(String documentId, DateTime? since) async {
-    final pages = await _remote.fetchChanged(
-      RemoteCollection.pages,
-      since: since,
-      parentId: documentId,
-    );
+    _pullingDocumentId = documentId;
+    _pullingDocumentProgress = null;
+    _emitProgress(_lastProgress, 'Syncing pages…');
+    try {
+      final pages = await _remote.fetchChanged(
+        RemoteCollection.pages,
+        since: since,
+        parentId: documentId,
+      );
 
-    final ensuredAssets = <String>{};
-    for (final record in pages) {
-      final local = await (_db.select(_db.notePages)
-            ..where((p) => p.id.equals(record.id)))
-          .getSingleOrNull();
-      if (local != null &&
-          !remoteWins(
-            localUpdatedAt: local.updatedAt,
-            remoteUpdatedAt: record.updatedAt,
-            remoteDeletedAt: record.deletedAt,
-          )) {
-        if (!record.isDeleted) {
-          final skippedPdf = record.data['pdfAssetId'] as String?;
-          final skippedBg = record.data['bgAssetId'] as String?;
-          if (skippedPdf != null && ensuredAssets.add(skippedPdf)) {
-            await _ensureAsset(skippedPdf);
+      final total = pages.length;
+      var processed = 0;
+      var lastEmitted = 0;
+      void emitPageProgress() {
+        if (total <= 0) return;
+        _pullingDocumentProgress = (processed / total).clamp(0.0, 1.0);
+        _emitProgress(_lastProgress, 'Syncing pages…');
+      }
+
+      final ensuredAssets = <String>{};
+      for (final record in pages) {
+        final local = await (_db.select(_db.notePages)
+              ..where((p) => p.id.equals(record.id)))
+            .getSingleOrNull();
+        if (local != null &&
+            !remoteWins(
+              localUpdatedAt: local.updatedAt,
+              remoteUpdatedAt: record.updatedAt,
+              remoteDeletedAt: record.deletedAt,
+            )) {
+          if (!record.isDeleted) {
+            final skippedPdf = record.data['pdfAssetId'] as String?;
+            final skippedBg = record.data['bgAssetId'] as String?;
+            if (skippedPdf != null && ensuredAssets.add(skippedPdf)) {
+              await _ensureAsset(skippedPdf);
+            }
+            if (skippedBg != null && ensuredAssets.add(skippedBg)) {
+              await _ensureAsset(skippedBg);
+            }
           }
-          if (skippedBg != null && ensuredAssets.add(skippedBg)) {
-            await _ensureAsset(skippedBg);
+          processed++;
+          if (processed == total || processed - lastEmitted >= 25) {
+            lastEmitted = processed;
+            emitPageProgress();
           }
+          continue;
         }
-        continue;
-      }
 
-      await _db.into(_db.notePages).insertOnConflictUpdate(
-            NotePagesCompanion.insert(
-              id: record.id,
-              documentId: documentId,
-              pageIndex: (record.data['pageIndex'] as num?)?.toInt() ?? 0,
-              template: Value(PaperTemplate
-                  .values[(record.data['template'] as num?)?.toInt() ?? 0]),
-              paperColor: Value(PaperColor
-                  .values[(record.data['paperColor'] as num?)?.toInt() ?? 0]),
-              marginSpec: Value(_margins(record.data['marginSpec'])),
-              pdfAssetId: Value(record.data['pdfAssetId'] as String?),
-              pdfPageIndex:
-                  Value((record.data['pdfPageIndex'] as num?)?.toInt()),
-              bgAssetId: Value(record.data['bgAssetId'] as String?),
-              pageW: Value((record.data['pageW'] as num?)?.toDouble()),
-              pageH: Value((record.data['pageH'] as num?)?.toDouble()),
-              bookmarkTitle: Value(record.data['bookmarkTitle'] as String?),
-              updatedAt: Value(record.updatedAt),
-              deletedAt: Value(record.deletedAt),
-              dirty: const Value(false),
-              remoteUpdatedAt: Value(record.updatedAt),
-            ),
-          );
+        await _db.into(_db.notePages).insertOnConflictUpdate(
+              NotePagesCompanion.insert(
+                id: record.id,
+                documentId: documentId,
+                pageIndex: (record.data['pageIndex'] as num?)?.toInt() ?? 0,
+                template: Value(PaperTemplate
+                    .values[(record.data['template'] as num?)?.toInt() ?? 0]),
+                paperColor: Value(PaperColor
+                    .values[(record.data['paperColor'] as num?)?.toInt() ?? 0]),
+                marginSpec: Value(_margins(record.data['marginSpec'])),
+                pdfAssetId: Value(record.data['pdfAssetId'] as String?),
+                pdfPageIndex:
+                    Value((record.data['pdfPageIndex'] as num?)?.toInt()),
+                bgAssetId: Value(record.data['bgAssetId'] as String?),
+                pageW: Value((record.data['pageW'] as num?)?.toDouble()),
+                pageH: Value((record.data['pageH'] as num?)?.toDouble()),
+                bookmarkTitle: Value(record.data['bookmarkTitle'] as String?),
+                updatedAt: Value(record.updatedAt),
+                deletedAt: Value(record.deletedAt),
+                dirty: const Value(false),
+                remoteUpdatedAt: Value(record.updatedAt),
+              ),
+            );
 
-      // PDF / image pages point at an asset; make sure its metadata (and, when
-      // possible, its bytes) land on this device — otherwise the editor paints
-      // blank pages and logs "Missing PDF asset".
-      final pdfId = record.data['pdfAssetId'] as String?;
-      final bgId = record.data['bgAssetId'] as String?;
-      if (pdfId != null && ensuredAssets.add(pdfId)) {
-        await _ensureAsset(pdfId);
+        // PDF / image pages point at an asset; make sure its metadata (and, when
+        // possible, its bytes) land on this device — otherwise the editor paints
+        // blank pages and logs "Missing PDF asset".
+        final pdfId = record.data['pdfAssetId'] as String?;
+        final bgId = record.data['bgAssetId'] as String?;
+        if (pdfId != null && ensuredAssets.add(pdfId)) {
+          await _ensureAsset(pdfId);
+        }
+        if (bgId != null && ensuredAssets.add(bgId)) {
+          await _ensureAsset(bgId);
+        }
+        processed++;
+        if (processed == total || processed - lastEmitted >= 25) {
+          lastEmitted = processed;
+          emitPageProgress();
+        }
       }
-      if (bgId != null && ensuredAssets.add(bgId)) {
-        await _ensureAsset(bgId);
+    } finally {
+      _pullingDocumentIds.remove(documentId);
+      if (_pullingDocumentId == documentId) {
+        _pullingDocumentId = null;
+        _pullingDocumentProgress = null;
       }
+      // Drop this card's lock immediately rather than waiting for the next
+      // phase emit — otherwise a finished PDF stays gray through elements.
+      _emitProgress(_lastProgress, 'Downloading documents…');
     }
   }
 
@@ -959,17 +1323,13 @@ class SyncEngine {
     var local = await (_db.select(_db.assets)
           ..where((a) => a.id.equals(assetId)))
         .getSingleOrNull();
-    final hasBytes = local != null &&
-        await assetExists(
-          localPath: local.localPath,
-          hasInlineData: local.data != null && local.data!.isNotEmpty,
-        );
-    if (hasBytes) {
+    if (await _assetBytesOnDevice(local, assetId)) {
       _downloadBackoffUntil.remove(assetId);
+      _downloadAttempts.remove(assetId);
       return;
     }
 
-    if (local == null || local.remoteKey == null) {
+    if (local == null) {
       final record =
           await _remote.fetchById(RemoteCollection.assets, assetId);
       if (record == null || record.isDeleted) return;
@@ -991,6 +1351,25 @@ class SyncEngine {
       local = await (_db.select(_db.assets)
             ..where((a) => a.id.equals(assetId)))
           .getSingleOrNull();
+    } else if (local.remoteKey == null) {
+      final record =
+          await _remote.fetchById(RemoteCollection.assets, assetId);
+      if (record != null && !record.isDeleted) {
+        await (_db.update(_db.assets)..where((a) => a.id.equals(assetId)))
+            .write(AssetsCompanion(
+          mime: Value(record.data['mime'] as String?),
+          sha256: Value(record.data['sha256'] as String?),
+          sizeBytes: Value((record.data['sizeBytes'] as num?)?.toInt()),
+          remoteKey: Value(record.data['remoteKey'] as String?),
+          updatedAt: Value(record.updatedAt),
+          deletedAt: Value(record.deletedAt),
+          dirty: const Value(false),
+          remoteUpdatedAt: Value(record.updatedAt),
+        ));
+        local = await (_db.select(_db.assets)
+              ..where((a) => a.id.equals(assetId)))
+            .getSingleOrNull();
+      }
     }
 
     // Metadata arrived before the importing device finished uploading to R2.
@@ -1020,9 +1399,15 @@ class SyncEngine {
         false;
     if (ok) {
       _downloadBackoffUntil.remove(assetId);
+      _downloadAttempts.remove(assetId);
+      _lastDownloadError = null;
     } else {
-      _downloadBackoffUntil[assetId] =
-          DateTime.now().add(_downloadBackoff);
+      _lastDownloadError = _files?.lastDownloadError ?? _lastDownloadError;
+      final attempts = (_downloadAttempts[assetId] ?? 0) + 1;
+      _downloadAttempts[assetId] = attempts;
+      var wait = _downloadBackoff * (1 << (attempts - 1).clamp(0, 5));
+      if (wait > _downloadBackoffMax) wait = _downloadBackoffMax;
+      _downloadBackoffUntil[assetId] = DateTime.now().add(wait);
     }
   }
 
@@ -1030,36 +1415,11 @@ class SyncEngine {
   /// only (or lost locally) try again to fetch the file before the canvas
   /// paints blank sheets.
   Future<void> ensureDocumentAssets(String documentId) async {
-    final pages = await (_db.select(_db.notePages)
-          ..where((p) =>
-              p.documentId.equals(documentId) & p.deletedAt.isNull()))
-        .get();
-    final ids = <String>{
-      for (final p in pages) ...[
-        if (p.pdfAssetId != null) p.pdfAssetId!,
-        if (p.bgAssetId != null) p.bgAssetId!,
-      ],
-    };
-    final pageIds = [for (final p in pages) p.id];
-    if (pageIds.isNotEmpty) {
-      final elements = await (_db.select(_db.canvasElements)
-            ..where((e) =>
-                e.pageId.isIn(pageIds) &
-                e.deletedAt.isNull() &
-                e.type.equals(ElementType.image.index)))
-          .get();
-      for (final element in elements) {
-        try {
-          final assetId = ImageElementData.fromJson(element.data).assetId;
-          if (assetId.isNotEmpty) ids.add(assetId);
-        } catch (_) {}
-      }
-    }
     // Opening a doc downloads outside syncNow; don't leave the toolbar stuck
     // on SyncPhase.syncing after a failed or skipped file fetch.
     final leaveBusy = !_running;
     try {
-      for (final id in ids) {
+      for (final id in await _referencedAssetIds(documentId: documentId)) {
         await _ensureAsset(id);
       }
     } finally {
@@ -1070,6 +1430,101 @@ class SyncEngine {
         ));
       }
     }
+  }
+
+  /// True when this device already has the notebook's pages and source file.
+  ///
+  /// Opening must not refetch thousands of page rows (or the PDF) in that
+  /// case — drawings, stickers, and the file stay on disk and the editor
+  /// should paint immediately. Background sync still brings later edits.
+  Future<bool> documentIsCachedLocally(String documentId) async {
+    if (await _livePageCount(documentId) <= 0) return false;
+    final pages = await (_db.select(_db.notePages)
+          ..where((p) =>
+              p.documentId.equals(documentId) & p.deletedAt.isNull()))
+        .get();
+    final sourceIds = <String>{
+      for (final p in pages) ...[
+        if (p.pdfAssetId != null) p.pdfAssetId!,
+        if (p.bgAssetId != null) p.bgAssetId!,
+      ],
+    };
+    for (final id in sourceIds) {
+      final local = await (_db.select(_db.assets)
+            ..where((a) => a.id.equals(id)))
+          .getSingleOrNull();
+      if (!await _assetBytesOnDevice(local, id)) return false;
+    }
+    return true;
+  }
+
+  Future<bool> _assetBytesOnDevice(Asset? local, String assetId) async {
+    if (local != null &&
+        await assetExists(
+          localPath: local.localPath,
+          hasInlineData: local.data != null && local.data!.isNotEmpty,
+        )) {
+      return true;
+    }
+    final recovered = await findStoredAssetPath(assetId);
+    if (recovered == null) return false;
+    await (_db.update(_db.assets)..where((a) => a.id.equals(assetId))).write(
+      AssetsCompanion(localPath: Value(recovered)),
+    );
+    return true;
+  }
+
+  /// Everything this device needs before showing [documentId]: its pages, the
+  /// ink on them, and the source file.
+  ///
+  /// The incremental pull is bounded — a run stops after [_inkRounds] batches,
+  /// and pages only arrive for documents the *documents* query returned. Both
+  /// are fine for keeping a library warm in the background and both can leave
+  /// exactly the notebook the user just tapped a step behind, which is how a
+  /// PDF opened on a second device came up with none of its annotations.
+  /// Asking for this one document by name closes that gap.
+  Future<void> ensureDocumentContent(String documentId) async {
+    if (await documentIsCachedLocally(documentId)) {
+      return;
+    }
+    if (_paused || !await _online()) {
+      await ensureDocumentAssets(documentId);
+      return;
+    }
+    final leaveBusy = !_running;
+    // Announce the fetch even when it turns out there is nothing to do: the
+    // editor reloads its in-memory strokes on the syncing→idle edge, so ink
+    // pulled here would otherwise sit in SQLite unpainted until the next run.
+    if (leaveBusy) _emitProgress(0.5, 'Downloading drawings…');
+    try {
+      // Ignore the cursor: whatever this device is missing for this notebook
+      // is by definition older than the cursor, or it would already be here.
+      await _pullPages(documentId, null);
+      final pageIds = [
+        for (final page in await (_db.select(_db.notePages)
+              ..where((p) =>
+                  p.documentId.equals(documentId) & p.deletedAt.isNull()))
+            .get())
+          page.id,
+      ];
+      if (pageIds.isNotEmpty) {
+        for (final ink in await _remote.fetchInkForPages(pageIds)) {
+          await _applyRemoteInk(ink);
+        }
+      }
+    } catch (e) {
+      // A blank page is better than a crashed open; the background run will
+      // try again.
+      debugPrint('Could not refresh $documentId before opening: $e');
+    } finally {
+      if (leaveBusy && !_running && !_paused) {
+        _emit(SyncStatus(
+          phase: SyncPhase.idle,
+          lastSyncedAt: _lastSyncedAt,
+        ));
+      }
+    }
+    await ensureDocumentAssets(documentId);
   }
 
   /// Replaces a page's strokes with the cloud copy. Whole-page granularity is
@@ -1084,24 +1539,58 @@ class SyncEngine {
   static const int _inkBatch = 50;
   static const int _inkRounds = 40;
 
-  Future<void> _pullInkChanged(DateTime? since) async {
-    var cursor = since;
+  Future<void> _pullInkChanged(DateTime? since, {bool full = false}) async {
+    // A backlog the previous run could not finish resumes where it stopped.
+    var cursor = _inkResumeCursor ?? (full ? null : since);
     for (var round = 0; round < _inkRounds; round++) {
       final batch = await _remote.fetchInkChanged(since: cursor, limit: _inkBatch);
-      if (batch.isEmpty) return;
-      for (final ink in batch) {
-        await _applyInk(ink.pageId, ink.bytes);
+      if (batch.isEmpty) {
+        _inkResumeCursor = null;
+        return;
       }
-      if (batch.length < _inkBatch) return;
+      for (final ink in batch) {
+        await _applyRemoteInk(ink);
+      }
+      if (batch.length < _inkBatch) {
+        _inkResumeCursor = null;
+        return;
+      }
       // Ties on the same millisecond are re-applied next round; applying ink
       // twice is harmless, skipping a page is not.
       cursor = batch.last.updatedAt;
     }
+    // Ceiling reached with more to come. Remember the cursor and make sure a
+    // follow-up run happens, or the rest of the backlog is stranded behind a
+    // cursor that has already moved past it.
+    _inkResumeCursor = cursor;
+    _missedUpdate = true;
+  }
+
+  /// Applies one page of ink pulled from the cloud.
+  Future<void> _applyRemoteInk(RemoteInk ink) async {
+    // Same-run echo: we just uploaded this page. Re-applying risks wiping
+    // local ink if the download round-trips as empty/corrupt. Only inside a
+    // run — the set survives until the next one starts, and an open-document
+    // fetch must not inherit it.
+    if (_running && _inkPagesPushedThisRun.contains(ink.pageId)) return;
+    var bytes = ink.bytes;
+    if ((bytes == null || bytes.isEmpty) && ink.usesRemoteFile) {
+      bytes = await _files?.getBytes(ink.remoteKey!);
+    }
+    if (bytes == null || bytes.isEmpty) return;
+    await _applyInk(ink.pageId, bytes, remoteUpdatedAt: ink.updatedAt);
   }
 
   /// Replaces a page's strokes with the cloud's copy, unless this device has
   /// unsent edits of its own — those win until they are pushed.
-  Future<void> _applyInk(String pageId, Uint8List blob) async {
+  ///
+  /// Never deletes local live ink in favour of an empty/corrupt remote blob
+  /// unless the remote timestamp clearly wins (another device cleared the page).
+  Future<void> _applyInk(
+    String pageId,
+    Uint8List blob, {
+    DateTime? remoteUpdatedAt,
+  }) async {
     if (blob.isEmpty) return;
     final page = await (_db.select(_db.notePages)
           ..where((p) => p.id.equals(pageId)))
@@ -1116,7 +1605,50 @@ class SyncEngine {
           ..limit(1))
         .get();
     if (dirty.isNotEmpty) return;
+
+    final localLive = await (_db.select(_db.strokes)
+          ..where((s) => s.pageId.equals(pageId) & s.deletedAt.isNull()))
+        .get();
     final strokes = decodeInkPage(blob);
+
+    // Never destroy local drawings for an empty download. Corrupt bytea, a
+    // failed R2 fetch that still produced a header, or a soft-capped upload
+    // that stored nothing all decode to []. A real clear-page leaves no live
+    // strokes on this device either (they're tombstoned before push).
+    //
+    // Re-dirty so the next push re-uploads the real ink and repairs the cloud.
+    if (strokes.isEmpty && localLive.isNotEmpty) {
+      debugPrint(
+        'Skip ink apply for $pageId: empty remote would wipe '
+        '${localLive.length} local stroke(s) — re-queuing upload',
+      );
+      final now = DateTime.now();
+      await (_db.update(_db.strokes)
+            ..where(
+              (s) => s.pageId.equals(pageId) & s.deletedAt.isNull(),
+            ))
+          .write(StrokesCompanion(
+            dirty: const Value(true),
+            updatedAt: Value(now),
+          ));
+      await touchPageForSync(_db, pageId);
+      return;
+    }
+
+    // Remote has strokes but is older than what we already have — keep local.
+    if (strokes.isNotEmpty &&
+        localLive.isNotEmpty &&
+        remoteUpdatedAt != null) {
+      final localUpdated = localLive
+          .map((s) => s.updatedAt)
+          .reduce((a, b) => a.isAfter(b) ? a : b);
+      if (!remoteWins(
+        localUpdatedAt: localUpdated,
+        remoteUpdatedAt: remoteUpdatedAt,
+      )) {
+        return;
+      }
+    }
 
     try {
       await _db.transaction(() async {
@@ -1142,6 +1674,7 @@ class SyncEngine {
                   bboxB: bounds.bottom,
                   seq: stroke.seq,
                   dirty: const Value(false),
+                  updatedAt: Value(remoteUpdatedAt ?? DateTime.now()),
                 ),
                 mode: InsertMode.insertOrReplace,
               );
@@ -1167,4 +1700,16 @@ class SyncEngine {
     }
     return MarginSpec.none;
   }
+}
+
+/// An asset whose bytes are not on this device yet.
+///
+/// [hasRemoteCopy] separates "R2 has it, we are fetching" from "the device
+/// that imported it has not uploaded it yet" — the two need different
+/// messages and very different retry rates.
+class _MissingAsset {
+  const _MissingAsset(this.id, {required this.hasRemoteCopy});
+
+  final String id;
+  final bool hasRemoteCopy;
 }

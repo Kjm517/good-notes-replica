@@ -39,6 +39,9 @@ class FileSync {
 
   bool get enabled => endpoint.isNotEmpty;
 
+  /// Last download failure reason, for the sync toolbar.
+  String? lastDownloadError;
+
   /// Files at or below this go up as one request; larger ones are split.
   /// R2 requires every part except the last to be the same size, and at least
   /// 5 MB, so the part size doubles as the threshold.
@@ -46,6 +49,10 @@ class FileSync {
 
   /// Attempts per part before the upload is abandoned and retried next run.
   static const int _partAttempts = 3;
+
+  /// Cellular / slow Wi‑Fi textbooks can take minutes; the default client
+  /// timeout is much shorter and left downloads looking permanently stuck.
+  static const Duration _transferTimeout = Duration(minutes: 20);
 
   /// Uploads every asset that has bytes locally but no remote copy yet.
   ///
@@ -112,7 +119,10 @@ class FileSync {
   ///
   /// Used when a document is opened on a device that has the notes but not the
   /// file yet. Returns false if the file isn't available.
-  Future<bool> download(String assetId) async {
+  Future<bool> download(
+    String assetId, {
+    void Function(double fraction)? onProgress,
+  }) async {
     if (!enabled) return false;
     final asset = await (_db.select(
       _db.assets,
@@ -125,7 +135,19 @@ class FileSync {
       localPath: asset.localPath,
       hasInlineData: asset.data != null,
     );
-    if (present) return true;
+    if (present) {
+      onProgress?.call(1);
+      return true;
+    }
+
+    final recovered = await findStoredAssetPath(assetId);
+    if (recovered != null) {
+      await (_db.update(_db.assets)..where((a) => a.id.equals(assetId))).write(
+        AssetsCompanion(localPath: Value(recovered)),
+      );
+      onProgress?.call(1);
+      return true;
+    }
 
     final key = asset.remoteKey;
     if (key == null) return false;
@@ -138,16 +160,29 @@ class FileSync {
         'GET',
         Uri.parse('$endpoint/file?key=${Uri.encodeQueryComponent(key)}'),
       )..headers.addAll(await _headers());
-      final response = await _client.send(request);
-      if (response.statusCode == 404) return false;
+      final response = await _client.send(request).timeout(_transferTimeout);
+      if (response.statusCode == 404) {
+        lastDownloadError = 'File not found on cloud storage';
+        return false;
+      }
       if (response.statusCode >= 300) {
         throw StateError('Download rejected (${response.statusCode}).');
       }
+      final total = response.contentLength ?? 0;
+      var received = 0;
+      onProgress?.call(0);
+      final progressStream = response.stream.timeout(_transferTimeout).map((chunk) {
+        received += chunk.length;
+        if (total > 0) {
+          onProgress?.call((received / total).clamp(0.0, 1.0));
+        }
+        return chunk;
+      });
       final stored = await writeAssetStream(
         asset.id,
-        response.stream,
+        progressStream,
         extension: asset.kind == 1 ? 'pdf' : 'img',
-      );
+      ).timeout(_transferTimeout);
       await (_db.update(_db.assets)..where((a) => a.id.equals(asset.id))).write(
         AssetsCompanion(
           localPath: Value(stored.localPath),
@@ -155,12 +190,44 @@ class FileSync {
           sizeBytes: Value(response.contentLength ?? asset.sizeBytes),
         ),
       );
+      onProgress?.call(1);
+      lastDownloadError = null;
       return true;
     } catch (e) {
       // Naming the endpoint here turns "the file just never arrives" into a
       // one-line diagnosis when it is pointed at the wrong worker.
+      lastDownloadError = _briefly('$e');
       debugPrint('Download failed for $assetId from $endpoint: $e');
       return false;
+    }
+  }
+
+  /// Uploads arbitrary bytes (e.g. oversized ink) under [key].
+  Future<void> putBytes(
+    String key,
+    Uint8List bytes, {
+    String mime = 'application/octet-stream',
+  }) async {
+    if (!enabled) throw StateError('File sync disabled');
+    await _put(key, bytes, mime);
+  }
+
+  /// Downloads raw bytes for an R2 [key] (used for oversized ink blobs).
+  Future<Uint8List?> getBytes(String key) async {
+    if (!enabled) return null;
+    try {
+      final response = await _client.get(
+        Uri.parse('$endpoint/file?key=${Uri.encodeQueryComponent(key)}'),
+        headers: await _headers(),
+      );
+      if (response.statusCode == 404) return null;
+      if (response.statusCode >= 300) {
+        throw StateError('Download rejected (${response.statusCode}).');
+      }
+      return response.bodyBytes;
+    } catch (e) {
+      debugPrint('getBytes failed for $key from $endpoint: $e');
+      return null;
     }
   }
 

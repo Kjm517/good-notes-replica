@@ -13,10 +13,11 @@ import 'providers.dart';
 /// Reads per-document transfer state from a [ProviderContainer].
 DocumentTransferState readDocumentTransfer(
   ProviderContainer container,
-  String documentId,
-) {
+  Document document, {
+  int? pageCount,
+}) {
   return documentTransferState(
-    documentId: documentId,
+    documentId: document.id,
     pendingUpload:
         container.read(pendingUploadDocumentsProvider).asData?.value ??
             const {},
@@ -25,6 +26,10 @@ DocumentTransferState readDocumentTransfer(
             const {},
     status: container.read(syncStatusProvider),
     paused: container.read(syncPausedProvider),
+    documentType: document.type,
+    pageCount: pageCount,
+    hasCoverPreview:
+        document.coverThumb != null && document.coverThumb!.isNotEmpty,
   );
 }
 
@@ -35,12 +40,11 @@ void showDocumentLockedSnackBar(
 ) {
   final pct = transfer.percent(status);
   final pctLabel = pct != null ? ' ($pct%)' : '';
-  final verb = transfer.kind == DocumentTransferKind.downloading
-      ? 'downloading'
-      : 'uploading';
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text('Still $verb$pctLabel — try again when sync finishes.'),
+      content: Text(
+        'Still ${transfer.lockedVerb}$pctLabel — try again when sync finishes.',
+      ),
     ),
   );
 }
@@ -52,7 +56,14 @@ bool tryOpenDocument(
   required ProviderContainer container,
   bool replace = false,
 }) {
-  final transfer = readDocumentTransfer(container, d.id);
+  final transfer = readDocumentTransfer(
+    container,
+    d,
+    pageCount: container
+        .read(documentPageCountProvider(d.id))
+        .asData
+        ?.value,
+  );
   if (transfer.locked) {
     showDocumentLockedSnackBar(
       context,
@@ -76,7 +87,7 @@ bool tryOpenDocument(
 
 /// Full-screen gate shown when navigating to a document whose file is still
 /// transferring — common on a fresh sign-in while R2 bytes catch up.
-class DocumentTransferGate extends ConsumerWidget {
+class DocumentTransferGate extends ConsumerStatefulWidget {
   const DocumentTransferGate({
     super.key,
     required this.documentId,
@@ -87,21 +98,59 @@ class DocumentTransferGate extends ConsumerWidget {
   final DocumentTransferState transfer;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DocumentTransferGate> createState() =>
+      _DocumentTransferGateState();
+}
+
+class _DocumentTransferGateState extends ConsumerState<DocumentTransferGate> {
+  double _heldFraction = 0;
+  late String _heldLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    _heldLabel = widget.transfer.badgeLabel(const SyncStatus()) ?? 'Syncing…';
+  }
+
+  void _absorb(double? next, String? label) {
+    if (next != null && next + 0.0005 >= _heldFraction) {
+      _heldFraction = next.clamp(0.0, 1.0);
+    }
+    if (label != null && label.isNotEmpty) {
+      _heldLabel = label;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final status = ref.watch(syncStatusProvider);
     final pageCount = ref
-            .watch(documentPageCountProvider(documentId))
+            .watch(documentPageCountProvider(widget.documentId))
             .asData
             ?.value ??
         0;
-    final label = transfer.badgeLabel(status) ?? 'Downloading…';
-    final pct = transfer.percent(status);
-    final fraction = pct != null ? (pct / 100).clamp(0.04, 0.96) : 0.04;
+    final pendingUpload =
+        ref.watch(pendingUploadDocumentsProvider).asData?.value ?? const {};
+    final missingLocal =
+        ref.watch(missingLocalFileDocumentsProvider).asData?.value ?? const {};
+    final paused = ref.watch(syncPausedProvider);
+    final doc = ref.watch(documentStreamProvider(widget.documentId)).asData?.value;
+    final transfer = documentTransferState(
+      documentId: widget.documentId,
+      pendingUpload: pendingUpload,
+      missingLocal: missingLocal,
+      status: status,
+      paused: paused,
+      documentType: doc?.type ?? DocumentType.notebook,
+      pageCount: pageCount,
+      hasCoverPreview: (doc?.coverThumb ?? '').isNotEmpty,
+    );
+    _absorb(transfer.progressFraction(status), transfer.badgeLabel(status));
 
     return Scaffold(
       body: EditorPrepareOverlay(
-        label: label,
-        fraction: fraction,
+        label: _heldLabel,
+        fraction: _heldFraction,
         pageCount: pageCount,
         onClose: () {
           if (context.canPop()) {

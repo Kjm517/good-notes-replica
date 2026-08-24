@@ -170,6 +170,19 @@ class AuthRepository {
   /// signed in" is enforced by signing out on cold start in `main.dart`.
   Future<void> applyPersistence({required bool keepSignedIn}) async {}
 
+  /// Bearer token for the Cloudflare Worker (file sync, billing, etc.).
+  Future<String?> idToken({bool forceRefresh = false}) async {
+    if (forceRefresh) {
+      try {
+        final refreshed = await _auth.refreshSession();
+        return refreshed.session?.accessToken;
+      } on AuthException {
+        // Fall through to whatever session is still cached.
+      }
+    }
+    return supabaseAccessToken();
+  }
+
   Future<void> signOut() async {
     await _auth.signOut();
   }
@@ -196,7 +209,8 @@ class AuthRepository {
         }
         break;
       case 'email_not_confirmed':
-        return 'Confirm this email address before signing in.';
+        return 'This account is still unconfirmed. In Supabase → Authentication → '
+            'Users, open the user menu and choose Confirm user, then try again.';
       case 'over_email_send_rate_limit':
       case 'over_request_rate_limit':
         return 'Too many attempts. Wait a moment and try again.';
@@ -221,7 +235,8 @@ class AuthRepository {
       return 'That email address doesn\'t look right.';
     }
     if (msg.contains('confirm') && msg.contains('email')) {
-      return 'Confirm this email address before signing in.';
+      return 'This account is still unconfirmed. In Supabase → Authentication → '
+          'Users, open the user menu and choose Confirm user, then try again.';
     }
     if ((msg.contains('sending') && msg.contains('email')) ||
         msg.contains('error sending') ||

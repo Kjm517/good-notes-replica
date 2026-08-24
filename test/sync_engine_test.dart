@@ -2,6 +2,7 @@ import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:notably/core/db/database.dart';
+import 'package:notably/core/ink/ink_page_codec.dart';
 import 'package:notably/core/ink/ink_stroke.dart';
 import 'package:notably/core/models/enums.dart';
 import 'package:notably/core/models/image_element.dart';
@@ -20,7 +21,9 @@ class MemoryRemoteStore implements RemoteStore {
   final Map<String, RemoteRecord> elements = {};
   final Map<String, RemoteRecord> assets = {};
   final Map<String, RemoteRecord> quizzes = {};
+  final Map<String, RemoteRecord> userPrefs = {};
   final Map<String, Uint8List> ink = {};
+  final Map<String, String> inkRemoteKeys = {};
   final Map<String, DateTime> inkUpdatedAt = {};
 
   /// Counts round trips so a regression back to one-request-per-page shows up
@@ -56,6 +59,8 @@ class MemoryRemoteStore implements RemoteStore {
         return _filter(quizzes.values, since);
       case RemoteCollection.assets:
         return _filter(assets.values, since);
+      case RemoteCollection.userPrefs:
+        return _filter(userPrefs.values, since);
     }
   }
 
@@ -77,6 +82,8 @@ class MemoryRemoteStore implements RemoteStore {
           quizzes[record.id] = record;
         case RemoteCollection.assets:
           assets[record.id] = record;
+        case RemoteCollection.userPrefs:
+          userPrefs[record.id] = record;
       }
     }
   }
@@ -98,8 +105,16 @@ class MemoryRemoteStore implements RemoteStore {
         RemoteInk(
           pageId: entry.key,
           bytes: entry.value,
+          remoteKey: inkRemoteKeys[entry.key],
           updatedAt: inkUpdatedAt[entry.key] ?? DateTime(2024),
         ),
+      for (final entry in inkRemoteKeys.entries)
+        if (!ink.containsKey(entry.key))
+          RemoteInk(
+            pageId: entry.key,
+            remoteKey: entry.value,
+            updatedAt: inkUpdatedAt[entry.key] ?? DateTime(2024),
+          ),
     ]..sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
     final changed = since == null
         ? rows
@@ -108,8 +123,44 @@ class MemoryRemoteStore implements RemoteStore {
   }
 
   @override
-  Future<bool> putInk(String pageId, Uint8List bytes, DateTime updatedAt) async {
-    ink[pageId] = bytes;
+  Future<List<RemoteInk>> fetchInkForPages(List<String> pageIds) async {
+    inkRequests++;
+    final wanted = pageIds.toSet();
+    return [
+      for (final entry in ink.entries)
+        if (wanted.contains(entry.key))
+          RemoteInk(
+            pageId: entry.key,
+            bytes: entry.value,
+            remoteKey: inkRemoteKeys[entry.key],
+            updatedAt: inkUpdatedAt[entry.key] ?? DateTime(2024),
+          ),
+      for (final entry in inkRemoteKeys.entries)
+        if (wanted.contains(entry.key) && !ink.containsKey(entry.key))
+          RemoteInk(
+            pageId: entry.key,
+            remoteKey: entry.value,
+            updatedAt: inkUpdatedAt[entry.key] ?? DateTime(2024),
+          ),
+    ];
+  }
+
+  @override
+  Future<bool> putInk(
+    String pageId,
+    DateTime updatedAt, {
+    Uint8List? bytes,
+    String? remoteKey,
+  }) async {
+    if (remoteKey != null && remoteKey.isNotEmpty) {
+      ink.remove(pageId);
+      inkRemoteKeys[pageId] = remoteKey;
+    } else if (bytes != null) {
+      ink[pageId] = bytes;
+      inkRemoteKeys.remove(pageId);
+    } else {
+      return false;
+    }
     inkUpdatedAt[pageId] = updatedAt;
     return true;
   }
@@ -131,6 +182,8 @@ class MemoryRemoteStore implements RemoteStore {
         return quizzes[id];
       case RemoteCollection.assets:
         return assets[id];
+      case RemoteCollection.userPrefs:
+        return userPrefs[id];
     }
   }
 
@@ -320,6 +373,161 @@ void main() {
         .get();
     expect(strokes, hasLength(1));
     expect(strokes.first.id, 'stroke-1');
+  });
+
+  test('opening a document fetches the pages and ink the cursor skipped',
+      () async {
+    // Regression: pages only arrive for documents the *documents* query
+    // returns, and the ink pull is capped per run. Either can leave the exact
+    // notebook the user just tapped a step behind, which is how a PDF opened
+    // on a second device came up with none of its annotations. Opening asks
+    // for that one document by name, ignoring the incremental cursor.
+    await deviceA.into(deviceA.documents).insert(DocumentsCompanion.insert(
+          id: 'doc-open',
+          type: DocumentType.notebook,
+          title: const Value('Lecture'),
+          ownerUid: const Value('user-1'),
+        ));
+    await deviceA.into(deviceA.notePages).insert(NotePagesCompanion.insert(
+          id: 'page-open',
+          documentId: 'doc-open',
+          pageIndex: 0,
+        ));
+    await StrokeRepository(deviceA).insertStroke(
+      'page-open',
+      InkStroke(
+        id: 'stroke-open',
+        tool: ToolType.pen,
+        color: 0xFF222222,
+        width: 3,
+        points: const [
+          StrokePoint(5, 5, 1),
+          StrokePoint(25, 25, 1),
+        ],
+      ),
+    );
+
+    final a = engine(deviceA);
+    final b = engine(deviceB);
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+
+    await a.syncNow();
+    await b.syncNow();
+
+    // Stand in for the gap: B has the notebook, but its pages and ink never
+    // made it — a bounded run, or a cursor that had already moved past them.
+    await (deviceB.delete(deviceB.strokes)
+          ..where((s) => s.pageId.equals('page-open')))
+        .go();
+    await (deviceB.delete(deviceB.notePages)
+          ..where((p) => p.id.equals('page-open')))
+        .go();
+
+    await b.ensureDocumentContent('doc-open');
+
+    final pages = await (deviceB.select(deviceB.notePages)
+          ..where((p) => p.documentId.equals('doc-open')))
+        .get();
+    expect(pages, hasLength(1), reason: 'the page should be re-fetched');
+
+    final strokes = await (deviceB.select(deviceB.strokes)
+          ..where((s) => s.pageId.equals('page-open') & s.deletedAt.isNull()))
+        .get();
+    expect(strokes, hasLength(1));
+    expect(strokes.first.id, 'stroke-open');
+  });
+
+  test('drawing stays on the same device after sync finishes', () async {
+    // Regression: push then pull on the drawing device used to delete-and-
+    // replace local strokes; an empty/corrupt echo made ink vanish under the
+    // green cloud.
+    await deviceA.into(deviceA.documents).insert(DocumentsCompanion.insert(
+          id: 'doc-keep',
+          type: DocumentType.notebook,
+          title: const Value('Keep me'),
+          ownerUid: const Value('user-1'),
+        ));
+    await deviceA.into(deviceA.notePages).insert(NotePagesCompanion.insert(
+          id: 'page-keep',
+          documentId: 'doc-keep',
+          pageIndex: 0,
+        ));
+
+    final a = engine(deviceA);
+    addTearDown(a.dispose);
+    await a.syncNow();
+
+    await StrokeRepository(deviceA).insertStroke(
+      'page-keep',
+      InkStroke(
+        id: 'stroke-keep',
+        tool: ToolType.pen,
+        color: 0xFF000000,
+        width: 3,
+        points: const [
+          StrokePoint(1, 2, 1),
+          StrokePoint(3, 4, 1),
+        ],
+      ),
+    );
+
+    await a.syncNow();
+
+    final strokes = await (deviceA.select(deviceA.strokes)
+          ..where((s) => s.pageId.equals('page-keep') & s.deletedAt.isNull()))
+        .get();
+    expect(strokes, hasLength(1));
+    expect(strokes.first.id, 'stroke-keep');
+  });
+
+  test('empty remote ink blob does not wipe local drawings', () async {
+    await deviceA.into(deviceA.documents).insert(DocumentsCompanion.insert(
+          id: 'doc-wipe',
+          type: DocumentType.notebook,
+          title: const Value('Wipe guard'),
+          ownerUid: const Value('user-1'),
+        ));
+    await deviceA.into(deviceA.notePages).insert(NotePagesCompanion.insert(
+          id: 'page-wipe',
+          documentId: 'doc-wipe',
+          pageIndex: 0,
+        ));
+
+    await StrokeRepository(deviceA).insertStroke(
+      'page-wipe',
+      InkStroke(
+        id: 'stroke-local',
+        tool: ToolType.pen,
+        color: 0xFF000000,
+        width: 2,
+        points: const [
+          StrokePoint(5, 5, 1),
+          StrokePoint(6, 6, 1),
+        ],
+      ),
+    );
+    // Simulate a prior successful push: local strokes are clean.
+    await (deviceA.update(deviceA.strokes)
+          ..where((s) => s.id.equals('stroke-local')))
+        .write(const StrokesCompanion(dirty: Value(false)));
+
+    final emptyBlob = encodeInkPage(const []);
+    // Newer empty remote used to win last-write-wins and delete local ink
+    // right after sync — the "draw, back, reopen, gone" bug.
+    cloud.ink['page-wipe'] = emptyBlob;
+    cloud.inkUpdatedAt['page-wipe'] =
+        DateTime.now().add(const Duration(minutes: 5));
+
+    final a = engine(deviceA);
+    addTearDown(a.dispose);
+    await a.syncNow(full: true);
+
+    final strokes = await (deviceA.select(deviceA.strokes)
+          ..where((s) => s.pageId.equals('page-wipe') & s.deletedAt.isNull()))
+        .get();
+    expect(strokes, hasLength(1));
+    expect(strokes.first.id, 'stroke-local');
   });
 
   test('pulling a big book does not cost one request per page', () async {
@@ -692,5 +900,32 @@ void main() {
     await engine.syncNowFromUser(full: false);
     expect(last?.phase, isNot(SyncPhase.paused));
     expect(cloud.documents.containsKey('doc-force'), isTrue);
+  });
+
+  test('user prefs (stickers + tools) sync across devices', () async {
+    await deviceA.into(deviceA.userPrefs).insert(UserPrefsCompanion.insert(
+          id: 'me',
+          payload: Value(
+            '{"stickers":[{"a":"sticker-1","n":"Star"}],'
+            '"tools":{"0":{"c":4278190335,"w":5.5,"s":0,"t":0}}}',
+          ),
+          dirty: const Value(true),
+        ));
+
+    final engineA = SyncEngine(db: deviceA, remote: cloud, uid: 'user-1');
+    final engineB = SyncEngine(db: deviceB, remote: cloud, uid: 'user-1');
+    addTearDown(engineA.dispose);
+    addTearDown(engineB.dispose);
+
+    await engineA.syncNow();
+    expect(cloud.userPrefs.containsKey('user-1'), isTrue);
+
+    await engineB.syncNow(full: true);
+    final prefs = await (deviceB.select(deviceB.userPrefs)
+          ..where((p) => p.id.equals('me')))
+        .getSingleOrNull();
+    expect(prefs, isNotNull);
+    expect(prefs!.payload, contains('sticker-1'));
+    expect(prefs.payload, contains('5.5'));
   });
 }

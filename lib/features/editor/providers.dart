@@ -90,10 +90,12 @@ final pagesStreamProvider =
 });
 
 /// The stateful editor for a document.
-final editorControllerProvider =
-    NotifierProvider.family<EditorController, EditorState, String>(
-  EditorController.new,
-);
+///
+/// Auto-dispose so leaving a notebook drops the in-memory stroke cache and the
+/// next open always reloads from SQLite — otherwise an empty cache entry after
+/// a bad sync could hide drawings that are still on disk.
+final editorControllerProvider = NotifierProvider.autoDispose
+    .family<EditorController, EditorState, String>(EditorController.new);
 
 /// Whether a resting palm/finger is ignored once a stylus is in use. Persisted
 /// app-wide and read by the canvas' pointer routing.

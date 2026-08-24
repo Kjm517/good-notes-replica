@@ -201,7 +201,14 @@ Future<Map<String, String>> _missingLocalFileDocuments(AppDatabase db) async {
       localPath: asset.localPath,
       hasInlineData: asset.data != null && asset.data!.isNotEmpty,
     );
-    if (!hasBytes) missing[entry.key] = entry.value;
+    if (hasBytes) continue;
+    final recovered = await findStoredAssetPath(entry.value);
+    if (recovered != null) {
+      await (db.update(db.assets)..where((a) => a.id.equals(entry.value)))
+          .write(AssetsCompanion(localPath: Value(recovered)));
+      continue;
+    }
+    missing[entry.key] = entry.value;
   }
   return missing;
 }

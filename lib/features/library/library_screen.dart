@@ -14,6 +14,7 @@ import '../sync/sync_indicator.dart';
 import 'data/import_service.dart';
 import 'data/library_repository.dart';
 import 'document_transfer.dart';
+import 'open_document.dart';
 import 'providers.dart';
 import 'widgets/convert_to_pdf_dialog.dart';
 import 'widgets/create_sheet.dart';
@@ -660,12 +661,18 @@ class _ListRow extends ConsumerWidget {
         ref.watch(missingLocalFileDocumentsProvider).asData?.value ?? const {};
     final paused = ref.watch(syncPausedProvider);
     final status = ref.watch(syncStatusProvider);
+    final pageCount = doc.type == DocumentType.folder
+        ? null
+        : ref.watch(documentPageCountProvider(doc.id)).asData?.value;
     final transfer = documentTransferState(
       documentId: doc.id,
       pendingUpload: pendingUpload,
       missingLocal: missingLocal,
       status: status,
       paused: paused,
+      documentType: doc.type,
+      pageCount: pageCount,
+      hasCoverPreview: (doc.coverThumb ?? '').isNotEmpty,
     );
     final locked = transfer.locked;
     final badgeLabel = transfer.listBadgeLabel(status);
@@ -697,9 +704,16 @@ class _ListRow extends ConsumerWidget {
                   ),
                   child: Icon(
                     showTransfer
-                        ? (transfer.kind == DocumentTransferKind.downloading
-                            ? Icons.cloud_download_outlined
-                            : Icons.cloud_upload_outlined)
+                        ? switch (transfer.kind) {
+                            DocumentTransferKind.downloading =>
+                              Icons.cloud_download_outlined,
+                            DocumentTransferKind.uploading =>
+                              Icons.cloud_upload_outlined,
+                            DocumentTransferKind.syncingPages =>
+                              Icons.cloud_sync_outlined,
+                            DocumentTransferKind.none =>
+                              Icons.cloud_outlined,
+                          }
                         : switch (doc.type) {
                             DocumentType.folder => Icons.folder_rounded,
                             DocumentType.notebook => Icons.menu_book_rounded,
@@ -767,40 +781,11 @@ class _ListRow extends ConsumerWidget {
 }
 
 void _open(BuildContext context, Document d) {
-  final container = ProviderScope.containerOf(context);
-  final pendingUpload =
-      container.read(pendingUploadDocumentsProvider).asData?.value ?? const {};
-  final missingLocal =
-      container.read(missingLocalFileDocumentsProvider).asData?.value ??
-          const {};
-  final paused = container.read(syncPausedProvider);
-  final status = container.read(syncStatusProvider);
-  final transfer = documentTransferState(
-    documentId: d.id,
-    pendingUpload: pendingUpload,
-    missingLocal: missingLocal,
-    status: status,
-    paused: paused,
+  tryOpenDocument(
+    context,
+    d,
+    container: ProviderScope.containerOf(context),
   );
-  if (transfer.locked) {
-    final pct = transfer.percent(status);
-    final pctLabel = pct != null ? ' ($pct%)' : '';
-    final verb = transfer.kind == DocumentTransferKind.downloading
-        ? 'downloading'
-        : 'uploading';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Still $verb$pctLabel — try again when sync finishes.'),
-      ),
-    );
-    return;
-  }
-  if (d.type == DocumentType.folder) {
-    context.push('/folder/${d.id}');
-  } else {
-    container.read(libraryRepositoryProvider).touchOpened(d.id);
-    context.push('/doc/${d.id}');
-  }
 }
 
 void _toggleStar(BuildContext context, Document d) {

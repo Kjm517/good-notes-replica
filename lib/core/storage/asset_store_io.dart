@@ -107,3 +107,12 @@ Future<void> deleteAsset(String? localPath) async {
   final file = File(localPath);
   if (await file.exists()) await file.delete();
 }
+
+Future<String?> findStoredAssetPath(String id) async {
+  final dir = await _assetsDir();
+  for (final ext in const ['pdf', 'img', 'bin', 'png', 'jpg', 'jpeg', 'webp']) {
+    final file = File(p.join(dir.path, '$id.$ext'));
+    if (await file.exists() && await file.length() > 0) return file.path;
+  }
+  return null;
+}

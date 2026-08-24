@@ -34,6 +34,9 @@ class SyncStatus {
     this.progress,
     this.progressMessage,
     this.activeAssetId,
+    this.pullingDocumentIds = const {},
+    this.pullingDocumentId,
+    this.pullingDocumentProgress,
   });
 
   final SyncPhase phase;
@@ -52,6 +55,18 @@ class SyncStatus {
 
   /// Asset currently uploading to R2, if any — used to gray the library card.
   final String? activeAssetId;
+
+  /// Documents whose page rows are still being pulled this run.
+  ///
+  /// A 4,000-page PDF lands the cover first, then pages trickle in; the
+  /// library card stays locked until this document leaves the set.
+  final Set<String> pullingDocumentIds;
+
+  /// Document currently inserting/fetching pages, if any.
+  final String? pullingDocumentId;
+
+  /// 0–1 page-insert progress for [pullingDocumentId]; null while fetching.
+  final double? pullingDocumentProgress;
 
   bool get isBusy => phase == SyncPhase.syncing;
 
@@ -75,8 +90,12 @@ class SyncStatus {
     double? progress,
     String? progressMessage,
     String? activeAssetId,
+    Set<String>? pullingDocumentIds,
+    String? pullingDocumentId,
+    double? pullingDocumentProgress,
     bool clearMessage = false,
     bool clearProgress = false,
+    bool clearPulling = false,
   }) =>
       SyncStatus(
         phase: phase ?? this.phase,
@@ -88,5 +107,14 @@ class SyncStatus {
             clearProgress ? null : (progressMessage ?? this.progressMessage),
         activeAssetId:
             clearProgress ? null : (activeAssetId ?? this.activeAssetId),
+        pullingDocumentIds: clearPulling
+            ? const {}
+            : (pullingDocumentIds ?? this.pullingDocumentIds),
+        pullingDocumentId: clearPulling
+            ? null
+            : (pullingDocumentId ?? this.pullingDocumentId),
+        pullingDocumentProgress: clearPulling
+            ? null
+            : (pullingDocumentProgress ?? this.pullingDocumentProgress),
       );
 }
