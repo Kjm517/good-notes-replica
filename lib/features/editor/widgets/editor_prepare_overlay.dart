@@ -12,12 +12,18 @@ class EditorPrepareOverlay extends StatelessWidget {
     required this.fraction,
     required this.pageCount,
     required this.onClose,
+    this.paused = false,
+    this.onPause,
+    this.onResume,
   });
 
   final String label;
   final double fraction;
   final int pageCount;
   final VoidCallback onClose;
+  final bool paused;
+  final VoidCallback? onPause;
+  final VoidCallback? onResume;
 
   @override
   Widget build(BuildContext context) {
@@ -69,12 +75,30 @@ class EditorPrepareOverlay extends StatelessWidget {
                       const SizedBox(height: 20),
                       _SmoothLinearProgress(fraction: fraction),
                       const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: onClose,
-                        child: Text(
-                          'Close',
-                          style: TextStyle(color: t.textMuted),
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (paused && onResume != null)
+                            TextButton(
+                              onPressed: onResume,
+                              child: const Text('Resume'),
+                            )
+                          else if (!paused && onPause != null)
+                            TextButton(
+                              onPressed: onPause,
+                              child: Text(
+                                'Pause',
+                                style: TextStyle(color: t.textMuted),
+                              ),
+                            ),
+                          TextButton(
+                            onPressed: onClose,
+                            child: Text(
+                              'Close',
+                              style: TextStyle(color: t.textMuted),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),

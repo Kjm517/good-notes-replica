@@ -27,87 +27,90 @@ class PremiumPlanSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.92;
     final useStore = ref.watch(revenueCatConfiguredProvider);
     final offeringsAsync = ref.watch(offeringsProvider);
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Choose a plan',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 20),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '7-day free trial · cancel anytime',
-                style: AppTokens.mono(size: 11, color: t.textFaint),
-              ),
-              const SizedBox(height: 20),
-              _PricingLadder(t: t),
-              const SizedBox(height: 16),
-              if (useStore && offeringsAsync.isLoading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else ...[
-                _PlanOption(
-                  plan: BillingPlan.yearly,
-                  title: 'Yearly',
-                  price: _priceFor(
-                    useStore: useStore,
-                    offerings: offeringsAsync.valueOrNull,
-                    plan: BillingPlan.yearly,
-                  ),
-                  badge: 'Best value',
-                  subtitle:
-                      '~${formatPhp(kYearlyEffectiveMonthlyPhp)}/mo · ${yearlySavingsLabel()}',
-                  package: packageForPlan(
-                    offeringsAsync.valueOrNull,
-                    BillingPlan.yearly,
-                  ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Choose a plan',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                      ),
                 ),
-                const SizedBox(height: 10),
-                _PlanOption(
-                  plan: BillingPlan.monthly,
-                  title: 'Monthly',
-                  price: _priceFor(
-                    useStore: useStore,
-                    offerings: offeringsAsync.valueOrNull,
+                const SizedBox(height: 6),
+                Text(
+                  kIsWeb
+                      ? 'Card, GCash, or Maya · not Google Play'
+                      : '7-day free trial · cancel anytime',
+                  style: AppTokens.mono(size: 11, color: t.textFaint),
+                ),
+                const SizedBox(height: 20),
+                const _FeatureCompare(),
+                const SizedBox(height: 18),
+                if (useStore && offeringsAsync.isLoading)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else ...[
+                  _PlanOption(
+                    plan: BillingPlan.yearly,
+                    title: 'Yearly',
+                    price: _priceFor(
+                      useStore: useStore,
+                      offerings: offeringsAsync.valueOrNull,
+                      plan: BillingPlan.yearly,
+                    ),
+                    badge: 'Best value',
+                    subtitle:
+                        '~${formatPhp(kYearlyEffectiveMonthlyPhp)}/mo · ${yearlySavingsLabel()}',
+                    featured: true,
+                    package: packageForPlan(
+                      offeringsAsync.valueOrNull,
+                      BillingPlan.yearly,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _PlanOption(
                     plan: BillingPlan.monthly,
+                    title: 'Monthly',
+                    price: _priceFor(
+                      useStore: useStore,
+                      offerings: offeringsAsync.valueOrNull,
+                      plan: BillingPlan.monthly,
+                    ),
+                    subtitle: 'Billed monthly · cancel anytime',
+                    package: packageForPlan(
+                      offeringsAsync.valueOrNull,
+                      BillingPlan.monthly,
+                    ),
                   ),
-                  subtitle:
-                      'Students ${formatPhp(kStudentMonthlyPhp)}/mo · launch ${formatPhp(kLaunchMonthlyPhp)}',
-                  package: packageForPlan(
-                    offeringsAsync.valueOrNull,
-                    BillingPlan.monthly,
+                ],
+                if (useStore)
+                  TextButton(
+                    onPressed: () => _restorePurchases(context, ref),
+                    child: const Text('Restore purchases'),
                   ),
+                const SizedBox(height: 12),
+                Text(
+                  'Free accounts keep 5 GB of notes. AI quizzes unlock with Premium or during a trial.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: t.textFaint, height: 1.4),
                 ),
               ],
-              if (useStore)
-                TextButton(
-                  onPressed: () => _restorePurchases(context, ref),
-                  child: const Text('Restore purchases'),
-                ),
-              const SizedBox(height: 16),
-              Text(
-                premiumTierSummary(),
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: t.textMuted),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Free tier: ${freeTierSummary()}.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: t.textFaint, height: 1.35),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -150,107 +153,101 @@ class PremiumPlanSheet extends ConsumerWidget {
   }
 }
 
-class _PricingLadder extends StatelessWidget {
-  const _PricingLadder({required this.t});
+class _FeatureCompare extends StatelessWidget {
+  const _FeatureCompare();
 
-  final AppTokens t;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: t.fill,
-        borderRadius: BorderRadius.circular(Radii.inner),
-        border: Border.all(color: t.line),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _LadderRow(
-            label: 'Free',
-            value: freeTierSummary(),
-            muted: true,
-          ),
-          Divider(height: 16, color: t.line),
-          _LadderRow(label: 'Monthly', value: monthlyPriceLabel()),
-          _LadderRow(
-            label: 'Student',
-            value: '${formatPhp(kStudentMonthlyPhp)}/mo',
-            hint: '.edu email or $kStudentVoucherCode',
-          ),
-          _LadderRow(
-            label: 'Yearly',
-            value: yearlyPriceLabel(),
-            hint: '~${formatPhp(kYearlyEffectiveMonthlyPhp)}/mo · ${yearlySavingsLabel()}',
-            accent: true,
-          ),
-          _LadderRow(
-            label: 'Launch',
-            value: '${formatPhp(kLaunchMonthlyPhp)}/mo',
-            hint: '$kLaunchVoucherCode · first month · GCash/Maya',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LadderRow extends StatelessWidget {
-  const _LadderRow({
-    required this.label,
-    required this.value,
-    this.hint,
-    this.muted = false,
-    this.accent = false,
-  });
-
-  final String label;
-  final String value;
-  final String? hint;
-  final bool muted;
-  final bool accent;
+  static const _rows = [
+    ('Storage', '5 GB', '15 GB'),
+    ('AI quizzes', 'Trial only', 'Unlimited'),
+    ('Quiz history', 'Trial only', 'Included'),
+    ('Cloud sync', 'Included', 'Included'),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final valueColor = accent ? t.premiumText : (muted ? t.textMuted : t.text);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      decoration: BoxDecoration(
+        color: t.fill,
+        borderRadius: BorderRadius.circular(Radii.card),
+        border: Border.all(color: t.line),
+      ),
+      child: Column(
         children: [
-          SizedBox(
-            width: 64,
-            child: Text(
-              label,
-              style: AppTokens.mono(
-                size: 10,
-                weight: FontWeight.w600,
-                color: t.textFaint,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
               children: [
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: valueColor,
+                const Expanded(flex: 5, child: SizedBox.shrink()),
+                Expanded(
+                  flex: 4,
+                  child: Text(
+                    'Free',
+                    textAlign: TextAlign.center,
+                    style: AppTokens.mono(
+                      size: 10,
+                      weight: FontWeight.w600,
+                      color: t.textFaint,
+                    ),
                   ),
                 ),
-                if (hint != null)
-                  Text(
-                    hint!,
-                    style: TextStyle(fontSize: 10, color: t.textFaint, height: 1.3),
+                Expanded(
+                  flex: 4,
+                  child: Text(
+                    'Premium',
+                    textAlign: TextAlign.center,
+                    style: AppTokens.mono(
+                      size: 10,
+                      weight: FontWeight.w600,
+                      color: t.premiumText,
+                    ),
                   ),
+                ),
               ],
             ),
           ),
+          for (var i = 0; i < _rows.length; i++) ...[
+            if (i > 0) Divider(height: 1, color: t.line),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 5,
+                    child: Text(
+                      _rows[i].$1,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: t.text,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 4,
+                    child: Text(
+                      _rows[i].$2,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: t.textMuted),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 4,
+                    child: Text(
+                      _rows[i].$3,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: t.premiumText,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -264,6 +261,7 @@ class _PlanOption extends StatelessWidget {
     required this.price,
     required this.subtitle,
     this.badge,
+    this.featured = false,
     this.package,
   });
 
@@ -272,22 +270,26 @@ class _PlanOption extends StatelessWidget {
   final String price;
   final String subtitle;
   final String? badge;
+  final bool featured;
   final Package? package;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     return Material(
-      color: t.surface,
+      color: featured ? t.premiumSoft : t.surface,
       borderRadius: BorderRadius.circular(Radii.card),
       child: InkWell(
         onTap: () => _select(context),
         borderRadius: BorderRadius.circular(Radii.card),
         child: Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(Radii.card),
-            border: Border.all(color: t.line),
+            border: Border.all(
+              color: featured ? t.premium.withValues(alpha: 0.45) : t.line,
+              width: featured ? 1.4 : 1,
+            ),
           ),
           child: Row(
             children: [
@@ -309,10 +311,10 @@ class _PlanOption extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 7,
-                              vertical: 2,
+                              vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: t.premiumSoft,
+                              color: featured ? t.premium : t.premiumSoft,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -320,7 +322,7 @@ class _PlanOption extends StatelessWidget {
                               style: AppTokens.mono(
                                 size: 9,
                                 weight: FontWeight.w600,
-                                color: t.premiumText,
+                                color: featured ? t.premiumOn : t.premiumText,
                               ),
                             ),
                           ),
@@ -328,7 +330,10 @@ class _PlanOption extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: TextStyle(fontSize: 12, color: t.textMuted)),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 12, color: t.textMuted),
+                    ),
                   ],
                 ),
               ),
@@ -340,7 +345,7 @@ class _PlanOption extends StatelessWidget {
                   color: t.premiumText,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               Icon(Icons.chevron_right_rounded, color: t.textFaint),
             ],
           ),

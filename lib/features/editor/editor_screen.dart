@@ -294,15 +294,15 @@ class _EditorState extends ConsumerState<_Editor> {
       );
       final pct = transfer.percent(status);
       final progress = transfer.progressFraction(status);
-      final label = switch (transfer.kind) {
-        DocumentTransferKind.syncingPages =>
-          pct != null ? 'Syncing pages… $pct%' : 'Syncing pages…',
-        _ => pct != null ? 'Downloading file… $pct%' : 'Downloading file…',
-      };
-      _setPrepare(
-        label,
-        progress != null ? 0.04 + progress * 0.06 : 0.04,
-      );
+      final paused = ref.read(syncPausedProvider);
+      final label = paused
+          ? 'Paused'
+          : switch (transfer.kind) {
+              DocumentTransferKind.syncingPages =>
+                pct != null ? 'Syncing pages… $pct%' : 'Syncing pages…',
+              _ => pct != null ? 'Downloading file… $pct%' : 'Downloading file…',
+            };
+      _setPrepare(label, progress ?? _prepareFraction);
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
   }
@@ -933,6 +933,11 @@ class _EditorState extends ConsumerState<_Editor> {
               label: _prepareLabel,
               fraction: _prepareFraction,
               pageCount: state.pages.length,
+              paused: ref.watch(syncPausedProvider),
+              onPause: () =>
+                  ref.read(syncPausedProvider.notifier).setPaused(true),
+              onResume: () =>
+                  ref.read(syncPausedProvider.notifier).setPaused(false),
               onClose: _leaveDocument,
             ),
           ),

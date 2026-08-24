@@ -1,6 +1,6 @@
 import 'billing_plan.dart';
 
-/// Promo / voucher codes for GCash & Maya checkout (PayMongo).
+/// Promo / voucher codes for PayMongo checkout (card, GCash, Maya).
 ///
 /// Codes are stored on the worker (R2) and managed from `/admin/vouchers`.
 /// Defaults: [kStudentVoucherCode], [kLaunchVoucherCode] — see [billing_ladder.dart].

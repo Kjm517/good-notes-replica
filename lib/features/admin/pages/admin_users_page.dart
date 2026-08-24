@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/design.dart';
+import '../admin_access.dart';
 import '../admin_api.dart';
+import '../admin_dates.dart';
+import '../csv_export.dart';
 import '../widgets/admin_widgets.dart';
 
 enum _UserType { free, monthly, yearly, lifetime }
@@ -53,7 +56,13 @@ class AdminUsersPage extends ConsumerStatefulWidget {
 class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
   final _search = TextEditingController();
   var _query = '';
-  final _busyUids = <String>{};
+  // Nullable so a hot-reload onto an already-mounted State does not leave
+  // these as JS `undefined` (which then crashes on `.contains`).
+  Set<String>? _busyUids;
+  Set<String>? _deletingUids;
+
+  Set<String> get _busy => _busyUids ??= <String>{};
+  Set<String> get _deleting => _deletingUids ??= <String>{};
 
   @override
   void dispose() {
@@ -74,7 +83,7 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
     if (api == null) return;
     if (_typeFromUser(user) == type) return;
 
-    setState(() => _busyUids.add(user.uid));
+    setState(() => _busy.add(user.uid));
     try {
       await api.updateSubscription(
         user.uid,
@@ -96,7 +105,7 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
       }
     } finally {
-      if (mounted) setState(() => _busyUids.remove(user.uid));
+      if (mounted) setState(() => _busy.remove(user.uid));
     }
   }
 
@@ -110,97 +119,197 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
     if (changed == true) _invalidateUserLists();
   }
 
+  Future<void> _deleteUser(AdminUserRow user) async {
+    final api = ref.read(adminApiServiceProvider);
+    if (api == null) return;
+    final label = user.email ?? shortUid(user.uid);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete $label?'),
+        content: const Text(
+          'Removes their files from R2 and drops them from this list. '
+          'If SUPABASE_SERVICE_ROLE_KEY is set on the worker, their Auth login '
+          'is deleted too. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _deleting.add(user.uid));
+    try {
+      final result = await api.deleteUser(user.uid);
+      _invalidateUserLists();
+      if (mounted) {
+        final suffix = result.authDeleted
+            ? ''
+            : result.authError != null && result.authError!.isNotEmpty
+                ? ' Files removed. Login was not deleted.'
+                : ' Files removed.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Deleted $label.$suffix')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _deleting.remove(user.uid));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     final usersAsync = ref.watch(adminUsersProvider(_query));
+    final canWrite = ref.watch(adminCanWriteProvider);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const AdminPageHeader(
+          AdminPageHeader(
             title: 'Users',
             subtitle:
-                'Edit a user for name, membership, and expiry — or tap the type chip for a quick plan change (Free, Monthly, Yearly, Lifetime).',
+                'Edit a user for name, membership, and expiry — or tap the type chip for a quick plan change.',
+            trailing: usersAsync.asData == null
+                ? null
+                : OutlinedButton.icon(
+                    onPressed: () async {
+                      final rows = usersAsync.asData!.value;
+                      await exportCsv(
+                        filename: 'notably-users.csv',
+                        headers: const [
+                          'uid',
+                          'email',
+                          'name',
+                          'plan',
+                          'storage_bytes',
+                          'last_seen',
+                        ],
+                        rows: [
+                          for (final u in rows)
+                            [
+                              u.uid,
+                              u.email ?? '',
+                              u.displayName ?? '',
+                              u.isPremium ? (u.plan ?? 'premium') : 'free',
+                              '${u.storageBytes}',
+                              u.lastSeenAt ?? '',
+                            ],
+                        ],
+                      );
+                    },
+                    icon: const Icon(Icons.download_outlined, size: 18),
+                    label: const Text('CSV'),
+                  ),
           ),
           const SizedBox(height: 16),
           AdminSearchField(
             controller: _search,
-            hint: 'Search email, name, or UID',
+            hint: 'Search Auth email, name, or UID',
             onChanged: (v) => setState(() => _query = v.trim()),
           ),
           const SizedBox(height: 16),
           usersAsync.when(
+            skipLoadingOnReload: true,
+            skipLoadingOnRefresh: true,
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (e, _) => AdminErrorView(
               message: '$e',
               onRetry: () => ref.invalidate(adminUsersProvider(_query)),
             ),
-            data: (users) => AdminDataTable(
-              columns: const ['Account', 'Storage', 'User type', 'Last seen', ''],
-              flex: const [5, 2, 2, 2],
-              emptyMessage:
-                  'No users yet — open the app signed in to register a heartbeat.',
-              rows: [
+            data: (users) {
+              final visible = [
                 for (final u in users)
-                  [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          u.email ?? u.displayName ?? shortUid(u.uid),
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: t.text,
-                          ),
-                        ),
-                        if (u.displayName != null &&
-                            u.displayName!.isNotEmpty &&
-                            u.email != null) ...[
-                          const SizedBox(height: 2),
+                  if (!_deleting.contains(u.uid)) u,
+              ];
+              return AdminDataTable(
+                columns: const ['Account', 'Storage', 'User type', 'Last seen', ''],
+                flex: const [5, 2, 2, 2],
+                actionWidth: 96,
+                emptyMessage:
+                    'No users yet — open the app signed in to register a heartbeat.',
+                rows: [
+                  for (final u in visible)
+                    [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            u.displayName!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12, color: t.textMuted),
+                            u.email ?? u.displayName ?? shortUid(u.uid),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: t.text,
+                            ),
+                          ),
+                          if (u.displayName != null &&
+                              u.displayName!.isNotEmpty &&
+                              u.email != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              u.displayName!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, color: t.textMuted),
+                            ),
+                          ],
+                          Text(
+                            shortUid(u.uid),
+                            style: AppTokens.mono(size: 10, color: t.textFaint),
                           ),
                         ],
-                        Text(
-                          shortUid(u.uid),
-                          style: AppTokens.mono(size: 10, color: t.textFaint),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      formatStorageBytes(u.storageBytes),
-                      style: TextStyle(color: t.textSecondary),
-                    ),
-                    _busyUids.contains(u.uid)
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : _UserTypeMenu(
-                            current: _typeFromUser(u),
-                            onSelected: (type) => _setType(u, type),
-                          ),
-                    Text(
-                      u.lastSeenAt != null && u.lastSeenAt!.isNotEmpty
-                          ? u.lastSeenAt!.substring(0, 10)
-                          : '—',
-                      style: AppTokens.mono(size: 11, color: t.textMuted),
-                    ),
-                    IconButton(
-                      tooltip: 'Edit user',
-                      icon: const Icon(Icons.edit_outlined, size: 20),
-                      onPressed: () => _openEditor(u),
-                    ),
-                  ],
-              ],
-            ),
+                      ),
+                      Text(
+                        formatStorageBytes(u.storageBytes),
+                        style: TextStyle(color: t.textSecondary),
+                      ),
+                      _UserTypeMenu(
+                        current: _typeFromUser(u),
+                        busy: _busy.contains(u.uid),
+                        onSelected: canWrite ? (type) => _setType(u, type) : null,
+                      ),
+                      Text(
+                        formatAdminWhen(u.lastSeenAt),
+                        style: AppTokens.mono(size: 11, color: t.textMuted),
+                      ),
+                      if (canWrite)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Edit user',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                              icon: const Icon(Icons.edit_outlined, size: 20),
+                              onPressed: () => _openEditor(u),
+                            ),
+                            IconButton(
+                              tooltip: 'Delete user',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                              icon: Icon(Icons.delete_outline, size: 20, color: t.pdfBadge),
+                              onPressed: () => _deleteUser(u),
+                            ),
+                          ],
+                        )
+                      else
+                        const SizedBox.shrink(),
+                    ],
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -212,10 +321,12 @@ class _UserTypeMenu extends StatelessWidget {
   const _UserTypeMenu({
     required this.current,
     required this.onSelected,
+    this.busy = false,
   });
 
   final _UserType current;
-  final ValueChanged<_UserType> onSelected;
+  final ValueChanged<_UserType>? onSelected;
+  final bool busy;
 
   Color _color(AppTokens t) => switch (current) {
         _UserType.free => t.textMuted,
@@ -227,7 +338,11 @@ class _UserTypeMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    return PopupMenuButton<_UserType>(
+    return IgnorePointer(
+      ignoring: busy || onSelected == null,
+      child: Opacity(
+        opacity: busy ? 0.45 : 1,
+        child: PopupMenuButton<_UserType>(
       tooltip: 'Change user type',
       initialValue: current,
       onSelected: onSelected,
@@ -251,6 +366,8 @@ class _UserTypeMenu extends StatelessWidget {
       child: AdminStatusChip(
         label: _typeLabel(current),
         color: _color(t),
+      ),
+        ),
       ),
     );
   }
@@ -281,7 +398,10 @@ class _UserEditorSheetState extends ConsumerState<_UserEditorSheet> {
     _email = TextEditingController(text: u.email ?? '');
     _type = _typeFromUser(u);
     if (u.premiumExpiresAt != null) {
-      _expiresAt = DateTime.tryParse(u.premiumExpiresAt!)?.toLocal();
+      final parsed = DateTime.tryParse(u.premiumExpiresAt!)?.toLocal();
+      if (parsed != null && parsed.year < 9000) {
+        _expiresAt = parsed;
+      }
     }
   }
 

@@ -1,10 +1,12 @@
 import {
-  createWalletCheckout,
+  createMethodCheckout,
   extractPaymentIntentId,
+  extractWebhookEventType,
   extractWebhookMetadata,
+  isPayMongoMethod,
   retrievePaymentIntent,
   verifyPayMongoWebhookSignature,
-  type PayMongoWallet,
+  type PayMongoMethod,
 } from './paymongo';
 import { resolveVoucherDiscount, validateVoucherPublic } from './vouchers';
 
@@ -19,7 +21,8 @@ export interface BillingRecord {
   expiresAt: string | null;
   source: 'paymongo';
   paymentIntentId?: string;
-  wallet?: PayMongoWallet;
+  /** Payment method used: card | gcash | paymaya */
+  wallet?: PayMongoMethod;
   updatedAt: string;
 }
 
@@ -57,9 +60,19 @@ export async function amountCentavosForPlan(
   voucher?: string | null,
 ): Promise<number> {
   const base = PLAN_AMOUNTS_CENTAVOS[plan];
+  if (base <= 0) return 0;
   const resolved = await resolveVoucherDiscount(bucket, voucher);
   if (resolved) {
-    return Math.max(2000, Math.round(base * (1 - resolved.discountRate)));
+    if (
+      resolved.discountKind === 'amount' &&
+      (resolved.discountAmountCentavos ?? 0) > 0
+    ) {
+      return Math.max(0, base - (resolved.discountAmountCentavos ?? 0));
+    }
+    const discounted = Math.round(base * (1 - resolved.discountRate));
+    // 100% off is free. Anything else still has PayMongo's ₱20 floor.
+    if (discounted <= 0) return 0;
+    return Math.max(2000, discounted);
   }
   return base;
 }
@@ -110,7 +123,7 @@ export async function grantPremiumFromPayment(
   bucket: R2Bucket,
   uid: string,
   plan: PaidBillingPlan,
-  opts?: { paymentIntentId?: string; wallet?: PayMongoWallet },
+  opts?: { paymentIntentId?: string; wallet?: PayMongoMethod },
 ): Promise<BillingRecord> {
   const existing = await readBillingRecord(bucket, uid);
   const now = new Date();
@@ -171,42 +184,64 @@ export async function handleBillingCheckout(
   uid: string,
   workerOrigin: string,
 ): Promise<Response> {
-  if (!payMongoConfigured(env)) {
-    return json({ error: 'PayMongo is not configured on this worker.' }, 503);
-  }
-
   const body = (await request.json()) as {
     plan?: PaidBillingPlan;
-    wallet?: PayMongoWallet;
+    /** Preferred: card | gcash | paymaya */
+    method?: string;
+    /** Legacy alias for method */
+    wallet?: string;
     voucher?: string | null;
   };
 
   const plan = body.plan;
-  const wallet = body.wallet;
+  const methodRaw = body.method ?? body.wallet;
   if (plan !== 'monthly' && plan !== 'yearly') {
     return json({ error: 'Invalid plan.' }, 400);
   }
-  if (wallet !== 'gcash' && wallet !== 'paymaya') {
-    return json({ error: 'Invalid wallet.' }, 400);
+  if (!isPayMongoMethod(methodRaw)) {
+    return json({ error: 'Invalid payment method. Use card, gcash, or paymaya.' }, 400);
   }
+  const method = methodRaw;
 
   const amountCentavos = await amountCentavosForPlan(
     env.BUCKET,
     plan,
     body.voucher,
   );
+
+  if (amountCentavos <= 0) {
+    const record = await grantPremiumFromPayment(env.BUCKET, uid, plan, {
+      paymentIntentId: `voucher:${(body.voucher ?? 'free').trim()}`,
+      wallet: method,
+    });
+    return json({
+      granted: true,
+      amountCentavos: 0,
+      plan,
+      wallet: method,
+      method,
+      expiresAt: record.expiresAt,
+    });
+  }
+
+  if (!payMongoConfigured(env)) {
+    return json({ error: 'PayMongo is not configured on this worker.' }, 503);
+  }
+
   const returnUrl = `${workerOrigin}/billing/return`;
   const secretKey = env.PAYMONGO_SECRET_KEY!;
 
-  const checkout = await createWalletCheckout(secretKey, {
+  const checkout = await createMethodCheckout(secretKey, {
     amountCentavos,
-    wallet,
+    method,
     returnUrl,
+    cancelUrl: returnUrl,
     description: `Notably Premium ${plan}`,
     metadata: {
       uid,
       plan,
-      wallet,
+      wallet: method,
+      method,
     },
   });
 
@@ -215,7 +250,8 @@ export async function handleBillingCheckout(
     paymentIntentId: checkout.paymentIntentId,
     amountCentavos,
     plan,
-    wallet,
+    wallet: method,
+    method,
   });
 }
 
@@ -248,7 +284,7 @@ export async function handleBillingReturn(
       if (intent.status === 'succeeded') {
         const uid = intent.metadata.uid;
         const plan = intent.metadata.plan as BillingPlan | undefined;
-        const wallet = intent.metadata.wallet as PayMongoWallet | undefined;
+        const wallet = intent.metadata.wallet as PayMongoMethod | undefined;
         if (uid && (plan === 'monthly' || plan === 'yearly')) {
           await grantPremiumFromPayment(env.BUCKET, uid, plan, {
             paymentIntentId,
@@ -291,13 +327,13 @@ export async function handleBillingWebhook(
     return json({ error: 'Invalid JSON.' }, 400);
   }
 
-  const eventType =
-    typeof body === 'object' && body !== null
-      ? (body as { data?: { attributes?: { type?: string } } }).data?.attributes
-          ?.type
-      : null;
+  const eventType = extractWebhookEventType(body);
 
-  if (eventType !== 'payment.paid' && eventType !== 'payment.failed') {
+  if (
+    eventType !== 'payment.paid' &&
+    eventType !== 'payment.failed' &&
+    eventType !== 'checkout_session.payment.paid'
+  ) {
     return json({ ok: true, ignored: true });
   }
 
@@ -311,6 +347,7 @@ export async function handleBillingWebhook(
   if (
     payMongoConfigured(env) &&
     paymentIntentId &&
+    paymentIntentId.startsWith('pi_') &&
     (!metadata.uid || !metadata.plan)
   ) {
     try {
@@ -326,7 +363,9 @@ export async function handleBillingWebhook(
 
   const uid = metadata.uid;
   const plan = metadata.plan as BillingPlan | undefined;
-  const wallet = metadata.wallet as PayMongoWallet | undefined;
+  const wallet = (metadata.method ?? metadata.wallet) as
+    | PayMongoMethod
+    | undefined;
 
   if (uid && (plan === 'monthly' || plan === 'yearly')) {
     await grantPremiumFromPayment(env.BUCKET, uid, plan, {

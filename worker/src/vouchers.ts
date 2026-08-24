@@ -1,8 +1,14 @@
 const VOUCHERS_KEY = 'config/vouchers.json';
 
+export type VoucherDiscountKind = 'percent' | 'amount';
+
 export interface StoredVoucher {
   code: string;
+  /** 0–1 for percent vouchers. Ignored when [discountKind] is amount. */
   discountRate: number;
+  /** Fixed peso off, in centavos (₱99 = 9900). */
+  discountAmountCentavos?: number | null;
+  discountKind?: VoucherDiscountKind;
   label?: string;
   active: boolean;
   createdAt: string;
@@ -88,16 +94,35 @@ function voucherIsUsable(v: StoredVoucher, now = Date.now()): boolean {
   return true;
 }
 
+export interface ResolvedVoucher {
+  discountRate: number;
+  discountKind: VoucherDiscountKind;
+  discountAmountCentavos?: number | null;
+  label?: string;
+}
+
+export function voucherKind(v: StoredVoucher): VoucherDiscountKind {
+  if (v.discountKind === 'amount' || (v.discountAmountCentavos ?? 0) > 0) {
+    return 'amount';
+  }
+  return 'percent';
+}
+
 export async function resolveVoucherDiscount(
   bucket: R2Bucket,
   rawCode?: string | null,
-): Promise<{ discountRate: number; label?: string } | null> {
+): Promise<ResolvedVoucher | null> {
   if (!rawCode?.trim()) return null;
   const code = normalizeCode(rawCode);
   const store = await readVoucherStore(bucket);
   const match = store.vouchers.find((v) => normalizeCode(v.code) === code);
   if (!match || !voucherIsUsable(match)) return null;
-  return { discountRate: match.discountRate, label: match.label };
+  return {
+    discountRate: match.discountRate,
+    discountKind: voucherKind(match),
+    discountAmountCentavos: match.discountAmountCentavos ?? null,
+    label: match.label,
+  };
 }
 
 export async function validateVoucherPublic(
@@ -107,6 +132,8 @@ export async function validateVoucherPublic(
   valid: boolean;
   code: string;
   discountRate?: number;
+  discountKind?: VoucherDiscountKind;
+  discountAmountCentavos?: number;
   label?: string;
 }> {
   const code = normalizeCode(rawCode);
@@ -116,6 +143,8 @@ export async function validateVoucherPublic(
     valid: true,
     code,
     discountRate: resolved.discountRate,
+    discountKind: resolved.discountKind,
+    discountAmountCentavos: resolved.discountAmountCentavos ?? undefined,
     label: resolved.label,
   };
 }
@@ -131,7 +160,9 @@ export async function upsertVoucherAdmin(
   bucket: R2Bucket,
   input: {
     code: string;
-    discountRate: number;
+    discountRate?: number;
+    discountAmountCentavos?: number | null;
+    discountKind?: VoucherDiscountKind;
     label?: string;
     active?: boolean;
     expiresAt?: string | null;
@@ -142,8 +173,26 @@ export async function upsertVoucherAdmin(
   if (!/^[A-Z0-9_-]{3,32}$/.test(code)) {
     throw new Error('Code must be 3–32 characters (letters, numbers, _ or -).');
   }
-  if (input.discountRate <= 0 || input.discountRate >= 1) {
-    throw new Error('Discount must be between 1% and 99%.');
+  const kind: VoucherDiscountKind =
+    input.discountKind === 'amount' ||
+    (input.discountAmountCentavos != null && input.discountAmountCentavos > 0)
+      ? 'amount'
+      : 'percent';
+
+  let discountRate = 0;
+  let discountAmountCentavos: number | null = null;
+  if (kind === 'amount') {
+    const amount = Math.round(input.discountAmountCentavos ?? 0);
+    if (amount < 100 || amount > 148900) {
+      throw new Error('Peso discount must be between ₱1 and ₱1,489.');
+    }
+    discountAmountCentavos = amount;
+  } else {
+    const rate = input.discountRate ?? 0;
+    if (rate <= 0 || rate > 1) {
+      throw new Error('Discount must be between 1% and 100%.');
+    }
+    discountRate = rate;
   }
 
   const store = await readVoucherStore(bucket);
@@ -152,7 +201,9 @@ export async function upsertVoucherAdmin(
 
   const row: StoredVoucher = {
     code,
-    discountRate: input.discountRate,
+    discountRate,
+    discountAmountCentavos,
+    discountKind: kind,
     label: input.label?.trim() || undefined,
     active: input.active ?? true,
     createdAt: existing?.createdAt ?? now,

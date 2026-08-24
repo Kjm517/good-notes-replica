@@ -1,5 +1,5 @@
 name: notably
-description: "A new Flutter project."
+description: "Take notes comfortably. Think notably — handwriting, PDFs, and quizzes on every device."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -64,6 +64,7 @@ dependencies:
   connectivity_plus: ^7.3.1
   pdfrx: ^2.4.7
   url_launcher: ^6.3.2
+  web: ^1.1.1
   purchases_flutter: ^10.9.1
   purchases_ui_flutter: ^10.9.1
   share_plus: ^12.0.2
@@ -86,9 +87,16 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: assets/branding/notably_logo.png
-  adaptive_icon_background: "#5257D4"
-  adaptive_icon_foreground: assets/branding/notably_logo.png
+  web:
+    generate: true
+    image_path: assets/branding/app_icon.png
+    background_color: "#0B1B4A"
+  image_path: assets/branding/app_icon.png
+  # Full bleed icon already includes its own rounded plate + gradient.
+  adaptive_icon_background: "#0B1B4A"
+  adaptive_icon_foreground: assets/branding/app_icon.png
+  adaptive_icon_foreground_inset: 0
+  remove_alpha_ios: true
 
 flutter_native_splash:
   color: "#EEF0F3"
@@ -119,8 +127,13 @@ flutter:
 
   assets:
     - .env
+    - assets/env
     - assets/quiz/stop_words.txt
     - assets/branding/notably_logo.png
+    - assets/branding/notably-solo-logo.png
+    - assets/branding/app_icon.png
+    - assets/payments/gcash.png
+    - assets/payments/maya.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

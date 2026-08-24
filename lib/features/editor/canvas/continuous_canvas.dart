@@ -339,8 +339,20 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   /// (palm rejection). Reset if the stylus goes unused for a while.
   DateTime? _lastStylusAt;
   bool get _stylusMode {
-    final at = _lastStylusAt;
-    return at != null && DateTime.now().difference(at).inMinutes < 5;
+    if (_lastStylusAt == null) return false;
+    return DateTime.now().difference(_lastStylusAt!) <
+        Duration(seconds: kIsWeb ? 90 : 45);
+  }
+
+  bool _looksLikeStylus(PointerEvent e) {
+    if (e.kind == PointerDeviceKind.stylus ||
+        e.kind == PointerDeviceKind.invertedStylus) {
+      return true;
+    }
+    if (!kIsWeb) return false;
+    // Chrome sometimes reports a pen as a mouse; pressure other than the
+    // default 0.5 is the usual tell.
+    return (e.pressure - 0.5).abs() > 0.04;
   }
 
   // Lasso in progress / selection drag state.
@@ -390,8 +402,7 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
   // ---- Multi-touch (pinch zoom + two-finger pan) ---------------------------
 
   void _onRootDown(PointerDownEvent e) {
-    if (e.kind == PointerDeviceKind.stylus ||
-        e.kind == PointerDeviceKind.invertedStylus) {
+    if (_looksLikeStylus(e)) {
       _lastStylusAt = DateTime.now();
     }
     _pointers[e.pointer] = e.localPosition;
@@ -1196,6 +1207,10 @@ class _ContinuousCanvasState extends State<ContinuousCanvas> {
         widget.palmRejection &&
         e.kind == PointerDeviceKind.touch &&
         _stylusMode;
+
+    if (_looksLikeStylus(e)) {
+      _lastStylusAt = DateTime.now();
+    }
 
     if (_handTool && onElement) return;
 

@@ -9,7 +9,7 @@
  * front: it verifies the caller's Supabase access token, then reads or writes
  * objects strictly under that user's own `users/{uid}/` prefix.
  *
- * Billing (PayMongo GCash / Maya) uses the same auth and stores entitlement
+ * Billing (PayMongo card / GCash / Maya) uses the same auth and stores entitlement
  * JSON beside each user's files in R2.
  */
 
@@ -46,7 +46,7 @@ export interface Env {
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization,Content-Type',
   'Access-Control-Max-Age': '86400',
 };
@@ -222,7 +222,8 @@ async function handleBilling(
         return withCors(
           json({
             paymongo: payMongoConfigured(env),
-            wallets: ['gcash', 'paymaya'],
+            wallets: ['card', 'gcash', 'paymaya'],
+            methods: ['card', 'gcash', 'paymaya'],
           }),
         );
 

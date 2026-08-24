@@ -1,11 +1,14 @@
 import { requireUser } from './auth';
 import {
   addTeamMember,
+  clearAudit,
   deleteUserData,
+  deleteUserFiles,
   getAiUsage,
   getOverview,
   listAudit,
   listBugReports,
+  readBugAttachment,
   listDocuments,
   listSubscriptions,
   listTeam,
@@ -18,17 +21,19 @@ import {
 import {
   appendAudit,
   type BugStatus,
-  isAdminUid,
   parseAdminUids,
+  staffRoleForUid,
 } from './admin-store';
 import {
   deleteAdmin,
+  deleteAuthUserViaRpc,
   listAdmins,
   upsertAdmin,
 } from './admins-db';
 import {
   createSupabaseUser,
   deleteSupabaseUser,
+  searchAuthUsers,
   updateSupabaseUserMetadata,
 } from './supabase-admin';
 import {
@@ -60,16 +65,28 @@ function accessTokenFrom(request: Request): string {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 }
 
+async function requireStaff(
+  request: Request,
+  env: AdminEnv,
+): Promise<{ uid: string; email?: string; accessToken: string; role: string }> {
+  const user = await requireUser(request, env);
+  const accessToken = accessTokenFrom(request);
+  const role = await staffRoleForUid(user.uid, env, accessToken);
+  if (!role) {
+    throw new Error('Admin access required.');
+  }
+  return { uid: user.uid, email: user.email, accessToken, role };
+}
+
 async function requireAdmin(
   request: Request,
   env: AdminEnv,
-): Promise<{ uid: string; email?: string; accessToken: string }> {
-  const user = await requireUser(request, env);
-  const accessToken = accessTokenFrom(request);
-  if (!(await isAdminUid(user.uid, env, accessToken))) {
-    throw new Error('Admin access required.');
+): Promise<{ uid: string; email?: string; accessToken: string; role: string }> {
+  const staff = await requireStaff(request, env);
+  if (staff.role !== 'admin') {
+    throw new Error('Viewer accounts cannot change this.');
   }
-  return { uid: user.uid, email: user.email, accessToken };
+  return staff;
 }
 
 export async function handleAdmin(
@@ -82,7 +99,7 @@ export async function handleAdmin(
 
   // ---- Overview ---------------------------------------------------
   if (path === '/admin/overview' && method === 'GET') {
-    await requireAdmin(request, env);
+    await requireStaff(request, env);
     const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days') ?? 30)));
     const overview = await getOverview(env.BUCKET, days);
     return json({ overview });
@@ -90,9 +107,17 @@ export async function handleAdmin(
 
   // ---- Users ------------------------------------------------------
   if (path === '/admin/users' && method === 'GET') {
-    await requireAdmin(request, env);
+    await requireStaff(request, env);
     const q = url.searchParams.get('q') ?? '';
-    const users = await listUsers(env.BUCKET, q);
+    let authHits: Array<{ id: string; email?: string; displayName?: string }> = [];
+    if (q.trim()) {
+      try {
+        authHits = await searchAuthUsers(env, q);
+      } catch (e) {
+        console.error('Auth user search failed:', e);
+      }
+    }
+    const users = await listUsers(env.BUCKET, q, authHits);
     return json({ users });
   }
 
@@ -100,60 +125,63 @@ export async function handleAdmin(
     const actor = await requireAdmin(request, env);
     const uid = decodeURIComponent(path.slice('/admin/users/'.length)).trim();
     if (!uid) return json({ error: 'uid is required.' }, 400);
-    const body = (await request.json()) as {
-      email?: string | null;
-      displayName?: string | null;
-      isPremium?: boolean;
-      plan?: 'monthly' | 'yearly' | 'lifetime';
-      expiresAt?: string | null;
-    };
+    try {
+      const body = (await request.json()) as {
+        email?: string | null;
+        displayName?: string | null;
+        isPremium?: boolean;
+        plan?: 'monthly' | 'yearly' | 'lifetime';
+        expiresAt?: string | null;
+      };
 
-    let profile;
-    if (body.email !== undefined || body.displayName !== undefined) {
-      profile = await updateUserProfile(
-        env.BUCKET,
-        uid,
-        { email: body.email, displayName: body.displayName },
-        actor,
-      );
-      if (
-        body.displayName !== undefined &&
-        env.SUPABASE_SERVICE_ROLE_KEY?.trim()
-      ) {
-        try {
-          await updateSupabaseUserMetadata(
-            {
-              SUPABASE_URL: env.SUPABASE_URL,
-              SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
-            },
-            uid,
-            { displayName: body.displayName },
-          );
-        } catch {
-          // Profile in R2 still saved; Auth metadata is best-effort.
+      let profile;
+      if (body.email !== undefined || body.displayName !== undefined) {
+        profile = await updateUserProfile(
+          env.BUCKET,
+          uid,
+          { email: body.email, displayName: body.displayName },
+          actor,
+        );
+        if (body.displayName !== undefined) {
+          try {
+            await updateSupabaseUserMetadata(
+              {
+                SUPABASE_URL: env.SUPABASE_URL,
+                SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+                SUPABASE_JWT_SECRET: env.SUPABASE_JWT_SECRET,
+                SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY,
+              },
+              uid,
+              { displayName: body.displayName },
+            );
+          } catch {
+            // Profile in R2 still saved; Auth metadata is best-effort.
+          }
         }
       }
-    }
 
-    let subscription;
-    if (body.isPremium !== undefined) {
-      subscription = await setSubscription(
-        env.BUCKET,
-        uid,
-        {
-          isPremium: body.isPremium,
-          plan: body.plan,
-          expiresAt: body.expiresAt,
-        },
-        actor,
-      );
-    }
+      let subscription;
+      if (body.isPremium !== undefined) {
+        subscription = await setSubscription(
+          env.BUCKET,
+          uid,
+          {
+            isPremium: body.isPremium,
+            plan: body.plan,
+            expiresAt: body.expiresAt,
+          },
+          actor,
+        );
+      }
 
-    return json({
-      ok: true,
-      profile: profile ?? null,
-      subscription: subscription ?? null,
-    });
+      return json({
+        ok: true,
+        profile: profile ?? null,
+        subscription: subscription ?? null,
+      });
+    } catch (e) {
+      return json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
   }
 
   if (path.startsWith('/admin/users/') && method === 'DELETE') {
@@ -166,35 +194,44 @@ export async function handleAdmin(
 
     const result = await deleteUserData(env.BUCKET, uid, actor);
     let authDeleted = false;
-    if (env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
-      try {
-        authDeleted = await deleteSupabaseUser(
-          {
-            SUPABASE_URL: env.SUPABASE_URL,
-            SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
-          },
-          uid,
-        );
-      } catch (e) {
-        return json(
-          {
-            error: e instanceof Error ? e.message : String(e),
-            deletedObjects: result.deletedObjects,
-          },
-          400,
-        );
+    let authError: string | undefined;
+
+    const rpc = await deleteAuthUserViaRpc(env, uid, actor.accessToken);
+    if (rpc.deleted) {
+      authDeleted = true;
+    } else if (!rpc.missing && rpc.error) {
+      authError = rpc.error;
+    }
+
+    if (!authDeleted) {
+      const gotrue = await deleteSupabaseUser(
+        {
+          SUPABASE_URL: env.SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+          SUPABASE_JWT_SECRET: env.SUPABASE_JWT_SECRET,
+          SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY,
+        },
+        uid,
+      );
+      authDeleted = gotrue.deleted;
+      if (!authDeleted && gotrue.error) authError = gotrue.error;
+      else if (!authDeleted && rpc.missing && !authError) {
+        authError =
+          'Run supabase/admin_delete_user.sql in the SQL Editor so Auth logins can be deleted.';
       }
     }
+
     return json({
       ok: true,
       deletedObjects: result.deletedObjects,
       authDeleted,
+      authError: authDeleted ? null : authError ?? null,
     });
   }
 
   // ---- Subscriptions ----------------------------------------------
   if (path === '/admin/subscriptions' && method === 'GET') {
-    await requireAdmin(request, env);
+    await requireStaff(request, env);
     const subscriptions = await listSubscriptions(env.BUCKET);
     return json({ subscriptions });
   }
@@ -226,31 +263,62 @@ export async function handleAdmin(
 
   // ---- Documents --------------------------------------------------
   if (path === '/admin/documents' && method === 'GET') {
-    await requireAdmin(request, env);
+    await requireStaff(request, env);
     const documents = await listDocuments(env.BUCKET);
     return json({ documents });
   }
 
+  if (path.startsWith('/admin/documents/') && method === 'DELETE') {
+    const actor = await requireAdmin(request, env);
+    const uid = decodeURIComponent(path.slice('/admin/documents/'.length)).trim();
+    if (!uid) return json({ error: 'uid is required.' }, 400);
+    const result = await deleteUserFiles(env.BUCKET, uid, actor);
+    return json({ ok: true, deletedObjects: result.deletedObjects });
+  }
+
   // ---- Bug reports ------------------------------------------------
   if (path === '/admin/bugs' && method === 'GET') {
-    await requireAdmin(request, env);
+    await requireStaff(request, env);
     const reports = await listBugReports(env.BUCKET);
     return json({ reports });
+  }
+
+  const bugFile = path.match(/^\/admin\/bugs\/([^/]+)\/files\/(\d+)$/);
+  if (bugFile && method === 'GET') {
+    await requireStaff(request, env);
+    const id = decodeURIComponent(bugFile[1]);
+    const index = Number(bugFile[2]);
+    const file = await readBugAttachment(env.BUCKET, id, index);
+    if (!file) return json({ error: 'Attachment not found.' }, 404);
+    return new Response(file.body, {
+      headers: {
+        'Content-Type': file.mime,
+        'Content-Disposition': `inline; filename="${file.name.replace(/"/g, '')}"`,
+      },
+    });
   }
 
   if (path.startsWith('/admin/bugs/') && method === 'PATCH') {
     const actor = await requireAdmin(request, env);
     const id = decodeURIComponent(path.slice('/admin/bugs/'.length));
-    const body = (await request.json()) as { status?: BugStatus };
-    if (!body.status) return json({ error: 'status is required.' }, 400);
-    const report = await updateBugStatus(env.BUCKET, id, body.status, actor);
+    const body = (await request.json()) as { status?: BugStatus; reply?: string };
+    if (!body.status && body.reply === undefined) {
+      return json({ error: 'status or reply is required.' }, 400);
+    }
+    const report = await updateBugStatus(
+      env.BUCKET,
+      id,
+      body.status,
+      actor,
+      body.reply,
+    );
     if (!report) return json({ error: 'Report not found.' }, 404);
     return json({ report });
   }
 
   // ---- AI usage ---------------------------------------------------
   if (path === '/admin/ai' && method === 'GET') {
-    await requireAdmin(request, env);
+    await requireStaff(request, env);
     const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days') ?? 30)));
     const usage = await getAiUsage(env.BUCKET, days);
     return json({ usage });
@@ -263,13 +331,19 @@ export async function handleAdmin(
     // An unreachable admins table throws AdminCheckUnavailable, which the
     // router turns into 503. Deliberately not caught here: the gate should
     // say "could not check", never quietly answer {admin: false}.
-    const admin = await isAdminUid(user.uid, env, token);
-    return json({ admin, uid: user.uid, email: user.email ?? null });
+    const role = await staffRoleForUid(user.uid, env, token);
+    return json({
+      admin: role != null,
+      canWrite: role === 'admin',
+      role,
+      uid: user.uid,
+      email: user.email ?? null,
+    });
   }
 
   // ---- Team (public.admins) ---------------------------------------
   if (path === '/admin/team' && method === 'GET') {
-    const actor = await requireAdmin(request, env);
+    const actor = await requireStaff(request, env);
     try {
       const rows = await listAdmins(env, actor.accessToken);
       // Only rows in public.admins — do not inject ADMIN_UIDS phantoms (those
@@ -290,7 +364,7 @@ export async function handleAdmin(
 
   if (path === '/admin/team/create' && method === 'POST') {
     const actor = await requireAdmin(request, env);
-    if (!env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
+    if (!env.SUPABASE_JWT_SECRET?.trim() && !env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
       return json(
         {
           error:
@@ -303,6 +377,7 @@ export async function handleAdmin(
       email?: string;
       password?: string;
       name?: string;
+      role?: 'admin' | 'viewer';
     };
     if (!body.email?.trim() || !body.password) {
       return json({ error: 'email and password are required.' }, 400);
@@ -312,6 +387,8 @@ export async function handleAdmin(
         {
           SUPABASE_URL: env.SUPABASE_URL,
           SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+          SUPABASE_JWT_SECRET: env.SUPABASE_JWT_SECRET,
+          SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY,
         },
         {
           email: body.email,
@@ -324,7 +401,7 @@ export async function handleAdmin(
         {
           user_id: created.id,
           email: created.email,
-          role: 'admin',
+          role: body.role === 'viewer' ? 'viewer' : 'admin',
           created_by: actor.uid,
         },
         actor.accessToken,
@@ -445,14 +522,26 @@ export async function handleAdmin(
 
   // ---- Audit log --------------------------------------------------
   if (path === '/admin/audit' && method === 'GET') {
-    await requireAdmin(request, env);
+    await requireStaff(request, env);
     const entries = await listAudit(env.BUCKET);
     return json({ entries });
   }
 
+  if (path === '/admin/audit' && method === 'DELETE') {
+    const actor = await requireAdmin(request, env);
+    const cleared = await clearAudit(env.BUCKET);
+    await appendAudit(env.BUCKET, {
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      action: 'audit.clear',
+      detail: `cleared=${cleared}`,
+    });
+    return json({ ok: true, cleared });
+  }
+
   // ---- Vouchers (existing) ----------------------------------------
   if (path === '/admin/vouchers' && method === 'GET') {
-    await requireAdmin(request, env);
+    await requireStaff(request, env);
     const vouchers = await listVouchersAdmin(env.BUCKET);
     return json({ vouchers });
   }
@@ -463,22 +552,30 @@ export async function handleAdmin(
       code?: string;
       discountRate?: number;
       discountPercent?: number;
+      discountAmountCentavos?: number;
+      discountKind?: 'percent' | 'amount';
       label?: string;
       active?: boolean;
       expiresAt?: string | null;
       maxUses?: number | null;
     };
     if (!body.code?.trim()) return json({ error: 'Code is required.' }, 400);
+    const kind =
+      body.discountKind === 'amount' || (body.discountAmountCentavos ?? 0) > 0
+        ? 'amount'
+        : 'percent';
     const rate =
       body.discountRate ??
       (body.discountPercent != null ? body.discountPercent / 100 : undefined);
-    if (rate == null) {
+    if (kind === 'percent' && rate == null) {
       return json({ error: 'discountRate or discountPercent is required.' }, 400);
     }
     try {
       const voucher = await upsertVoucherAdmin(env.BUCKET, {
         code: body.code,
         discountRate: rate,
+        discountAmountCentavos: body.discountAmountCentavos,
+        discountKind: kind,
         label: body.label,
         active: body.active,
         expiresAt: body.expiresAt,

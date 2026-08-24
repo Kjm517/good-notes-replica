@@ -52,12 +52,12 @@ function restHeaders(
   );
 }
 
-export async function isUserAdmin(
+export async function getAdminRole(
   env: AdminsDbEnv,
   uid: string,
   userAccessToken?: string,
-): Promise<boolean> {
-  const url = `${restBase(env)}/admins?user_id=eq.${encodeURIComponent(uid)}&role=eq.admin&select=user_id`;
+): Promise<string | null> {
+  const url = `${restBase(env)}/admins?user_id=eq.${encodeURIComponent(uid)}&select=user_id,role`;
   const res = await fetch(url, {
     headers: restHeaders(env, userAccessToken),
   });
@@ -65,8 +65,16 @@ export async function isUserAdmin(
     const text = await res.text();
     throw new Error(`admins lookup failed (${res.status}): ${text}`);
   }
-  const rows = (await res.json()) as Array<{ user_id: string }>;
-  return rows.length > 0;
+  const rows = (await res.json()) as Array<{ user_id: string; role?: string }>;
+  return rows[0]?.role ?? (rows.length > 0 ? 'admin' : null);
+}
+
+export async function isUserAdmin(
+  env: AdminsDbEnv,
+  uid: string,
+  userAccessToken?: string,
+): Promise<boolean> {
+  return (await getAdminRole(env, uid, userAccessToken)) === 'admin';
 }
 
 export async function listAdmins(
@@ -136,4 +144,34 @@ export async function deleteAdmin(
   }
   const rows = (await res.json()) as AdminRow[];
   return rows.length > 0;
+}
+
+/** Delete an Auth user as the signed-in admin (PostgREST RPC, no service_role). */
+export async function deleteAuthUserViaRpc(
+  env: AdminsDbEnv,
+  targetUid: string,
+  userAccessToken: string,
+): Promise<{ deleted: boolean; missing?: boolean; error?: string }> {
+  const url = `${restBase(env)}/rpc/admin_delete_auth_user`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: restHeaders(env, userAccessToken),
+    body: JSON.stringify({ target: targetUid }),
+  });
+  if (res.status === 404) {
+    return { deleted: false, missing: true };
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    const missing =
+      res.status === 400 &&
+      /PGRST202|could not find the function|schema cache/i.test(text);
+    return {
+      deleted: false,
+      missing,
+      error: missing ? undefined : `admin_delete_auth_user failed (${res.status}): ${text}`,
+    };
+  }
+  const body = await res.json().catch(() => null);
+  return { deleted: body === true };
 }

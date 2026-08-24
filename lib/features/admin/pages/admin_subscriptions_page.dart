@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/design.dart';
 import '../admin_api.dart';
+import '../csv_export.dart';
 import '../widgets/admin_widgets.dart';
 
 class AdminSubscriptionsPage extends ConsumerStatefulWidget {
@@ -48,9 +49,32 @@ class _AdminSubscriptionsPageState extends ConsumerState<AdminSubscriptionsPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const AdminPageHeader(
+          AdminPageHeader(
             title: 'Subscriptions',
             subtitle: 'PayMongo wallet entitlements stored in R2.',
+            trailing: subsAsync.asData == null
+                ? null
+                : OutlinedButton.icon(
+                    onPressed: () async {
+                      final subs = subsAsync.asData!.value;
+                      await exportCsv(
+                        filename: 'notably-subscriptions.csv',
+                        headers: const ['uid', 'email', 'plan', 'expires', 'mrr_php'],
+                        rows: [
+                          for (final s in subs)
+                            [
+                              s.uid,
+                              s.email ?? '',
+                              s.plan ?? '',
+                              s.expiresAt ?? '',
+                              s.mrrPhp.toStringAsFixed(2),
+                            ],
+                        ],
+                      );
+                    },
+                    icon: const Icon(Icons.download_outlined, size: 18),
+                    label: const Text('CSV'),
+                  ),
           ),
           const SizedBox(height: 16),
           subsAsync.when(

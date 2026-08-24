@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../app/design.dart';
 import '../../app/supabase_bootstrap.dart';
 import '../../app/page_routes.dart';
+import '../legal/legal_copy.dart';
+import '../legal/legal_sheet.dart';
 import '../settings/entitlements.dart';
 import 'data/auth_repository.dart';
 import 'providers.dart';
@@ -31,6 +34,29 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   bool _obscure = true;
   bool _acceptedTerms = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _finishGoogleRedirect();
+    });
+  }
+
+  Future<void> _finishGoogleRedirect() async {
+    final auth = _auth;
+    if (auth == null || !kIsWeb) return;
+    if (auth.currentUser != null) return;
+    final uri = Uri.base;
+    if (!uri.queryParameters.containsKey('code')) return;
+    await _run((a) async {
+      final result = await a.completeOAuthRedirect(uri);
+      if (result == null) {
+        throw const AuthFailure('Google sign-in did not complete. Try again.');
+      }
+      return result;
+    });
+  }
 
   @override
   void dispose() {
@@ -145,10 +171,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                       ),
                     )
                   else
-                    const SizedBox(height: 48),
-                  const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                   _Hero(creatingAccount: _creatingAccount),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 22),
                   if (!configured)
                     _NotConfiguredCard()
                   else ...[
@@ -236,12 +261,12 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     if (_creatingAccount)
                       _TermsRow(
                         accepted: _acceptedTerms,
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() {
-                                  _acceptedTerms = v;
-                                  if (v) _error = null;
-                                }),
+                        enabled: !_busy,
+                        onAccepted: () => setState(() {
+                          _acceptedTerms = true;
+                          _error = null;
+                        }),
+                        onDeclined: () => setState(() => _acceptedTerms = false),
                       ),
                     if (_error != null) ...[
                       const SizedBox(height: 14),
@@ -302,8 +327,8 @@ class _Hero extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const AppMark(),
-        const SizedBox(height: 22),
+        const AppMark(size: 128),
+        const SizedBox(height: 10),
         Text(
           creatingAccount ? 'Create your account' : 'Welcome to Notably',
           textAlign: TextAlign.center,
@@ -314,13 +339,13 @@ class _Hero extends StatelessWidget {
             color: t.text,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 250),
+          constraints: const BoxConstraints(maxWidth: 320),
           child: Text(
             creatingAccount
                 ? 'Your notebooks, PDFs and highlights, on every device.'
-                : 'Read, mark up and think — the same notes on every device.',
+                : 'Take notes comfortably, on every device.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, height: 1.5, color: t.textMuted),
           ),
@@ -476,66 +501,116 @@ class _SessionRow extends StatelessWidget {
   }
 }
 
-/// "I agree to the Terms and Privacy Policy" — gates the Create account
-/// button, shown only while signing up.
+/// "I agree to the Terms and Privacy Policy" — gates Create account.
+/// Checking the box (or tapping a link) opens the legal modal; Agree ticks it.
 class _TermsRow extends StatelessWidget {
-  const _TermsRow({required this.accepted, required this.onChanged});
+  const _TermsRow({
+    required this.accepted,
+    required this.enabled,
+    required this.onAccepted,
+    required this.onDeclined,
+  });
 
   final bool accepted;
-  final ValueChanged<bool>? onChanged;
+  final bool enabled;
+  final VoidCallback onAccepted;
+  final VoidCallback onDeclined;
+
+  Future<void> _openLegal(BuildContext context, LegalDoc doc) async {
+    if (!enabled) return;
+    final agreed = await LegalSheet.show(
+      context,
+      initial: doc,
+      requireAgree: true,
+    );
+    if (agreed) {
+      onAccepted();
+    }
+  }
+
+  Future<void> _onCheckbox(BuildContext context, bool? value) async {
+    if (!enabled) return;
+    if (value != true) {
+      onDeclined();
+      return;
+    }
+    await _openLegal(context, LegalDoc.terms);
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final enabled = onChanged != null;
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: InkWell(
-        onTap: enabled ? () => onChanged!(!accepted) : null,
-        borderRadius: BorderRadius.circular(Radii.inner),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: 22,
-                height: 22,
-                child: Checkbox(
-                  value: accepted,
-                  visualDensity: VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  onChanged: enabled ? (v) => onChanged!(v ?? false) : null,
-                ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: Checkbox(
+                value: accepted,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: enabled ? (v) => _onCheckbox(context, v) : null,
               ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    style: TextStyle(
-                        fontSize: 12.5, height: 1.45, color: t.textMuted),
-                    children: [
-                      const TextSpan(text: 'I agree to the '),
-                      TextSpan(
-                        text: 'Terms',
-                        style: TextStyle(
-                            color: t.textSecondary,
-                            fontWeight: FontWeight.w600),
-                      ),
-                      const TextSpan(text: ' and '),
-                      TextSpan(
-                        text: 'Privacy Policy',
-                        style: TextStyle(
-                            color: t.textSecondary,
-                            fontWeight: FontWeight.w600),
-                      ),
-                      const TextSpan(text: '.'),
-                    ],
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.45,
+                    color: t.textMuted,
                   ),
+                  children: [
+                    const TextSpan(text: 'I agree to the '),
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.baseline,
+                      baseline: TextBaseline.alphabetic,
+                      child: GestureDetector(
+                        onTap: enabled
+                            ? () => _openLegal(context, LegalDoc.terms)
+                            : null,
+                        child: Text(
+                          'Terms',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            height: 1.45,
+                            color: t.accentText,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const TextSpan(text: ' and '),
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.baseline,
+                      baseline: TextBaseline.alphabetic,
+                      child: GestureDetector(
+                        onTap: enabled
+                            ? () => _openLegal(context, LegalDoc.privacy)
+                            : null,
+                        child: Text(
+                          'Privacy Policy',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            height: 1.45,
+                            color: t.accentText,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const TextSpan(text: '.'),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

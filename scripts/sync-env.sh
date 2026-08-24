@@ -34,5 +34,12 @@ for raw in env_path.read_text(encoding="utf-8").splitlines():
         values[key] = val
 
 out_path.write_text(json.dumps(values, indent=2) + "\n", encoding="utf-8")
+# Flutter web cannot serve files that start with `.`, so also write a
+# non-hidden copy for dotenv on Chrome.
+asset_env = Path(sys.argv[1]).parent / "assets" / "env"
+asset_env.parent.mkdir(parents=True, exist_ok=True)
+lines = [f"{k}={v}" for k, v in values.items()]
+asset_env.write_text("\n".join(lines) + "\n", encoding="utf-8")
 print(f"Wrote {out_path} ({len(values)} key(s))")
+print(f"Wrote {asset_env}")
 PY

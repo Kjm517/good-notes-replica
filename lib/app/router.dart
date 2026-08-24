@@ -44,6 +44,15 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       if (!signedIn) {
         if (admin) return null;
+        // Keep the PKCE `code` on the URL so Supabase can exchange it.
+        // Redirecting to bare /sign-in was dropping Google's callback.
+        final oauth = state.uri.queryParameters.containsKey('code') ||
+            state.uri.queryParameters.containsKey('error');
+        if (oauth) {
+          final q = state.uri.query;
+          if (loc == '/sign-in') return null;
+          return q.isEmpty ? '/sign-in' : '/sign-in?$q';
+        }
         return loc == '/sign-in' ? null : '/sign-in';
       }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/design.dart';
+import '../admin_access.dart';
 import '../admin_api.dart';
 import '../voucher_api.dart';
 
@@ -20,6 +21,7 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
   final _maxUses = TextEditingController();
   var _active = true;
   var _hasExpiry = false;
+  var _discountKind = 'percent';
   DateTime? _expiresAt;
   var _saving = false;
   var _showEditor = false;
@@ -46,6 +48,7 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
       _code.clear();
       _label.clear();
       _discount.text = '20';
+      _discountKind = 'percent';
       _maxUses.clear();
       _active = true;
       _hasExpiry = false;
@@ -60,7 +63,12 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
       _editingCode = row.code;
       _code.text = row.code;
       _label.text = row.label ?? '';
-      _discount.text = '${row.discountPercent}';
+      _discount.text = row.isAmountOff
+          ? ((row.discountAmountCentavos ?? 0) / 100).toStringAsFixed(
+              (row.discountAmountCentavos ?? 0) % 100 == 0 ? 0 : 2,
+            )
+          : '${row.discountPercent}';
+      _discountKind = row.isAmountOff ? 'amount' : 'percent';
       _maxUses.text = row.maxUses?.toString() ?? '';
       _active = row.active;
       _hasExpiry = parsed != null;
@@ -82,10 +90,25 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
       return;
     }
     final code = (_editingCode ?? _code.text).trim();
-    final percent = int.tryParse(_discount.text.trim());
-    if (code.isEmpty || percent == null || percent < 1 || percent > 100) {
-      _snack('Enter a code and discount between 1–100%.');
+    if (code.isEmpty) {
+      _snack('Enter a code.');
       return;
+    }
+    int? percent;
+    int? amountCentavos;
+    if (_discountKind == 'amount') {
+      final pesos = double.tryParse(_discount.text.trim().replaceAll(',', ''));
+      if (pesos == null || pesos < 1 || pesos > 1489) {
+        _snack('Enter a peso discount between ₱1 and ₱1,489.');
+        return;
+      }
+      amountCentavos = (pesos * 100).round();
+    } else {
+      percent = int.tryParse(_discount.text.trim());
+      if (percent == null || percent < 1 || percent > 100) {
+        _snack('Enter a discount between 1–100%.');
+        return;
+      }
     }
     final maxRaw = _maxUses.text.trim();
     final maxUses = maxRaw.isEmpty ? null : int.tryParse(maxRaw);
@@ -113,7 +136,9 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
           : null;
       await service.upsertVoucher(
         code: code,
+        discountKind: _discountKind,
         discountPercent: percent,
+        discountAmountCentavos: amountCentavos,
         label: _label.text,
         active: _active,
         maxUses: maxUses,
@@ -142,7 +167,9 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
     try {
       await service.upsertVoucher(
         code: row.code,
-        discountPercent: row.discountPercent,
+        discountKind: row.isAmountOff ? 'amount' : 'percent',
+        discountPercent: row.isAmountOff ? null : row.discountPercent,
+        discountAmountCentavos: row.isAmountOff ? row.discountAmountCentavos : null,
         label: row.label,
         active: !row.active,
         expiresAt: row.expiresAt,
@@ -194,6 +221,7 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final vouchersAsync = ref.watch(adminVouchersProvider);
+    final canWrite = ref.watch(adminCanWriteProvider);
     final narrow = MediaQuery.sizeOf(context).width < 960;
 
     return vouchersAsync.when(
@@ -236,11 +264,12 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
                       ],
                     ),
                   ),
-                  FilledButton.icon(
-                    onPressed: _openCreate,
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('New voucher'),
-                  ),
+                  if (canWrite)
+                    FilledButton.icon(
+                      onPressed: _openCreate,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('New voucher'),
+                    ),
                 ],
               ),
               const SizedBox(height: 18),
@@ -272,7 +301,7 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
                     children: [
                       _MiniStat(label: 'Active codes', value: '$activeCount', t: t),
                       _MiniStat(label: 'Redemptions', value: '$redemptions', t: t),
-                      _MiniStat(label: 'GCash & Maya', value: 'PayMongo', t: t),
+                      _MiniStat(label: 'Card · GCash · Maya', value: 'PayMongo', t: t),
                       _MiniStat(label: 'Store IAP', value: 'Unchanged', t: t),
                     ],
                   );
@@ -294,6 +323,8 @@ class _AdminVouchersPageState extends ConsumerState<AdminVouchersPage> {
           code: _code,
           label: _label,
           discount: _discount,
+          discountKind: _discountKind,
+          onDiscountKind: (v) => setState(() => _discountKind = v),
           maxUses: _maxUses,
           active: _active,
           hasExpiry: _hasExpiry,
@@ -488,7 +519,7 @@ class _TableRow extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Text('${row.discountPercent}%', style: AppTokens.mono(size: 12, color: t.text)),
+            child: Text(row.discountLabel, style: AppTokens.mono(size: 12, color: t.text)),
           ),
           Expanded(
             child: Text(
@@ -595,6 +626,8 @@ class _VoucherEditorPage extends StatelessWidget {
     required this.code,
     required this.label,
     required this.discount,
+    required this.discountKind,
+    required this.onDiscountKind,
     required this.maxUses,
     required this.active,
     required this.hasExpiry,
@@ -612,6 +645,8 @@ class _VoucherEditorPage extends StatelessWidget {
   final TextEditingController code;
   final TextEditingController label;
   final TextEditingController discount;
+  final String discountKind;
+  final ValueChanged<String> onDiscountKind;
   final TextEditingController maxUses;
   final bool active;
   final bool hasExpiry;
@@ -674,13 +709,28 @@ class _VoucherEditorPage extends StatelessWidget {
                 decoration: const InputDecoration(hintText: 'Student discount'),
               ),
               const SizedBox(height: 14),
-              Text('Discount (%)', style: AppTokens.sectionLabel(t.textFaint)),
-              const SizedBox(height: 6),
+              Text('Discount', style: AppTokens.sectionLabel(t.textFaint)),
+              const SizedBox(height: 8),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'percent', label: Text('% off')),
+                  ButtonSegment(value: 'amount', label: Text('₱ off')),
+                ],
+                selected: {discountKind},
+                onSelectionChanged: saving
+                    ? null
+                    : (s) => onDiscountKind(s.first),
+              ),
+              const SizedBox(height: 8),
               TextField(
                 controller: discount,
                 enabled: !saving,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(hintText: '20'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  hintText: discountKind == 'amount' ? '99' : '100',
+                  prefixText: discountKind == 'amount' ? '₱ ' : null,
+                  suffixText: discountKind == 'amount' ? null : '%',
+                ),
               ),
               const SizedBox(height: 14),
               Text('Redemption limit', style: AppTokens.sectionLabel(t.textFaint)),
@@ -726,7 +776,7 @@ class _VoucherEditorPage extends StatelessWidget {
                 title: const Text('Active'),
                 subtitle: Text(
                   active
-                      ? 'Redeemable at GCash & Maya checkout.'
+                      ? 'Redeemable at card, GCash & Maya checkout.'
                       : 'Paused — code will be rejected at checkout.',
                   style: TextStyle(fontSize: 12, color: t.textMuted),
                 ),

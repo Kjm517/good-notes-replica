@@ -17,6 +17,18 @@ class EnvConfig {
     defaultValue: '',
   );
 
+  /// Supabase project URL (no /rest/v1). Used when `.env` is not bundled (web).
+  static const supabaseUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: '',
+  );
+
+  /// Supabase anon / publishable key.
+  static const supabaseAnonKey = String.fromEnvironment(
+    'SUPABASE_ANON_KEY',
+    defaultValue: '',
+  );
+
   static bool get hasFileSync => fileEndpoint.isNotEmpty;
   static bool get hasGemini => geminiApiKey.isNotEmpty;
 }

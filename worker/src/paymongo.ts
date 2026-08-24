@@ -1,10 +1,21 @@
 const PAYMONGO_BASE = 'https://api.paymongo.com/v1';
+const PAYMONGO_V2_BASE = 'https://api.paymongo.com/v2';
 
-export type PayMongoWallet = 'gcash' | 'paymaya';
+/** E-wallets plus debit/credit card (card uses hosted Checkout). */
+export type PayMongoMethod = 'gcash' | 'paymaya' | 'card';
+
+/** @deprecated Prefer [PayMongoMethod]. */
+export type PayMongoWallet = PayMongoMethod;
 
 export interface PayMongoEnv {
   PAYMONGO_SECRET_KEY?: string;
   PAYMONGO_WEBHOOK_SECRET?: string;
+}
+
+export const PAYMONGO_METHODS: PayMongoMethod[] = ['card', 'gcash', 'paymaya'];
+
+export function isPayMongoMethod(value: unknown): value is PayMongoMethod {
+  return value === 'gcash' || value === 'paymaya' || value === 'card';
 }
 
 interface PayMongoResource<T> {
@@ -17,9 +28,10 @@ interface PayMongoResource<T> {
 async function payMongoRequest<T>(
   secretKey: string,
   path: string,
-  init?: { method?: string; body?: unknown },
+  init?: { method?: string; body?: unknown; base?: string },
 ): Promise<PayMongoResource<T>> {
-  const response = await fetch(`${PAYMONGO_BASE}${path}`, {
+  const base = init?.base ?? PAYMONGO_BASE;
+  const response = await fetch(`${base}${path}`, {
     method: init?.method ?? (init?.body ? 'POST' : 'GET'),
     headers: {
       Authorization: `Basic ${btoa(`${secretKey}:`)}`,
@@ -54,11 +66,37 @@ async function payMongoRequest<T>(
   return json as PayMongoResource<T>;
 }
 
+/**
+ * Creates a PayMongo redirect checkout for GCash, Maya, or card.
+ * Card uses hosted Checkout Sessions (card details never touch our app).
+ * Wallets keep the Payment Intent + attach redirect flow.
+ */
+export async function createMethodCheckout(
+  secretKey: string,
+  opts: {
+    amountCentavos: number;
+    method: PayMongoMethod;
+    returnUrl: string;
+    cancelUrl?: string;
+    description: string;
+    metadata: Record<string, string>;
+  },
+): Promise<{ redirectUrl: string; paymentIntentId: string }> {
+  if (opts.method === 'card') {
+    return createCardCheckoutSession(secretKey, opts);
+  }
+  return createWalletCheckout(secretKey, {
+    ...opts,
+    wallet: opts.method,
+  });
+}
+
+/** @deprecated Use [createMethodCheckout]. */
 export async function createWalletCheckout(
   secretKey: string,
   opts: {
     amountCentavos: number;
-    wallet: PayMongoWallet;
+    wallet: Exclude<PayMongoMethod, 'card'>;
     returnUrl: string;
     description: string;
     metadata: Record<string, string>;
@@ -119,6 +157,58 @@ export async function createWalletCheckout(
   }
 
   return { redirectUrl, paymentIntentId: intent.data.id };
+}
+
+/** Debit/credit via PayMongo Hosted Checkout — card form is on their page. */
+async function createCardCheckoutSession(
+  secretKey: string,
+  opts: {
+    amountCentavos: number;
+    returnUrl: string;
+    cancelUrl?: string;
+    description: string;
+    metadata: Record<string, string>;
+  },
+): Promise<{ redirectUrl: string; paymentIntentId: string }> {
+  const session = await payMongoRequest<{
+    checkout_url?: string;
+    payment_intent?: { id?: string } | null;
+  }>(secretKey, '/checkout_sessions', {
+    base: PAYMONGO_V2_BASE,
+    body: {
+      data: {
+        attributes: {
+          send_email_receipt: true,
+          show_description: true,
+          show_line_items: true,
+          description: opts.description,
+          line_items: [
+            {
+              currency: 'PHP',
+              amount: opts.amountCentavos,
+              name: opts.description,
+              quantity: 1,
+            },
+          ],
+          payment_method_types: ['card'],
+          success_url: opts.returnUrl,
+          cancel_url: opts.cancelUrl ?? opts.returnUrl,
+          metadata: opts.metadata,
+        },
+      },
+    },
+  });
+
+  const redirectUrl = session.data.attributes.checkout_url;
+  if (!redirectUrl) {
+    throw new Error('PayMongo did not return a card checkout URL.');
+  }
+
+  // v2 may defer the payment intent; track the session id until webhook fires.
+  const paymentIntentId =
+    session.data.attributes.payment_intent?.id ?? session.data.id;
+
+  return { redirectUrl, paymentIntentId };
 }
 
 export async function retrievePaymentIntent(
@@ -191,29 +281,72 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 export function extractWebhookMetadata(body: unknown): Record<string, string> {
   if (typeof body !== 'object' || body === null) return {};
-  const root = body as {
-    data?: {
-      attributes?: {
-        type?: string;
-        data?: {
-          attributes?: {
-            metadata?: Record<string, string>;
-            payment_intent_id?: string;
-          };
-        };
-      };
-    };
-  };
+  // Support classic payment.paid nesting and checkout_session.payment.paid.
+  const root = body as Record<string, unknown>;
+  const data = root.data as Record<string, unknown> | undefined;
+  if (!data) return {};
 
-  const direct = root.data?.attributes?.data?.attributes?.metadata;
-  if (direct && typeof direct === 'object') return direct;
+  const attrs = data.attributes as Record<string, unknown> | undefined;
+  const nestedResource = attrs?.data as Record<string, unknown> | undefined;
+  const nestedAttrs = nestedResource?.attributes as
+    | Record<string, unknown>
+    | undefined;
+  if (nestedAttrs?.metadata && typeof nestedAttrs.metadata === 'object') {
+    return nestedAttrs.metadata as Record<string, string>;
+  }
+
+  const session = data.data as Record<string, unknown> | undefined;
+  const sessionAttrs = session?.attributes as Record<string, unknown> | undefined;
+  if (sessionAttrs?.metadata && typeof sessionAttrs.metadata === 'object') {
+    return sessionAttrs.metadata as Record<string, string>;
+  }
+
+  const intent = sessionAttrs?.payment_intent as Record<string, unknown> | undefined;
+  const intentAttrs = intent?.attributes as Record<string, unknown> | undefined;
+  if (intentAttrs?.metadata && typeof intentAttrs.metadata === 'object') {
+    return intentAttrs.metadata as Record<string, string>;
+  }
+
+  if (attrs?.metadata && typeof attrs.metadata === 'object') {
+    return attrs.metadata as Record<string, string>;
+  }
 
   return {};
 }
 
 export function extractPaymentIntentId(body: unknown): string | null {
   if (typeof body !== 'object' || body === null) return null;
-  const attrs = (body as { data?: { attributes?: { data?: { attributes?: { payment_intent_id?: string } } } } })
-    .data?.attributes?.data?.attributes;
-  return attrs?.payment_intent_id ?? null;
+  const root = body as Record<string, unknown>;
+  const data = root.data as Record<string, unknown> | undefined;
+  if (!data) return null;
+
+  const attrs = data.attributes as Record<string, unknown> | undefined;
+  const nestedResource = attrs?.data as Record<string, unknown> | undefined;
+  const nestedAttrs = nestedResource?.attributes as
+    | Record<string, unknown>
+    | undefined;
+  const classic = nestedAttrs?.payment_intent_id;
+  if (typeof classic === 'string' && classic) return classic;
+
+  const session = data.data as Record<string, unknown> | undefined;
+  const sessionAttrs = session?.attributes as Record<string, unknown> | undefined;
+  const intent = sessionAttrs?.payment_intent as Record<string, unknown> | undefined;
+  if (typeof intent?.id === 'string' && intent.id) return intent.id;
+
+  if (typeof session?.id === 'string' && session.id.startsWith('cs_')) {
+    return session.id;
+  }
+
+  return null;
+}
+
+export function extractWebhookEventType(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const root = body as Record<string, unknown>;
+  const data = root.data as Record<string, unknown> | undefined;
+  if (!data) return null;
+  const attrs = data.attributes as Record<string, unknown> | undefined;
+  if (typeof attrs?.type === 'string') return attrs.type;
+  if (typeof data.type === 'string') return data.type;
+  return null;
 }

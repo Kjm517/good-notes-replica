@@ -30,6 +30,7 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
+/build
 /build/
 /coverage/
 
@@ -39,14 +40,15 @@ app.*.symbols
 # Obfuscation related
 app.*.map.json
 
-# Local secrets / sync endpoint (copy from .env.example)
+# Local secrets — never commit real keys
 .env
+.env.*
+!.env.example
+!.env*.example
 .dart_defines.json
+assets/env
 
 # Android Studio will place build artifacts here
 /android/app/debug
 /android/app/profile
 /android/app/release
-
-# Environment variables (API keys)
-.env

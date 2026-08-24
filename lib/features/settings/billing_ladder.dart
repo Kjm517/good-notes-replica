@@ -1,6 +1,9 @@
 import 'billing_plan.dart';
 
-/// Public voucher codes (mirrored in worker `DEFAULT_STORE` on first deploy).
+/// Promo codes for PayMongo checkout (card, GCash, Maya).
+///
+/// Stored on the worker and managed from `/admin/vouchers`. These constants
+/// are the defaults on first deploy — they are not shown in customer UI.
 const kStudentVoucherCode = 'STUDENT20';
 const kLaunchVoucherCode = 'LAUNCH99';
 
@@ -22,17 +25,3 @@ bool qualifiesForStudentPricing(String? email) {
   const suffixes = ['.edu', '.edu.ph', '.ac.ph'];
   return suffixes.any((s) => lower.endsWith(s));
 }
-
-String studentPricingHint() =>
-    'Students with a .edu email get ${formatPhp(kStudentMonthlyPhp)}/mo automatically '
-    '(or use $kStudentVoucherCode).';
-
-String launchPricingHint() =>
-    'Early adopters: use $kLaunchVoucherCode for ${formatPhp(kLaunchMonthlyPhp)} '
-    'your first month (GCash & Maya).';
-
-String freeTierSummary() =>
-    '5 GB storage · AI quizzes unlock with Premium or trial';
-
-String premiumTierSummary() =>
-    'Unlimited AI quizzes · quiz history · cloud sync · 15 GB storage';

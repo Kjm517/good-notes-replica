@@ -40,21 +40,33 @@ $$;
 revoke all on function public.is_admin(uuid) from public;
 grant execute on function public.is_admin(uuid) to authenticated, anon, service_role;
 
+create or replace function public.is_staff(uid uuid default auth.uid())
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.admins a
+    where a.user_id = uid and a.role in ('admin', 'viewer')
+  );
+$$;
+
+revoke all on function public.is_staff(uuid) from public;
+grant execute on function public.is_staff(uuid) to authenticated, anon, service_role;
+
 drop policy if exists "admins read own" on public.admins;
 drop policy if exists "admins read all" on public.admins;
 drop policy if exists "admins insert" on public.admins;
 drop policy if exists "admins update" on public.admins;
 drop policy if exists "admins delete" on public.admins;
 
--- Signed-in user can see their own row. This is the one the Worker's
--- membership check needs, and it is deliberately not routed through
--- is_admin(): the whole point is that it works before you know the answer.
 create policy "admins read own" on public.admins
   for select using (auth.uid() = user_id);
 
--- Existing admins can list the whole team.
 create policy "admins read all" on public.admins
-  for select using (public.is_admin());
+  for select using (public.is_staff());
 
 create policy "admins insert" on public.admins
   for insert with check (public.is_admin());
@@ -67,6 +79,39 @@ create policy "admins delete" on public.admins
 
 grant select, insert, update, delete on public.admins to authenticated;
 grant all on public.admins to service_role;
+
+-- Admin console: delete an Auth user without the service_role JWT.
+-- The worker calls this via PostgREST using the signed-in admin's access
+-- token + the public anon key. security definer runs as the function owner
+-- (postgres), who can delete from auth.users; is_admin() still sees the
+-- caller's JWT via auth.uid().
+create or replace function public.admin_delete_auth_user(target uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n int;
+begin
+  if not public.is_admin() then
+    raise exception 'Admin access required.';
+  end if;
+  if target is null then
+    raise exception 'target is required.';
+  end if;
+  if target = auth.uid() then
+    raise exception 'You cannot delete your own account from here.';
+  end if;
+
+  delete from auth.users where id = target;
+  get diagnostics n = row_count;
+  return n > 0;
+end;
+$$;
+
+revoke all on function public.admin_delete_auth_user(uuid) from public;
+grant execute on function public.admin_delete_auth_user(uuid) to authenticated, service_role;
 
 -- Bootstrap YOUR account as admin (change the email).
 -- Matched case-insensitively against auth.users, so the row can only ever

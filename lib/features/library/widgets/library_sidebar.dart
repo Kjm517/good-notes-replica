@@ -118,19 +118,7 @@ class _Brand extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(24, 22, 24, 20),
       child: Row(
         children: [
-          Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: t.accent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(
-              Icons.draw_rounded,
-              size: 16,
-              color: Colors.white,
-            ),
-          ),
+          const AppMark(size: 26),
           const SizedBox(width: 10),
           Text(
             'Notably',

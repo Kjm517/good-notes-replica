@@ -13,6 +13,8 @@ import '../../app/providers.dart';
 import '../../core/sync/sync_providers.dart';
 import '../../core/sync/sync_state.dart';
 import '../auth/providers.dart';
+import '../legal/legal_copy.dart';
+import '../legal/legal_sheet.dart';
 import 'entitlements.dart';
 import 'about_notably_sheet.dart';
 import 'bug_report_sheet.dart';
@@ -20,6 +22,7 @@ import 'paymongo_billing.dart';
 import 'premium_plan_sheet.dart';
 import 'premium_providers.dart';
 import 'settings_widgets.dart';
+import '../pwa/pwa_install.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -32,8 +35,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    // Pick up admin/plan changes as soon as Settings opens, not only on resume.
-    Future.microtask(() {
+    // Re-check worker entitlement whenever Settings opens so an admin revoke
+    // shows up without requiring a full app restart.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(ref.read(payMongoEntitlementRefreshProvider)());
     });
   }
@@ -91,6 +95,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   label: 'Support',
                   child: _SupportSection(),
                 ),
+                if (kIsWeb)
+                  SettingsSection(
+                    label: 'App',
+                    child: SettingsGroupCard(
+                      children: [
+                        SettingsRow(
+                          icon: Icons.install_desktop_outlined,
+                          title: pwaIsStandalone()
+                              ? 'Installed'
+                              : 'Install Notably',
+                          subtitle: pwaIsStandalone()
+                              ? 'Running as an installed app'
+                              : pwaInstallAvailable()
+                                  ? 'Add to your home screen or apps list'
+                                  : 'Chrome menu → Cast, save, and share → Install Notably',
+                          onTap: pwaIsStandalone()
+                              ? null
+                              : () async {
+                                  final ok = await promptPwaInstall();
+                                  if (!context.mounted || ok) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Use the Chrome install icon in the address bar, or the browser menu.',
+                                      ),
+                                    ),
+                                  );
+                                },
+                        ),
+                      ],
+                    ),
+                  ),
                 if (kIsWeb)
                   SettingsSection(
                     label: 'Admin',
@@ -302,11 +338,14 @@ class _GoPremiumCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             trialExpired
-                ? 'Your 7-day trial has ended. Premium from ${monthlyPriceLabel()} '
-                    '(students ${formatPhp(kStudentMonthlyPhp)}/mo) keeps AI quizzes, '
-                    'history, and 15 GB storage.'
-                : 'Start a 7-day trial with $kTrialQuizLimit AI quizzes, or go Premium from '
-                    '${monthlyPriceLabel()} — ${yearlyPriceLabel()} ${yearlySavingsLabel().toLowerCase()}.',
+                ? (kIsWeb
+                    ? 'Your trial has ended. On the web, Premium is card, GCash, or Maya from ${monthlyPriceLabel()}.'
+                    : 'Your 7-day trial has ended. Premium from ${monthlyPriceLabel()} '
+                        'keeps unlimited AI quizzes, history, and 15 GB storage.')
+                : (kIsWeb
+                    ? 'Premium on the web is billed with card, GCash, or Maya from ${monthlyPriceLabel()} — not Google Play.'
+                    : 'Start a 7-day trial with $kTrialQuizLimit AI quizzes, or go Premium from '
+                        '${monthlyPriceLabel()} — ${yearlyPriceLabel()} ${yearlySavingsLabel().toLowerCase()}.'),
             style: TextStyle(fontSize: 13, color: t.textSecondary, height: 1.4),
           ),
           const SizedBox(height: 16),
@@ -527,6 +566,18 @@ class _AboutSection extends StatelessWidget {
           subtitle: 'Version $kAppVersion',
           trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
           onTap: () => AboutNotablySheet.show(context),
+        ),
+        SettingsRow(
+          icon: Icons.description_outlined,
+          title: 'Terms of Use',
+          trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
+          onTap: () => LegalSheet.show(context, initial: LegalDoc.terms),
+        ),
+        SettingsRow(
+          icon: Icons.privacy_tip_outlined,
+          title: 'Privacy Policy',
+          trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
+          onTap: () => LegalSheet.show(context, initial: LegalDoc.privacy),
         ),
       ],
     );

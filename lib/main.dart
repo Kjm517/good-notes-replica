@@ -30,10 +30,23 @@ Future<Widget> bootstrap() async {
   pdfrxFlutterInitialize();
 
   // Load .env before anything else so API keys are available.
-  try {
-    await dotenv.load(fileName: '.env');
-  } catch (e) {
-    debugPrint('Could not load .env (Gemini will be unavailable): $e');
+  // Web cannot serve files that start with `.`, so sync-env also writes
+  // assets/env (no leading dot) for Chrome / Flutter web.
+  var envLoaded = false;
+  for (final name in ['.env', 'assets/env']) {
+    try {
+      await dotenv.load(fileName: name);
+      envLoaded = true;
+      break;
+    } catch (e) {
+      debugPrint('Could not load $name: $e');
+    }
+  }
+  if (!envLoaded) {
+    debugPrint(
+      'No .env / assets/env found. Compile with --dart-define-from-file=.dart_defines.json '
+      'or run scripts/sync-env.sh',
+    );
   }
 
   // Never fatal: if Supabase isn't configured the app runs local-only.

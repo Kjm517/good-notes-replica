@@ -45,8 +45,9 @@ class AboutNotablySheet extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'A GoodNotes-style notebook for Android, iOS, and web — '
-                'handwriting, PDFs, AI quizzes, and cloud sync.',
+                'Take notes comfortably. Think notably.\n\n'
+                'Handwrite, mark up PDFs, and turn them into practice quizzes. '
+                'The same library on phone, tablet, and web.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,

@@ -9,22 +9,34 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/providers.dart';
 import '../../app/supabase_bootstrap.dart';
 import '../../core/sync/sync_providers.dart';
+import '../auth/data/auth_repository.dart';
 import '../auth/providers.dart';
 import 'billing_plan.dart';
 import 'entitlements.dart';
 import 'premium_providers.dart';
 
-enum PayMongoWallet { gcash, paymaya }
+enum PayMongoMethod { card, gcash, paymaya }
 
-extension PayMongoWalletApi on PayMongoWallet {
+/// Legacy alias — prefer [PayMongoMethod].
+typedef PayMongoWallet = PayMongoMethod;
+
+extension PayMongoMethodApi on PayMongoMethod {
   String get apiValue => switch (this) {
-        PayMongoWallet.gcash => 'gcash',
-        PayMongoWallet.paymaya => 'paymaya',
+        PayMongoMethod.card => 'card',
+        PayMongoMethod.gcash => 'gcash',
+        PayMongoMethod.paymaya => 'paymaya',
       };
 
   String get label => switch (this) {
-        PayMongoWallet.gcash => 'GCash',
-        PayMongoWallet.paymaya => 'Maya',
+        PayMongoMethod.card => 'Card',
+        PayMongoMethod.gcash => 'GCash',
+        PayMongoMethod.paymaya => 'Maya',
+      };
+
+  String get subtitle => switch (this) {
+        PayMongoMethod.card => 'Visa · Mastercard · JCB',
+        PayMongoMethod.gcash => '',
+        PayMongoMethod.paymaya => '',
       };
 }
 
@@ -56,12 +68,14 @@ class PayMongoEntitlement {
 
 class PayMongoCheckout {
   const PayMongoCheckout({
-    required this.redirectUrl,
-    required this.paymentIntentId,
+    this.redirectUrl,
+    this.paymentIntentId,
+    this.granted = false,
   });
 
-  final String redirectUrl;
-  final String paymentIntentId;
+  final String? redirectUrl;
+  final String? paymentIntentId;
+  final bool granted;
 }
 
 const _pendingCheckoutKey = 'paymongo_pending_checkout';
@@ -74,7 +88,6 @@ final payMongoSignedInProvider = Provider<bool>((ref) {
 
 /// Whether wallet checkout can run (native + signed-in user).
 final payMongoAvailableProvider = Provider<bool>((ref) {
-  if (kIsWeb) return false;
   return ref.watch(payMongoSignedInProvider);
 });
 
@@ -100,6 +113,20 @@ const _entitlementPollInterval = Duration(seconds: 12);
 
 final payMongoSyncProvider = Provider<void>((ref) {
   if (!ref.watch(payMongoSignedInProvider)) return;
+
+  ref.listen<AsyncValue<AppUser?>>(authStateProvider, (prev, next) {
+    final prevUid = prev?.asData?.value?.uid;
+    final nextUid = next.asData?.value?.uid;
+    if (prevUid == nextUid) return;
+    ref.read(payMongoEntitlementSyncedProvider.notifier).state = false;
+    ref.read(payMongoPremiumActiveProvider.notifier).state = false;
+    if (nextUid != null) {
+      Future.microtask(() {
+        unawaited(ref.read(payMongoEntitlementRefreshProvider)());
+      });
+    }
+  });
+
   var inFlight = false;
   Future<void> tick() async {
     if (inFlight) return;
@@ -121,10 +148,14 @@ final payMongoEntitlementRefreshProvider = Provider<Future<void> Function()>(
   (ref) {
     return () async {
       final service = ref.read(payMongoBillingServiceProvider);
-      if (service == null) return;
+      if (service == null) {
+        ref.read(payMongoEntitlementSyncedProvider.notifier).state = false;
+        ref.read(payMongoPremiumActiveProvider.notifier).state = false;
+        return;
+      }
       try {
         final entitlement = await service.fetchEntitlement();
-        applyPayMongoEntitlement(ref, entitlement);
+        await applyPayMongoEntitlement(ref, entitlement);
         if (entitlement.isPremium) {
           await service.clearPendingCheckout();
         }
@@ -135,31 +166,30 @@ final payMongoEntitlementRefreshProvider = Provider<Future<void> Function()>(
   },
 );
 
-void applyPayMongoEntitlement(Ref ref, PayMongoEntitlement entitlement) {
-  final wasPremium = ref.read(payMongoPremiumActiveProvider);
-  final currentPlan = ref.read(billingPlanProvider);
-  final nextPlan = entitlement.isPremium
-      ? (entitlement.plan ?? BillingPlan.lifetime)
-      : BillingPlan.none;
-  if (wasPremium == entitlement.isPremium) {
-    if (!entitlement.isPremium) return;
-    if (currentPlan == nextPlan) return;
+Future<void> applyPayMongoEntitlement(
+  Ref ref,
+  PayMongoEntitlement entitlement,
+) async {
+  // 1) Persist / clear local plan first (prefs + notifier state).
+  if (entitlement.isPremium && entitlement.plan != null) {
+    await ref.read(billingPlanProvider.notifier).syncFromPayMongo(
+          plan: entitlement.plan!,
+          expiresAt: entitlement.expiresAt,
+        );
+  } else {
+    await ref.read(billingPlanProvider.notifier).clearLocalPremium(force: true);
   }
 
+  // 2) Then publish live flags. isPremiumProvider watches these; do not
+  // invalidate billingPlanProvider here (that caused CircularDependencyError).
   ref.read(payMongoPremiumActiveProvider.notifier).state =
       entitlement.isPremium;
-  if (entitlement.isPremium) {
-    unawaited(
-      ref.read(billingPlanProvider.notifier).syncFromPayMongo(
-            plan: nextPlan,
-            expiresAt: entitlement.expiresAt,
-          ),
-    );
-  } else if (!ref.read(rcPremiumActiveProvider)) {
-    unawaited(ref.read(billingPlanProvider.notifier).clearFromPayMongo());
-  }
-  ref.invalidate(isPremiumProvider);
-  ref.read(entitlementServiceProvider).refresh();
+  ref.read(payMongoEntitlementSyncedProvider.notifier).state = true;
+
+  // 3) Refresh derived entitlement UI off the current call stack.
+  Future.microtask(() {
+    ref.read(entitlementServiceProvider).refresh();
+  });
 }
 
 class PayMongoBillingService {
@@ -191,7 +221,7 @@ class PayMongoBillingService {
 
   Future<PayMongoCheckout> createCheckout({
     required BillingPlan plan,
-    required PayMongoWallet wallet,
+    required PayMongoMethod method,
     String? voucher,
   }) async {
     final headers = await _authHeaders();
@@ -200,7 +230,8 @@ class PayMongoBillingService {
       headers: headers,
       body: jsonEncode({
         'plan': plan.name,
-        'wallet': wallet.apiValue,
+        'method': method.apiValue,
+        'wallet': method.apiValue,
         if (voucher != null && voucher.trim().isNotEmpty)
           'voucher': voucher.trim(),
       }),
@@ -212,8 +243,9 @@ class PayMongoBillingService {
     }
     final map = body as Map<String, dynamic>;
     return PayMongoCheckout(
-      redirectUrl: map['redirectUrl'] as String,
-      paymentIntentId: map['paymentIntentId'] as String,
+      granted: map['granted'] == true,
+      redirectUrl: map['redirectUrl'] as String?,
+      paymentIntentId: map['paymentIntentId'] as String?,
     );
   }
 

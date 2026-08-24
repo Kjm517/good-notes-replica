@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'env_config.dart';
+
 /// Whether Supabase started successfully this run.
 ///
 /// The app is usable without it: notes stay local, and sign-in/sync stay
@@ -24,6 +26,7 @@ String get kSupabaseUrl {
       final v = dotenv.env['SUPABASE_URL']?.trim() ?? '';
       if (v.isNotEmpty) return v;
     }
+    if (EnvConfig.supabaseUrl.isNotEmpty) return EnvConfig.supabaseUrl;
     return const String.fromEnvironment('SUPABASE_URL');
   }();
   // Project URL only — never include /rest/v1 (that breaks Auth paths).
@@ -35,6 +38,7 @@ String get kSupabaseAnonKey {
     final v = dotenv.env['SUPABASE_ANON_KEY']?.trim() ?? '';
     if (v.isNotEmpty) return v;
   }
+  if (EnvConfig.supabaseAnonKey.isNotEmpty) return EnvConfig.supabaseAnonKey;
   return const String.fromEnvironment('SUPABASE_ANON_KEY');
 }
 
