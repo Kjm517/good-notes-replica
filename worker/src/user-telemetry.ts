@@ -27,6 +27,7 @@ export async function handleUserTelemetry(
       subject?: string;
       description?: string;
       device?: string;
+      attachments?: Array<{ name?: string; mime?: string; data?: string }>;
     };
     if (!body.description?.trim()) {
       return json({ error: 'description is required.' }, 400);
@@ -38,6 +39,13 @@ export async function handleUserTelemetry(
       subject: body.subject?.trim() || 'Notably bug report',
       description: body.description,
       device: body.device?.trim() || 'unknown',
+      attachments: (body.attachments ?? [])
+        .filter((a) => a.data && a.mime)
+        .map((a) => ({
+          name: a.name ?? 'screenshot',
+          mime: a.mime ?? 'image/jpeg',
+          data: a.data ?? '',
+        })),
     });
     return json({ report });
   }

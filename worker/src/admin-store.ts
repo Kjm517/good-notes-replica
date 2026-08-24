@@ -21,6 +21,12 @@ export interface UsersIndex {
 
 export type BugStatus = 'open' | 'triaged' | 'resolved' | 'closed';
 
+export interface BugAttachment {
+  key: string;
+  name: string;
+  mime: string;
+}
+
 export interface BugReport {
   id: string;
   uid: string;
@@ -32,6 +38,9 @@ export interface BugReport {
   status: BugStatus;
   createdAt: string;
   updatedAt: string;
+  attachments?: BugAttachment[];
+  adminReply?: string;
+  adminReplyAt?: string;
 }
 
 export interface BugStore {
@@ -147,6 +156,54 @@ export class AdminCheckUnavailable extends Error {
   }
 }
 
+export type StaffRole = 'admin' | 'viewer';
+
+export async function staffRoleForUid(
+  uid: string,
+  env: {
+    ADMIN_UIDS?: string;
+    BUCKET: R2Bucket;
+    SUPABASE_URL?: string;
+    SUPABASE_ANON_KEY?: string;
+    SUPABASE_SERVICE_ROLE_KEY?: string;
+  },
+  userAccessToken?: string,
+): Promise<StaffRole | null> {
+  // Optional bootstrap fallback while migrating off wrangler ADMIN_UIDS.
+  if (parseAdminUids(env.ADMIN_UIDS).has(uid)) return 'admin';
+
+  let lookupFailure: string | undefined;
+  if (env.SUPABASE_URL) {
+    const { getAdminRole } = await import('./admins-db');
+    try {
+      const role = await getAdminRole(
+        {
+          SUPABASE_URL: env.SUPABASE_URL,
+          SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY,
+          SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+        },
+        uid,
+        userAccessToken,
+      );
+      if (role === 'admin' || role === 'viewer') return role;
+    } catch (e) {
+      lookupFailure = e instanceof Error ? e.message : String(e);
+      console.error('admins table check failed:', e);
+    }
+  }
+
+  // Legacy R2 team list (pre-admins-table). Still authoritative if it grants
+  // access, so a broken Supabase lookup cannot lock out an existing admin.
+  const team = await readJson<TeamStore>(env.BUCKET, TEAM_KEY, { members: [] });
+  const member = team.members.find((m) => m.uid === uid);
+  if (member?.role === 'admin' || member?.role === 'viewer') return member.role;
+
+  // Nothing granted access, but the one source that should have known was
+  // unreachable. Saying "no" here would be a guess dressed as an answer.
+  if (lookupFailure) throw new AdminCheckUnavailable(lookupFailure);
+  return null;
+}
+
 export async function isAdminUid(
   uid: string,
   env: {
@@ -158,39 +215,19 @@ export async function isAdminUid(
   },
   userAccessToken?: string,
 ): Promise<boolean> {
-  // Optional bootstrap fallback while migrating off wrangler ADMIN_UIDS.
-  if (parseAdminUids(env.ADMIN_UIDS).has(uid)) return true;
+  return (await staffRoleForUid(uid, env, userAccessToken)) === 'admin';
+}
 
-  let lookupFailure: string | undefined;
-  if (env.SUPABASE_URL) {
-    const { isUserAdmin } = await import('./admins-db');
-    try {
-      if (
-        await isUserAdmin(
-          {
-            SUPABASE_URL: env.SUPABASE_URL,
-            SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY,
-            SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
-          },
-          uid,
-          userAccessToken,
-        )
-      ) {
-        return true;
-      }
-    } catch (e) {
-      lookupFailure = e instanceof Error ? e.message : String(e);
-      console.error('admins table check failed:', e);
-    }
-  }
-
-  // Legacy R2 team list (pre-admins-table). Still authoritative if it grants
-  // access, so a broken Supabase lookup cannot lock out an existing admin.
-  const team = await readJson<TeamStore>(env.BUCKET, TEAM_KEY, { members: [] });
-  if (team.members.some((m) => m.uid === uid && m.role === 'admin')) return true;
-
-  // Nothing granted access, but the one source that should have known was
-  // unreachable. Saying "no" here would be a guess dressed as an answer.
-  if (lookupFailure) throw new AdminCheckUnavailable(lookupFailure);
-  return false;
+export async function isStaffUid(
+  uid: string,
+  env: {
+    ADMIN_UIDS?: string;
+    BUCKET: R2Bucket;
+    SUPABASE_URL?: string;
+    SUPABASE_ANON_KEY?: string;
+    SUPABASE_SERVICE_ROLE_KEY?: string;
+  },
+  userAccessToken?: string,
+): Promise<boolean> {
+  return (await staffRoleForUid(uid, env, userAccessToken)) != null;
 }

@@ -1,4 +1,4 @@
-import { readBillingRecord, type BillingRecord, type BillingPlan } from './billing';
+import { readBillingRecord, type BillingRecord, type BillingPlan, LIFETIME_EXPIRES_AT } from './billing';
 import {
   appendAudit,
   type AiUsageEvent,
@@ -8,6 +8,7 @@ import {
   type AuditStore,
   BUGS_KEY,
   type BugReport,
+  type BugAttachment,
   type BugStatus,
   type BugStore,
   newId,
@@ -24,6 +25,7 @@ import {
 const PLAN_MRR_CENTAVOS: Record<BillingPlan, number> = {
   monthly: 19900,
   yearly: Math.round(149900 / 12),
+  lifetime: 0,
 };
 
 export interface AdminOverview {
@@ -162,7 +164,8 @@ export async function getOverview(
   const premium = rows.filter((r) => r.isPremium);
   const mrrPhp = premium.reduce((sum, r) => {
     if (r.plan === 'yearly') return sum + PLAN_MRR_CENTAVOS.yearly / 100;
-    return sum + PLAN_MRR_CENTAVOS.monthly / 100;
+    if (r.plan === 'monthly') return sum + PLAN_MRR_CENTAVOS.monthly / 100;
+    return sum;
   }, 0);
 
   const bugs = await readJson<BugStore>(bucket, BUGS_KEY, { reports: [] });
@@ -197,9 +200,32 @@ export async function getOverview(
 export async function listUsers(
   bucket: R2Bucket,
   query: string,
+  authHits: Array<{ id: string; email?: string; displayName?: string }> = [],
 ): Promise<AdminUserRow[]> {
   const q = query.trim().toLowerCase();
   const rows = await loadUserRows(bucket);
+  if (authHits.length > 0) {
+    const byUid = new Map(rows.map((r) => [r.uid, r]));
+    for (const hit of authHits) {
+      const existing = byUid.get(hit.id);
+      if (existing) {
+        existing.email = existing.email || hit.email;
+        existing.displayName = existing.displayName || hit.displayName;
+      } else {
+        rows.push({
+          uid: hit.id,
+          email: hit.email,
+          displayName: hit.displayName,
+          lastSeenAt: undefined,
+          storageBytes: 0,
+          fileCount: 0,
+          isPremium: false,
+          plan: null,
+          premiumExpiresAt: null,
+        });
+      }
+    }
+  }
   if (!q) return rows;
   return rows.filter(
     (r) =>
@@ -226,7 +252,9 @@ export async function listSubscriptions(
       mrrPhp: r.isPremium
         ? (r.plan === 'yearly'
             ? PLAN_MRR_CENTAVOS.yearly
-            : PLAN_MRR_CENTAVOS.monthly) / 100
+            : r.plan === 'monthly'
+              ? PLAN_MRR_CENTAVOS.monthly
+              : 0) / 100
         : 0,
     }));
 }
@@ -246,10 +274,13 @@ export async function setSubscription(
   let record: BillingRecord;
   if (body.isPremium) {
     const plan = body.plan ?? 'monthly';
+    if (plan !== 'monthly' && plan !== 'yearly' && plan !== 'lifetime') {
+      throw new Error('plan must be monthly, yearly, or lifetime.');
+    }
     let expiresAt: string;
-    if (body.expiresAt === null) {
-      // Explicit clear → treat as no expiry (still premium until revoked).
-      expiresAt = new Date('9999-12-31T23:59:59.000Z').toISOString();
+    if (body.expiresAt === null || plan === 'lifetime') {
+      // Explicit clear, or lifetime — still premium until revoked.
+      expiresAt = LIFETIME_EXPIRES_AT;
     } else if (body.expiresAt) {
       const parsed = new Date(body.expiresAt);
       if (Number.isNaN(parsed.getTime())) {
@@ -360,6 +391,42 @@ export async function deleteUserData(
   return { deletedObjects };
 }
 
+/** Delete a user's R2 files (PDFs/images) but keep billing.json. */
+export async function deleteUserFiles(
+  bucket: R2Bucket,
+  uid: string,
+  actor: { uid: string; email?: string },
+): Promise<{ deletedObjects: number }> {
+  const prefix = `users/${uid}/`;
+  let deletedObjects = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await bucket.list({ prefix, cursor, limit: 1000 });
+    for (const obj of page.objects) {
+      if (obj.key.endsWith('/billing.json')) continue;
+      await bucket.delete(obj.key);
+      deletedObjects += 1;
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  const index = await readJson<UsersIndex>(bucket, USERS_INDEX_KEY, { users: {} });
+  if (index.users[uid]) {
+    index.users[uid].storageBytes = 0;
+    index.users[uid].fileCount = 0;
+    await writeJson(bucket, USERS_INDEX_KEY, index);
+  }
+
+  await appendAudit(bucket, {
+    actorUid: actor.uid,
+    actorEmail: actor.email,
+    action: 'documents.delete',
+    target: uid,
+    detail: `objects=${deletedObjects}`,
+  });
+  return { deletedObjects };
+}
+
 export async function listDocuments(
   bucket: R2Bucket,
 ): Promise<AdminDocumentRow[]> {
@@ -383,12 +450,33 @@ export async function submitBugReport(
     subject: string;
     description: string;
     device: string;
+    attachments?: Array<{ name: string; mime: string; data: string }>;
   },
 ): Promise<BugReport> {
   const store = await readJson<BugStore>(bucket, BUGS_KEY, { reports: [] });
   const now = new Date().toISOString();
+  const id = newId('bug');
+  const attachments: BugAttachment[] = [];
+  const incoming = (input.attachments ?? []).slice(0, 3);
+  for (let i = 0; i < incoming.length; i += 1) {
+    const item = incoming[i];
+    const mime = (item.mime || 'application/octet-stream').slice(0, 80);
+    if (!mime.startsWith('image/')) continue;
+    const binary = Uint8Array.from(atob(item.data.replace(/^data:[^;]+;base64,/, '')), (c) =>
+      c.charCodeAt(0),
+    );
+    if (binary.byteLength === 0 || binary.byteLength > 1_500_000) continue;
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+    const key = `bugs/${id}/${i}.${ext}`;
+    await bucket.put(key, binary, { httpMetadata: { contentType: mime } });
+    attachments.push({
+      key,
+      name: (item.name || `screenshot-${i + 1}.${ext}`).slice(0, 80),
+      mime,
+    });
+  }
   const report: BugReport = {
-    id: newId('bug'),
+    id,
     uid: input.uid,
     email: input.email,
     category: input.category,
@@ -398,6 +486,7 @@ export async function submitBugReport(
     status: 'open',
     createdAt: now,
     updatedAt: now,
+    attachments: attachments.length > 0 ? attachments : undefined,
   };
   store.reports.unshift(report);
   store.reports = store.reports.slice(0, 200);
@@ -413,23 +502,47 @@ export async function listBugReports(bucket: R2Bucket): Promise<BugReport[]> {
 export async function updateBugStatus(
   bucket: R2Bucket,
   id: string,
-  status: BugStatus,
+  status: BugStatus | undefined,
   actor: { uid: string; email?: string },
+  reply?: string,
 ): Promise<BugReport | null> {
   const store = await readJson<BugStore>(bucket, BUGS_KEY, { reports: [] });
   const report = store.reports.find((r) => r.id === id);
   if (!report) return null;
-  report.status = status;
-  report.updatedAt = new Date().toISOString();
+  const now = new Date().toISOString();
+  if (status) report.status = status;
+  if (reply !== undefined) {
+    report.adminReply = reply.trim();
+    report.adminReplyAt = now;
+  }
+  report.updatedAt = now;
   await writeJson(bucket, BUGS_KEY, store);
   await appendAudit(bucket, {
     actorUid: actor.uid,
     actorEmail: actor.email,
-    action: 'bug.update',
+    action: reply ? 'bug.reply' : 'bug.update',
     target: id,
-    detail: status,
+    detail: [status, reply ? 'reply' : undefined].filter(Boolean).join(','),
   });
   return report;
+}
+
+export async function readBugAttachment(
+  bucket: R2Bucket,
+  id: string,
+  index: number,
+): Promise<{ body: ArrayBuffer; mime: string; name: string } | null> {
+  const store = await readJson<BugStore>(bucket, BUGS_KEY, { reports: [] });
+  const report = store.reports.find((r) => r.id === id);
+  const file = report?.attachments?.[index];
+  if (!file) return null;
+  const object = await bucket.get(file.key);
+  if (!object) return null;
+  return {
+    body: await object.arrayBuffer(),
+    mime: file.mime,
+    name: file.name,
+  };
 }
 
 export async function recordAiUsage(
@@ -571,4 +684,12 @@ export async function removeTeamMember(
 export async function listAudit(bucket: R2Bucket): Promise<AuditStore['entries']> {
   const store = await readJson<AuditStore>(bucket, AUDIT_KEY, { entries: [] });
   return store.entries;
+}
+
+/** Wipe the audit log. Returns how many entries were removed. */
+export async function clearAudit(bucket: R2Bucket): Promise<number> {
+  const store = await readJson<AuditStore>(bucket, AUDIT_KEY, { entries: [] });
+  const count = store.entries.length;
+  await writeJson(bucket, AUDIT_KEY, { entries: [] } satisfies AuditStore);
+  return count;
 }

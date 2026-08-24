@@ -28,10 +28,12 @@ Deploy prints a URL like `https://notably-files.<your>.workers.dev`.
 Pass it to the app when running:
 
 ```bash
-flutter run -d chrome --web-port=5000 --dart-define=NOTABLY_FILE_ENDPOINT=https://notably-files.<your>.workers.dev
+./scripts/run-chrome.sh
+# Windows:
+./scripts/run-chrome.ps1
 ```
 
-Or set `NOTABLY_FILE_ENDPOINT` in `.env`. Without that, the app skips file sync —
+Or set `NOTABLY_FILE_ENDPOINT` in `.env` and use the VS Code **Notably (Chrome, fixed port)** launch config. Without that, the app skips file sync —
 notes and annotations still sync via Supabase.
 
 ## Endpoints
