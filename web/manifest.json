@@ -3,7 +3,7 @@
     "short_name": "Notably",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0B1B4A",
+    "background_color": "#5759D3",
     "theme_color": "#5257D4",
     "description": "Take notes comfortably. Think notably — handwriting, PDFs, and quizzes on every device.",
     "orientation": "any",

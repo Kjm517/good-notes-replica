@@ -520,7 +520,7 @@ class _AiFeaturesCard extends ConsumerWidget {
     if (paused) return 'Paused — notes stay on this device';
     return switch (status.phase) {
       SyncPhase.disabled => 'Sign in to sync across devices',
-      SyncPhase.idle => 'Up to date',
+      SyncPhase.idle => status.message ?? 'Up to date',
       SyncPhase.syncing => status.progressMessage ?? 'Syncing…',
       SyncPhase.pending =>
         status.pendingChanges > 0

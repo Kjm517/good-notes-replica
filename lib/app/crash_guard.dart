@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 
 import 'url_strategy.dart';
 
@@ -25,7 +26,11 @@ Future<void> runGuarded(Future<Widget> Function() bootstrap) async {
 
   runZonedGuarded(
     () async {
-      WidgetsFlutterBinding.ensureInitialized();
+      final binding = WidgetsFlutterBinding.ensureInitialized();
+      // Keep the native launch image up until NotablyApp decides the session
+      // is ready — otherwise users see native splash, then a second Flutter
+      // splash with a different logo.
+      FlutterNativeSplash.preserve(widgetsBinding: binding);
       configureWebUrlStrategy();
 
       FlutterError.onError = (details) {
@@ -51,6 +56,7 @@ Future<void> runGuarded(Future<Widget> Function() bootstrap) async {
         runApp(app);
       } catch (error, stack) {
         debugPrint('Startup failed: $error\n$stack');
+        FlutterNativeSplash.remove();
         runApp(StartupFailureApp(error: error, stack: stack));
       }
     },
@@ -58,6 +64,7 @@ Future<void> runGuarded(Future<Widget> Function() bootstrap) async {
       debugPrint('Unhandled zone error: $error\n$stack');
       if (!started) {
         started = true;
+        FlutterNativeSplash.remove();
         runApp(StartupFailureApp(error: error, stack: stack));
       }
     },

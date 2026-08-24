@@ -367,36 +367,48 @@ class SyncEngine {
           ),
         );
         _scheduleRetry();
-      } else if (pendingDownloads > 0) {
-        // Two very different situations used to share one message. A file
-        // whose R2 key exists is genuinely mid-download and worth retrying
-        // soon; one with no key anywhere is waiting on the device that
-        // imported it, and nothing this device does will speed it up. Saying
-        // "still downloading" for the second is what made sync look hung.
+      } else if (pendingDownloads > 0 &&
+          missingFiles.any((a) => a.hasRemoteCopy)) {
+        // Genuinely mid-download: the object exists and this device can go
+        // and get it, so stay pending and keep retrying.
         final fetchable = missingFiles.where((a) => a.hasRemoteCopy).length;
-        final waiting = pendingDownloads - fetchable;
         _emit(
           SyncStatus(
             phase: SyncPhase.pending,
-            pendingChanges: pendingDownloads,
+            pendingChanges: fetchable,
             lastSyncedAt: _lastSyncedAt,
-            message: _lastDownloadError != null && fetchable > 0
+            message: _lastDownloadError != null
                 ? 'Download failed: $_lastDownloadError'
-                : fetchable > 0
-                ? (fetchable == 1
-                      ? '1 file still downloading'
-                      : '$fetchable files still downloading')
-                : (waiting == 1
-                      ? '1 file is still uploading from your other device'
-                      : '$waiting files are still uploading from your '
-                            'other device'),
+                : fetchable == 1
+                ? '1 file still downloading'
+                : '$fetchable files still downloading',
           ),
         );
         _scheduleRetry();
       } else {
+        // Everything this device owns is pushed, and everything it could
+        // fetch is fetched. Files with no key anywhere are waiting on the
+        // device that imported them — that is not this device being out of
+        // sync, and reporting it as pending left the account "syncing"
+        // forever, re-running every few seconds for work that was never its
+        // to do. Settle, and say so in the message rather than the phase.
+        // [_remoteWatch] wakes us when the other device publishes the key,
+        // so nothing is lost by not polling for it.
         _pendingRuns = 0;
         _lastDownloadError = null;
-        _emit(SyncStatus(phase: SyncPhase.idle, lastSyncedAt: _lastSyncedAt));
+        _emit(
+          SyncStatus(
+            phase: SyncPhase.idle,
+            lastSyncedAt: _lastSyncedAt,
+            message: pendingDownloads == 0
+                ? null
+                : pendingDownloads == 1
+                ? 'Fully synced · 1 file not uploaded from your other '
+                      'device yet'
+                : 'Fully synced · $pendingDownloads files not uploaded '
+                      'from your other device yet',
+          ),
+        );
       }
     } catch (e) {
       debugPrint('Sync failed: $e');

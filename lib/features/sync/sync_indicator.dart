@@ -56,9 +56,10 @@ class SyncIndicator extends ConsumerWidget {
                 SyncPhase.syncing => pct != null
                     ? '${status.progressMessage ?? "Syncing…"} $pct%'
                     : 'Syncing…',
-                SyncPhase.idle => status.lastSyncedAt == null
-                    ? 'Synced — tap to resync'
-                    : 'Synced • tap to resync',
+                SyncPhase.idle => status.message ??
+                    (status.lastSyncedAt == null
+                        ? 'Synced — tap to resync'
+                        : 'Synced • tap to resync'),
                 SyncPhase.pending => status.message ??
                     '${status.pendingChanges} change(s) pending',
                 SyncPhase.error => status.message ?? 'Sync error',
@@ -116,7 +117,7 @@ class SyncIndicator extends ConsumerWidget {
                     SyncPhase.syncing => pct != null
                         ? '${status.progressMessage ?? 'Syncing…'} · $pct%'
                         : (status.progressMessage ?? 'Syncing…'),
-                    SyncPhase.idle => 'Fully synced',
+                    SyncPhase.idle => status.message ?? 'Fully synced',
                     SyncPhase.pending => status.message ??
                         (status.pendingChanges > 0
                             ? '${status.pendingChanges} change(s) pending'

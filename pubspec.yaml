@@ -68,6 +68,10 @@ dependencies:
   purchases_flutter: ^10.9.1
   purchases_ui_flutter: ^10.9.1
   share_plus: ^12.0.2
+  # Runtime preserve/remove so the native splash stays until Flutter is ready
+  # (avoids a second, different splash flash). CLI generators stay in
+  # dev_dependencies below.
+  flutter_native_splash: ^2.4.7
 
 dev_dependencies:
   flutter_test:
@@ -89,23 +93,32 @@ flutter_launcher_icons:
   ios: true
   web:
     generate: true
-    image_path: assets/branding/app_icon.png
-    background_color: "#0B1B4A"
-  image_path: assets/branding/app_icon.png
-  # Full bleed icon already includes its own rounded plate + gradient.
-  adaptive_icon_background: "#0B1B4A"
-  adaptive_icon_foreground: assets/branding/app_icon.png
+    image_path: assets/branding/app_icon_1024.png
+    background_color: "#5759D3"
+  # Square crop of assets/branding/app_icon.png (source is letterboxed).
+  image_path: assets/branding/app_icon_1024.png
+  # Full-bleed plate — match brand periwinkle so adaptive edges blend.
+  adaptive_icon_background: "#5759D3"
+  adaptive_icon_foreground: assets/branding/app_icon_1024.png
   adaptive_icon_foreground_inset: 0
   remove_alpha_ios: true
 
 flutter_native_splash:
-  color: "#EEF0F3"
-  color_dark: "#0F1119"
-  image: assets/branding/notably_logo.png
+  color: "#000000"
+  color_dark: "#000000"
+  # Padded square, not the bare wordmark. The generated iOS storyboard pins the
+  # image view to all four edges with scaleAspectFit, so whatever is handed to
+  # it is scaled up until it touches the window — a bare 1057x400 logo came out
+  # spanning the full width of an iPad. The margins have to be baked into the
+  # asset; a square canvas keeps them even in both orientations.
+  image: assets/branding/notably_logo_splash_padded.png
   android_12:
-    color: "#EEF0F3"
-    color_dark: "#0F1119"
-    image: assets/branding/notably_logo.png
+    # Same art as the main splash — never the launcher/app icon.
+    color: "#000000"
+    color_dark: "#000000"
+    image: assets/branding/notably_logo_splash.png
+    icon_background_color: "#000000"
+    icon_background_color_dark: "#000000"
   android: true
   ios: true
   web: false
@@ -130,8 +143,10 @@ flutter:
     - assets/env
     - assets/quiz/stop_words.txt
     - assets/branding/notably_logo.png
+    - assets/branding/notably_logo_splash.png
     - assets/branding/notably-solo-logo.png
     - assets/branding/app_icon.png
+    - assets/branding/app_icon_1024.png
     - assets/payments/gcash.png
     - assets/payments/maya.png
 

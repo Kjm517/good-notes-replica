@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/sync/sync_providers.dart';
@@ -10,7 +11,6 @@ import '../features/auth/providers.dart';
 import '../features/settings/paymongo_billing.dart';
 import '../features/settings/revenuecat_billing.dart';
 import '../features/settings/entitlements.dart';
-import 'design.dart';
 import 'supabase_bootstrap.dart';
 import 'providers.dart';
 import 'router.dart';
@@ -32,6 +32,7 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
   bool _splashExpired = false;
   bool _trialExpiredPopupShown = false;
   bool _heartbeatSent = false;
+  bool _nativeSplashRemoved = false;
 
   @override
   void initState() {
@@ -105,20 +106,17 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
       });
     });
 
-    // Supabase restores a persisted session asynchronously, so right after
-    // launch "signed out" and "not loaded yet" look identical. Hold on a quiet
-    // splash until the state resolves, or a signed-in user flashes through
-    // the sign-in screen on every cold start. Local-only runs skip this —
-    // there's no session to restore there.
-    if (supabaseReady && authState.isLoading && !_splashExpired) {
-      return MaterialApp(
-        title: 'Notably',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
-        darkTheme: AppTheme.dark(),
-        themeMode: themeMode,
-        home: const _SplashScreen(),
-      );
+    // Supabase restores a persisted session asynchronously. Keep the *native*
+    // launch screen (notably_logo_splash) covering the UI until that finishes —
+    // do not paint a second Flutter splash on top of it (that looked like two
+    // launch screens). Local-only builds have nothing to wait for.
+    final holdSplash = supabaseReady && authState.isLoading && !_splashExpired;
+    if (!holdSplash && !_nativeSplashRemoved) {
+      _nativeSplashRemoved = true;
+      // After this frame so the router is already under the splash.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        FlutterNativeSplash.remove();
+      });
     }
 
     return MaterialApp.router(
@@ -128,20 +126,17 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
       darkTheme: AppTheme.dark(),
       themeMode: themeMode,
       routerConfig: ref.watch(routerProvider),
-    );
-  }
-}
-
-/// Quiet brand splash shown while Supabase restores the session — the app mark
-/// on the canvas colour, deliberately without a spinner.
-class _SplashScreen extends StatelessWidget {
-  const _SplashScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: context.tokens.canvas,
-      body: const Center(child: AppMark(size: 96)),
+      // Black under the native splash so a mid-handoff frame never flashes white.
+      builder: (context, child) {
+        if (!holdSplash) return child ?? const SizedBox.shrink();
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            const ColoredBox(color: Color(0xFF000000)),
+            if (child != null) Opacity(opacity: 0, child: child),
+          ],
+        );
+      },
     );
   }
 }
