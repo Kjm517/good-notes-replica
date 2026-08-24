@@ -251,15 +251,20 @@ class _StorageMeter extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 'Storage',
                 style: TextStyle(fontSize: 12, color: t.textMuted),
               ),
-              Text(
-                '${usedGb.toStringAsFixed(1)} / ${quotaGb.toStringAsFixed(0)} GB',
-                style: AppTokens.mono(size: 12, color: t.textSecondary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${usedGb.toStringAsFixed(1)} / ${quotaGb.toStringAsFixed(0)} GB',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: AppTokens.mono(size: 12, color: t.textSecondary),
+                ),
               ),
             ],
           ),

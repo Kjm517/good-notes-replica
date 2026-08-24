@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,17 +15,31 @@ import '../../core/sync/sync_state.dart';
 import '../auth/providers.dart';
 import 'entitlements.dart';
 import 'about_notably_sheet.dart';
-import 'billing_plan.dart';
 import 'bug_report_sheet.dart';
+import 'paymongo_billing.dart';
 import 'premium_plan_sheet.dart';
 import 'premium_providers.dart';
 import 'settings_widgets.dart';
 
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Pick up admin/plan changes as soon as Settings opens, not only on resume.
+    Future.microtask(() {
+      unawaited(ref.read(payMongoEntitlementRefreshProvider)());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final t = context.tokens;
     final entitlement = ref.watch(entitlementProvider);
     final ent = entitlement.asData?.value;
@@ -111,7 +127,10 @@ class _AccountHeader extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final user = ref.watch(authStateProvider).asData?.value;
-    final tier = entitlement?.tierLabel ?? 'Free';
+    final plan = ref.watch(billingPlanProvider);
+    final tier = entitlement?.isPremium == true && plan == BillingPlan.lifetime
+        ? 'Lifetime'
+        : (entitlement?.tierLabel ?? 'Free');
     final premiumBadge = entitlement?.isPremium == true || entitlement?.isTrialActive == true;
 
     if (user == null) {
@@ -128,12 +147,16 @@ class _AccountHeader extends ConsumerWidget {
         ),
         title: const Text(
           'Not signed in',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
           supabaseReady
               ? 'Sign in to sync your notes and start your 7-day trial'
               : 'Sync is not set up — notes stay on this device',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 12.5, color: t.textMuted),
         ),
         trailing: TierBadge(label: tier, premium: premiumBadge),
@@ -158,10 +181,14 @@ class _AccountHeader extends ConsumerWidget {
       ),
       title: Text(
         user.label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
         user.email ?? 'Signed in',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: AppTokens.mono(size: 11, color: t.textMuted),
       ),
       trailing: TierBadge(label: tier, premium: premiumBadge),
@@ -310,10 +337,13 @@ class _ActivePlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final planName = plan == BillingPlan.monthly ? 'Monthly' : 'Yearly';
-    final renewLabel = renewsAt == null
-        ? 'Active subscription'
-        : 'Renews ${DateFormat.yMMMd().format(renewsAt!)}';
+    final planName = billingPlanLabel(plan);
+    final lifetime = plan == BillingPlan.lifetime;
+    final renewLabel = lifetime
+        ? 'Never expires'
+        : renewsAt == null
+            ? 'Active subscription'
+            : 'Renews ${DateFormat.yMMMd().format(renewsAt!)}';
 
     return PremiumGradientCard(
       child: Column(

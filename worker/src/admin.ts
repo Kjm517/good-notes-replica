@@ -104,7 +104,7 @@ export async function handleAdmin(
       email?: string | null;
       displayName?: string | null;
       isPremium?: boolean;
-      plan?: 'monthly' | 'yearly';
+      plan?: 'monthly' | 'yearly' | 'lifetime';
       expiresAt?: string | null;
     };
 
@@ -204,7 +204,7 @@ export async function handleAdmin(
     const uid = decodeURIComponent(path.slice('/admin/subscriptions/'.length));
     const body = (await request.json()) as {
       isPremium?: boolean;
-      plan?: 'monthly' | 'yearly';
+      plan?: 'monthly' | 'yearly' | 'lifetime';
       expiresAt?: string | null;
     };
     try {

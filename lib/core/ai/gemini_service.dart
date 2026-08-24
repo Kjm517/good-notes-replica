@@ -202,7 +202,7 @@ Omit "highlight" unless you can see the page layout.
     return '''
 You are a university exam writer. Write $questionCount questions a professor would put on a midterm. Use grammatical, natural English. Rewrite awkward source phrasing; do not copy broken sentences.
 
-Generate exactly $questionCount questions.
+Generate exactly $questionCount questions. The JSON array MUST contain $questionCount objects — returning fewer is a failure. If you are close to the length limit, write shorter explanations (2 sentences) instead of dropping questions.
 
 HARD RULE — QUESTION KINDS
 Use ONLY these kind values: ${kinds.join(', ')}.
@@ -236,7 +236,7 @@ REQUIRED
 - The highlight must cover the sentence that contains the accepted answer, not a nearby heading or author name.
 
 EXPLANATION — facts, not grading
-Write 3–5 sentences of real facts about the topic: what it is, what it does, when/where it occurs, how it differs from related structures.
+Write 2 short sentences of real facts about the topic: what it is, what it does, or how it differs from related structures.
 Use Google Search to confirm well-known scientific or medical facts that support the source page. Never contradict the page. Never invent a dose, trial name, percentage, or statistic that is not on the page or in a standard reference.
 Do not mention "correct", "wrong options", "the answer", or "this statement is true/false".
 Contrast related facts in the same breath ("Lysosomes digest organelles; they do not make ATP") instead of saying an option is incorrect.
@@ -263,7 +263,7 @@ Return a JSON array only. Each element:
   "choices": ["A", "B", "C", "D"],
   "correctIndex": 2,
   "acceptedAnswer": "the correct answer as a student would write it",
-  "explanation": "3-5 sentences of facts about the topic, then See page N.",
+  "explanation": "2 sentences of facts about the topic, then See page N.",
   "pageIndex": 0,
   "sourceQuote": "the sentence from that page which states the answer, copied exactly",
   "highlight": {"x": 0.08, "y": 0.40, "w": 0.38, "h": 0.019}
@@ -342,6 +342,30 @@ ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstru
     List<Map<String, dynamic>> parts, {
     bool googleSearch = false,
   }) async {
+    try {
+      return await _postGenerate(
+        model,
+        parts,
+        googleSearch: googleSearch,
+        disableThinking: true,
+      );
+    } catch (e) {
+      if (!_isThinkingConfigRejected(e)) rethrow;
+      return await _postGenerate(
+        model,
+        parts,
+        googleSearch: googleSearch,
+        disableThinking: false,
+      );
+    }
+  }
+
+  Future<GeminiTextResult> _postGenerate(
+    String model,
+    List<Map<String, dynamic>> parts, {
+    required bool googleSearch,
+    required bool disableThinking,
+  }) async {
     final uri = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/'
       '$model:generateContent',
@@ -356,8 +380,12 @@ ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstru
       'generationConfig': {
         'temperature': 0.65,
         'topP': 0.9,
-        'maxOutputTokens': 32768,
+        'maxOutputTokens': 65536,
         'responseMimeType': 'application/json',
+        // Thinking models spend the output budget on hidden thoughts and then
+        // return 5–8 questions instead of the 25 we asked for.
+        if (disableThinking)
+          'thinkingConfig': {'thinkingBudget': 0},
       },
       if (googleSearch)
         'tools': [
@@ -414,6 +442,10 @@ ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstru
     if (candidates is! List || candidates.isEmpty) return '';
     final first = candidates.first;
     if (first is! Map) return '';
+    final finish = first['finishReason'];
+    if (finish is String && finish != 'STOP' && finish != 'stop') {
+      debugPrint('Gemini finishReason=$finish');
+    }
     final content = first['content'];
     if (content is! Map) return '';
     final parts = content['parts'];
@@ -425,6 +457,14 @@ ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstru
       if (part['text'] is String) buf.write(part['text']);
     }
     return buf.toString();
+  }
+
+  bool _isThinkingConfigRejected(Object error) {
+    final raw = error.toString().toLowerCase();
+    return raw.contains('thinkingbudget') ||
+        raw.contains('thinking_config') ||
+        raw.contains('thinkingconfig') ||
+        (raw.contains('thinking') && raw.contains('invalid'));
   }
 
   bool _isModelUnavailable(Object error) {

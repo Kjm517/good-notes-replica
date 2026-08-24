@@ -110,7 +110,8 @@ void main() {
     });
 
     test('portrait iPad chrome uses the phone bottom dock', () {
-      // iPad Pro 12.9 portrait — same colour strip / tool pill as iPhone.
+      // iPad Pro 12.9 portrait — same colour strip / tool pill as iPhone,
+      // but the dock itself shows every tool (no More sheet).
       expect(
         EditorBarLayout.chromeForSize(const Size(1024, 1366)),
         EditorBarLayout.phone,

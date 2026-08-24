@@ -152,16 +152,56 @@ final missingLocalFileDocumentsProvider =
     return Stream.value(const <String, String>{});
   }
   final db = ref.watch(databaseProvider);
-  final pagesStream = (db.select(db.notePages)
-        ..where((p) => p.deletedAt.isNull()))
-      .watch();
+
+  // Drift invalidates by table, so every committed stroke re-runs these — a
+  // stroke touches its page row for sync. Both triggers are reduced to a
+  // signature and de-duplicated so the recompute below (which stats a file per
+  // document) only runs when the page→asset mapping or an asset really moved.
+  final pagesStream = db
+      .customSelect(
+        'SELECT document_id, COALESCE(pdf_asset_id, bg_asset_id) AS asset_id '
+        'FROM note_pages '
+        'WHERE deleted_at IS NULL '
+        'AND (pdf_asset_id IS NOT NULL OR bg_asset_id IS NOT NULL) '
+        'GROUP BY document_id ORDER BY document_id',
+        readsFrom: {db.notePages},
+      )
+      .watch()
+      .map((rows) => rows
+          .map((r) =>
+              '${r.read<String>('document_id')}:${r.read<String>('asset_id')}')
+          .join(','))
+      .distinct();
+
   final assetsStream = (db.select(db.assets)
         ..where((a) => a.deletedAt.isNull()))
-      .watch();
+      .watch()
+      .map((assets) => assets
+          .map((a) => '${a.id}:${a.remoteKey ?? ''}:${a.localPath ?? ''}:'
+              '${a.data?.isNotEmpty ?? false}')
+          .join(','))
+      .distinct();
 
   return Stream.multi((controller) {
+    var running = false;
+    var again = false;
+
     Future<void> emit() async {
-      controller.add(await _missingLocalFileDocuments(db));
+      if (running) {
+        again = true;
+        return;
+      }
+      running = true;
+      try {
+        do {
+          again = false;
+          final value = await _missingLocalFileDocuments(db);
+          if (controller.isClosed) return;
+          controller.add(value);
+        } while (again);
+      } finally {
+        running = false;
+      }
     }
 
     unawaited(emit());
@@ -174,19 +214,35 @@ final missingLocalFileDocumentsProvider =
   });
 });
 
-Future<Map<String, String>> _missingLocalFileDocuments(AppDatabase db) async {
-  final pages = await (db.select(db.notePages)
-        ..where((p) => p.deletedAt.isNull()))
+/// One `documentId → assetId` pair per document, taken from its lowest-indexed
+/// backed page.
+///
+/// Done in SQL rather than by walking every page row: this runs whenever the
+/// pages table changes, and a library holding a few thousand-page PDFs would
+/// otherwise decode every row of every document each time. SQLite defines the
+/// bare columns of a `min()` aggregate as coming from the matching row.
+Future<Map<String, String>> _assetIdByDocument(AppDatabase db) async {
+  final rows = await db
+      .customSelect(
+        'SELECT document_id, '
+        'COALESCE(pdf_asset_id, bg_asset_id) AS asset_id, '
+        'MIN(page_index) AS page_index '
+        'FROM note_pages '
+        'WHERE deleted_at IS NULL '
+        'AND (pdf_asset_id IS NOT NULL OR bg_asset_id IS NOT NULL) '
+        'GROUP BY document_id',
+        readsFrom: {db.notePages},
+      )
       .get();
-  if (pages.isEmpty) return const <String, String>{};
+  return {
+    for (final row in rows)
+      row.read<String>('document_id'): row.read<String>('asset_id'),
+  };
+}
 
-  final assetIdByDocument = <String, String>{};
-  for (final page in pages) {
-    final assetId = page.pdfAssetId ?? page.bgAssetId;
-    if (assetId != null) {
-      assetIdByDocument.putIfAbsent(page.documentId, () => assetId);
-    }
-  }
+Future<Map<String, String>> _missingLocalFileDocuments(AppDatabase db) async {
+  final assetIdByDocument = await _assetIdByDocument(db);
+  if (assetIdByDocument.isEmpty) return const <String, String>{};
 
   final missing = <String, String>{};
   for (final entry in assetIdByDocument.entries) {

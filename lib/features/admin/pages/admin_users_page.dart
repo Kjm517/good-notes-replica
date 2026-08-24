@@ -5,10 +5,19 @@ import '../../../app/design.dart';
 import '../admin_api.dart';
 import '../widgets/admin_widgets.dart';
 
-enum _UserType { free, monthly, yearly }
+enum _UserType { free, monthly, yearly, lifetime }
+
+bool _isLifetimeExpiry(String? iso) {
+  if (iso == null || iso.isEmpty) return true;
+  final parsed = DateTime.tryParse(iso);
+  return parsed != null && parsed.year >= 2099;
+}
 
 _UserType _typeFromUser(AdminUserRow u) {
   if (!u.isPremium) return _UserType.free;
+  if (u.plan == 'lifetime' || _isLifetimeExpiry(u.premiumExpiresAt)) {
+    return _UserType.lifetime;
+  }
   if (u.plan == 'yearly') return _UserType.yearly;
   return _UserType.monthly;
 }
@@ -17,6 +26,14 @@ String _typeLabel(_UserType type) => switch (type) {
       _UserType.free => 'Free',
       _UserType.monthly => 'Monthly',
       _UserType.yearly => 'Yearly',
+      _UserType.lifetime => 'Lifetime',
+    };
+
+String? _planApiValue(_UserType type) => switch (type) {
+      _UserType.free => null,
+      _UserType.monthly => 'monthly',
+      _UserType.yearly => 'yearly',
+      _UserType.lifetime => 'lifetime',
     };
 
 String _formatDay(DateTime dt) {
@@ -62,9 +79,7 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
       await api.updateSubscription(
         user.uid,
         isPremium: type != _UserType.free,
-        plan: type == _UserType.free
-            ? null
-            : (type == _UserType.yearly ? 'yearly' : 'monthly'),
+        plan: _planApiValue(type),
       );
       _invalidateUserLists();
       if (mounted) {
@@ -108,7 +123,7 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
           const AdminPageHeader(
             title: 'Users',
             subtitle:
-                'Edit a user for name, membership, and expiry — or tap the type chip for a quick plan change.',
+                'Edit a user for name, membership, and expiry — or tap the type chip for a quick plan change (Free, Monthly, Yearly, Lifetime).',
           ),
           const SizedBox(height: 16),
           AdminSearchField(
@@ -206,6 +221,7 @@ class _UserTypeMenu extends StatelessWidget {
         _UserType.free => t.textMuted,
         _UserType.monthly => t.success,
         _UserType.yearly => t.accentText,
+        _UserType.lifetime => t.premiumText,
       };
 
   @override
@@ -290,7 +306,9 @@ class _UserEditorSheetState extends ConsumerState<_UserEditorSheet> {
   Future<void> _save() async {
     final api = ref.read(adminApiServiceProvider);
     if (api == null) return;
-    if (_type != _UserType.free && _expiresAt == null) {
+    if (_type != _UserType.free &&
+        _type != _UserType.lifetime &&
+        _expiresAt == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Pick a membership expiry date.')),
       );
@@ -299,7 +317,9 @@ class _UserEditorSheetState extends ConsumerState<_UserEditorSheet> {
 
     setState(() => _saving = true);
     try {
-      final expiryIso = _type == _UserType.free || _expiresAt == null
+      final expiryIso = _type == _UserType.free ||
+              _type == _UserType.lifetime ||
+              _expiresAt == null
           ? null
           : DateTime(
               _expiresAt!.year,
@@ -314,9 +334,7 @@ class _UserEditorSheetState extends ConsumerState<_UserEditorSheet> {
         email: _email.text.trim(),
         displayName: _name.text.trim(),
         isPremium: _type != _UserType.free,
-        plan: _type == _UserType.free
-            ? null
-            : (_type == _UserType.yearly ? 'yearly' : 'monthly'),
+        plan: _planApiValue(_type),
         expiresAt: expiryIso,
       );
       if (mounted) Navigator.pop(context, true);
@@ -413,24 +431,40 @@ class _UserEditorSheetState extends ConsumerState<_UserEditorSheet> {
             const SizedBox(height: 14),
             Text('Membership', style: AppTokens.sectionLabel(t.textFaint)),
             const SizedBox(height: 8),
-            SegmentedButton<_UserType>(
-              segments: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
                 for (final type in _UserType.values)
-                  ButtonSegment(value: type, label: Text(_typeLabel(type))),
+                  ChoiceChip(
+                    label: Text(_typeLabel(type)),
+                    selected: _type == type,
+                    onSelected: busy
+                        ? null
+                        : (_) => setState(() {
+                              _type = type;
+                              if (_type == _UserType.lifetime ||
+                                  _type == _UserType.free) {
+                                _expiresAt = null;
+                              } else {
+                                _expiresAt = DateTime.now().add(
+                                  Duration(
+                                    days: _type == _UserType.yearly ? 365 : 30,
+                                  ),
+                                );
+                              }
+                            }),
+                  ),
               ],
-              selected: {_type},
-              onSelectionChanged: busy
-                  ? null
-                  : (s) => setState(() {
-                        _type = s.first;
-                        if (_type != _UserType.free && _expiresAt == null) {
-                          _expiresAt = DateTime.now().add(
-                            Duration(days: _type == _UserType.yearly ? 365 : 30),
-                          );
-                        }
-                      }),
             ),
-            if (_type != _UserType.free) ...[
+            if (_type == _UserType.lifetime) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Lifetime access — no expiry. Premium until you revoke it.',
+                style: TextStyle(fontSize: 12.5, color: t.textMuted),
+              ),
+            ],
+            if (_type != _UserType.free && _type != _UserType.lifetime) ...[
               const SizedBox(height: 14),
               Text('Expires', style: AppTokens.sectionLabel(t.textFaint)),
               const SizedBox(height: 6),

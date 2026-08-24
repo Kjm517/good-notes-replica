@@ -38,11 +38,11 @@ class SettingsGroupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    return Container(
-      decoration: BoxDecoration(
-        color: t.surface,
+    return Material(
+      color: t.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Radii.card),
-        border: Border.all(color: t.line),
+        side: BorderSide(color: t.line),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -107,6 +107,8 @@ class SettingsRow extends StatelessWidget {
                 children: [
                   Text(
                     title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -117,6 +119,8 @@ class SettingsRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: AppTokens.mono(
                         size: 10,
                         color: t.textFaint.withValues(alpha: muted),
@@ -275,6 +279,8 @@ class AppearancePicker extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         opt.$3,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight:

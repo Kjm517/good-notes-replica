@@ -745,6 +745,8 @@ class _ListRow extends ConsumerWidget {
                       if (badgeLabel != null)
                         Text(
                           badgeLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: AppTokens.mono(size: 11, color: t.textFaint),
                         ),
                     ],

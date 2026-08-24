@@ -600,11 +600,13 @@ class _EditorState extends ConsumerState<_Editor> {
         screenSize.width < AppBreakpoints.desktop;
     final tablet =
         screenSize.shortestSide >= AppBreakpoints.tabletShortest;
-    // Phones and portrait tablets overlay the Edge-style pages/outline
-    // drawer so it doesn't crush the canvas. Landscape tablets/desktop keep
-    // the persistent rail.
+    // Phones overlay the Edge-style pages/outline drawer so it doesn't crush
+    // the canvas. Tablets keep the persistent rail in both orientations: a
+    // drawer that closes on jump made portrait iPad unusable for reading, as
+    // tapping a page dismissed it and left the library pane in the slot, with
+    // no page list to carry on navigating from.
     final overlaySidebar =
-        chrome == EditorBarLayout.phone || tabletPortrait || !wideScreen;
+        !tablet && (chrome == EditorBarLayout.phone || !wideScreen);
     final drawerWidth = (screenSize.width * 0.86).clamp(240.0, 320.0);
     // Default open on tablet/desktop; phones start closed so the PDF is full
     // width until the user taps Pages & outline.
@@ -691,7 +693,11 @@ class _EditorState extends ConsumerState<_Editor> {
                 children: [
                   Row(
                     children: [
-                      if (tabletPortrait)
+                      // The split-view library and the page list share this
+                      // slot — 240 + 276 points of chrome would leave a
+                      // portrait iPad barely any canvas. The toolbar's
+                      // "Pages & outline" button switches between them.
+                      if (tabletPortrait && !sidebarOpen)
                         _TabletLibraryPane(currentDocumentId: documentId),
                       if (layout.showsSideRail)
                         EditorToolRail(
@@ -1263,6 +1269,8 @@ class _TabletDocumentRow extends ConsumerWidget {
             subtitle: Text(
               badgeLabel ??
                   (count == null ? 'Document' : '$count pp'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: AppTokens.mono(size: 10, color: t.textFaint),
             ),
             onTap: locked ? null : onTap,

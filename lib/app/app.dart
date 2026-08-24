@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/sync/sync_providers.dart';
 import '../core/sync/user_telemetry.dart';
+import '../core/sync/background_keep_alive.dart';
 import '../features/auth/providers.dart';
 import '../features/settings/paymongo_billing.dart';
 import '../features/settings/revenuecat_billing.dart';
@@ -36,6 +37,7 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    BackgroundKeepAlive.bindNative();
 
     // Auth restore is a network round trip on some devices and can stall on a
     // broken or offline Play services install. Falling through to the router

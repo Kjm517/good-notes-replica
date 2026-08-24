@@ -40,11 +40,15 @@ class AdminStatCard extends StatelessWidget {
           const Spacer(),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: AppTokens.mono(size: 11, color: t.textFaint),
           ),
           const SizedBox(height: 6),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.w700,
@@ -53,7 +57,12 @@ class AdminStatCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(trend, style: TextStyle(fontSize: 12, color: t.textMuted)),
+          Text(
+            trend,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: t.textMuted),
+          ),
         ],
       ),
     );

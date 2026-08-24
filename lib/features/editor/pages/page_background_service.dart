@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:pdfx/pdfx.dart';
+import 'package:pdfrx/pdfrx.dart';
 
 import '../../../core/db/database.dart';
 import '../../../core/storage/asset_store.dart';
@@ -11,12 +11,12 @@ import '../../../core/sync/file_sync.dart';
 import '../../library/data/asset_repository.dart';
 
 /// Loads and caches page background images: imported photos (decoded) and PDF
-/// pages (rendered via pdfx).
+/// pages (rendered via PDFium / pdfrx).
 ///
 /// GPU textures stay tiny (a handful of full pages) so the device does not
-/// run out of memory. Rendered PDF pages are also written to a local JPEG
-/// cache: the first visit pays for PdfRenderer, later visits just decode
-/// the file. The original PDF is kept as the source of truth.
+/// run out of memory. Rendered PDF pages are also written to a local image
+/// cache: the first visit pays for PDFium, later visits just decode the
+/// file. The original PDF is kept as the source of truth.
 class PageBackgroundService {
   PageBackgroundService(this._assets, {FileSync? files}) : _files = files;
   final AssetRepository _assets;
@@ -46,16 +46,17 @@ class PageBackgroundService {
   final Map<String, Future<PdfDocument>> _pdfDocs = {};
   final Map<String, Future<ui.Image?>> _inFlight = {};
 
-  /// Per-document render queues. Exactly one PdfRenderer page is open at a
-  /// time; everything else waits here, ordered by [PageRenderPriority].
+  /// Per-document render queues, ordered by [PageRenderPriority]. Native
+  /// runs two PDFium jobs at once so the next page is already in flight
+  /// while the current one is uploaded to the GPU. Web stays serial.
   final Map<String, _PdfRenderQueue> _pdfQueues = {};
 
   /// Bumped when scrolling settles. Queued prefetch/thumbnail jobs from a
   /// fling carry an older generation and are dropped instead of starting.
   int _generation = 0;
 
-  /// Drops stale non-visible work from a fling. In-flight renders keep
-  /// running — pdfx has no cancel API.
+  /// Drops stale non-visible work from a fling. In-flight prefetch /
+  /// thumbnail jobs are cancelled via PDFium's render token.
   void notifyScrollSettled() {
     _generation++;
     for (final queue in _pdfQueues.values) {
@@ -102,34 +103,36 @@ class PageBackgroundService {
 
   void _pumpPdfQueue(String assetId) {
     final queue = _pdfQueues[assetId];
-    if (queue == null || queue.busy) return;
+    if (queue == null) return;
     queue.dropStale(_generation);
-    final job = queue.takeNext();
-    if (job == null) {
-      _pdfQueues.remove(assetId);
-      return;
-    }
-    queue.busy = true;
-    () async {
-      try {
-        final doc = await _openPdf(assetId);
-        final image = await _renderPdfPageLocked(
-          doc,
-          job.pageIndex,
-          job.targetWidth,
-          persistPageId: job.persistPageId,
-          persistVariant: job.persistVariant,
-          maxRenderSide: job.maxRenderSide,
-        );
-        if (!job.completer.isCompleted) job.completer.complete(image);
-      } catch (e) {
-        debugPrint('[bg] render failed for $assetId p${job.pageIndex}: $e');
-        if (!job.completer.isCompleted) job.completer.complete(null);
-      } finally {
-        queue.busy = false;
-        _pumpPdfQueue(assetId);
+    while (!queue.atCapacity) {
+      final job = queue.takeNext();
+      if (job == null) {
+        if (queue.activeCount == 0) _pdfQueues.remove(assetId);
+        return;
       }
-    }();
+      queue.start(job);
+      () async {
+        try {
+          final doc = await _openPdf(assetId);
+          if (job.cancelToken?.isCanceled == true) {
+            if (!job.completer.isCompleted) job.completer.complete(null);
+            return;
+          }
+          final image = await _renderPdfPageLocked(
+            doc,
+            job,
+          );
+          if (!job.completer.isCompleted) job.completer.complete(image);
+        } catch (e) {
+          debugPrint('[bg] render failed for $assetId p${job.pageIndex}: $e');
+          if (!job.completer.isCompleted) job.completer.complete(null);
+        } finally {
+          queue.finish(job);
+          _pumpPdfQueue(assetId);
+        }
+      }();
+    }
   }
 
   void _upgradeInFlight(
@@ -307,7 +310,10 @@ class PageBackgroundService {
     }
     ui.Image? image;
     try {
-      if (page.bgAssetId != null) {
+      final full = _cache[page.id];
+      if (full != null) {
+        image = await _downscale(full, targetWidth);
+      } else if (page.bgAssetId != null) {
         final bytes = await _bytesFor(page.bgAssetId!);
         if (bytes != null) {
           image = await _decode(bytes, targetWidth: targetWidth.round());
@@ -415,7 +421,7 @@ class PageBackgroundService {
     return _assets.getBytes(assetId);
   }
 
-  /// Disk JPEG if this page has been drawn before; otherwise PdfRenderer,
+  /// Disk image if this page has been drawn before; otherwise PDFium,
   /// then persist so the next open skips the renderer.
   Future<ui.Image?> _loadPdfPage(
     NotePage page, {
@@ -446,46 +452,109 @@ class PageBackgroundService {
 
   Future<ui.Image?> _renderPdfPageLocked(
     PdfDocument doc,
-    int pageIndex,
-    double? targetWidth, {
-    String? persistPageId,
-    String persistVariant = kPageRenderFull,
-    double maxRenderSide = _maxRenderSide,
-  }) async {
-    final page = await doc.getPage(pageIndex + 1);
+    _PdfRenderJob job,
+  ) async {
+    if (job.pageIndex < 0 || job.pageIndex >= doc.pages.length) return null;
+    var page = doc.pages[job.pageIndex];
+    if (!page.isLoaded) page = await page.ensureLoaded();
+    final token = page.createCancellationToken();
+    job.cancelToken = token;
+    if (token.isCanceled) return null;
+
+    double scale;
+    if (job.targetWidth != null) {
+      scale = job.targetWidth! / page.width;
+    } else {
+      // ~2x for crisp text, capped so one page never becomes a huge texture.
+      scale = 2.0;
+      final longest = page.width > page.height ? page.width : page.height;
+      if (longest * scale > job.maxRenderSide) {
+        scale = job.maxRenderSide / longest;
+      }
+    }
+    final fullWidth = page.width * scale;
+    final fullHeight = page.height * scale;
+    final rendered = await page.render(
+      fullWidth: fullWidth,
+      fullHeight: fullHeight,
+      backgroundColor: 0xffffffff,
+      cancellationToken: token,
+    );
+    if (rendered == null || token.isCanceled) {
+      rendered?.dispose();
+      return null;
+    }
     try {
-      double scale;
-      if (targetWidth != null) {
-        scale = targetWidth / page.width;
-      } else {
-        // ~2x for crisp text, capped so one page never becomes a huge texture.
-        scale = 2.0;
-        final longest = (page.width > page.height ? page.width : page.height);
-        if (longest * scale > maxRenderSide) {
-          scale = maxRenderSide / longest;
-        }
-      }
-      final rendered = await page.render(
-        width: page.width * scale,
-        height: page.height * scale,
-        format: PdfPageImageFormat.jpeg,
-        quality: 85,
-        backgroundColor: '#FFFFFF',
+      final pixels = Uint8List.fromList(rendered.pixels);
+      final image = await _imageFromBgra(
+        rendered.width,
+        rendered.height,
+        pixels,
       );
-      if (rendered == null) return null;
-      final bytes = rendered.bytes;
-      if (persistPageId != null) {
-        unawaited(writePageRender(persistPageId, persistVariant, bytes));
+      if (job.persistPageId != null) {
+        unawaited(_persistRender(image, job.persistPageId!, job.persistVariant));
       }
-      return _decode(bytes);
+      return image;
     } finally {
-      await page.close();
+      rendered.dispose();
+    }
+  }
+
+  Future<ui.Image> _imageFromBgra(int width, int height, Uint8List bgra) {
+    final done = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      bgra,
+      width,
+      height,
+      ui.PixelFormat.bgra8888,
+      done.complete,
+    );
+    return done.future;
+  }
+
+  /// Disk cache is decoded on the next open. PNG encode happens after the
+  /// page is already on screen so it does not delay first paint.
+  Future<void> _persistRender(
+    ui.Image image,
+    String pageId,
+    String variant,
+  ) async {
+    final clone = image.clone();
+    try {
+      final bytes = await clone.toByteData(format: ui.ImageByteFormat.png);
+      if (bytes == null) return;
+      await writePageRender(pageId, variant, bytes.buffer.asUint8List());
+    } catch (e) {
+      debugPrint('[bg] persist failed for $pageId: $e');
+    } finally {
+      clone.dispose();
+    }
+  }
+
+  Future<ui.Image> _downscale(ui.Image src, double targetWidth) async {
+    final scale = targetWidth / src.width;
+    if (scale >= 0.95) return src.clone();
+    final w = targetWidth.round().clamp(1, 4096);
+    final h = (src.height * scale).round().clamp(1, 4096);
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    canvas.drawImageRect(
+      src,
+      ui.Rect.fromLTWH(0, 0, src.width.toDouble(), src.height.toDouble()),
+      ui.Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+      ui.Paint()..filterQuality = ui.FilterQuality.medium,
+    );
+    final picture = recorder.endRecording();
+    try {
+      return await picture.toImage(w, h);
+    } finally {
+      picture.dispose();
     }
   }
 
   /// Renders [pages] in the background without blocking the caller, so the
   /// next pages are ready by the time they scroll into view.
-  void prefetch(Iterable<NotePage> pages) => prefetchAll(pages.take(2));
+  void prefetch(Iterable<NotePage> pages) => prefetchAll(pages.take(3));
 
   /// Like [prefetch], but does not cap the set — used to warm nearby pages
   /// after the open-document overlay has already dismissed.
@@ -540,7 +609,7 @@ class PageBackgroundService {
     final pending = _pdfDocs.remove(assetId);
     if (pending != null) {
       unawaited(
-        pending.then((doc) => doc.close()).catchError((_) {}),
+        pending.then((doc) => doc.dispose()).catchError((_) {}),
       );
     }
     _pdfQueues.remove(assetId)?.completeAll();
@@ -564,7 +633,7 @@ class PageBackgroundService {
     _thumbs.clear();
     for (final docFuture in _pdfDocs.values) {
       try {
-        (await docFuture).close();
+        (await docFuture).dispose();
       } catch (_) {}
     }
     _pdfDocs.clear();
@@ -601,20 +670,34 @@ class _PdfRenderJob {
   final String persistVariant;
   final double maxRenderSide;
   final Completer<ui.Image?> completer = Completer<ui.Image?>();
+  PdfPageRenderCancellationToken? cancelToken;
 }
 
 class _PdfRenderQueue {
   final List<_PdfRenderJob> _pending = [];
-  bool busy = false;
+  final List<_PdfRenderJob> _running = [];
+
+  /// Web PDFium/wasm is happier serial; native can overlap two pages.
+  static int get _maxActive => kIsWeb ? 1 : 2;
+
+  int get activeCount => _running.length;
+  bool get atCapacity => activeCount >= _maxActive;
 
   _PdfRenderJob? job(String key) {
     for (final item in _pending) {
+      if (item.key == key) return item;
+    }
+    for (final item in _running) {
       if (item.key == key) return item;
     }
     return null;
   }
 
   void enqueue(_PdfRenderJob job) => _pending.add(job);
+
+  void start(_PdfRenderJob job) => _running.add(job);
+
+  void finish(_PdfRenderJob job) => _running.remove(job);
 
   void dropStale(int generation) {
     final kept = <_PdfRenderJob>[];
@@ -629,13 +712,19 @@ class _PdfRenderQueue {
     _pending
       ..clear()
       ..addAll(kept);
+    for (final job in _running) {
+      if (job.priority == PageRenderPriority.visible) continue;
+      if (job.generation < generation) job.cancelToken?.cancel();
+    }
   }
 
   void completeAll() {
-    for (final job in _pending) {
+    for (final job in [..._pending, ..._running]) {
+      job.cancelToken?.cancel();
       if (!job.completer.isCompleted) job.completer.complete(null);
     }
     _pending.clear();
+    _running.clear();
   }
 
   _PdfRenderJob? takeNext() {

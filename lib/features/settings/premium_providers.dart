@@ -48,6 +48,7 @@ class BillingHistoryEntry {
   String get planLabel => switch (plan) {
         BillingPlan.yearly => 'Premium — Yearly',
         BillingPlan.monthly => 'Premium — Monthly',
+        BillingPlan.lifetime => 'Premium — Lifetime',
         BillingPlan.none => 'Premium',
       };
 
@@ -82,6 +83,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
       return switch (raw) {
         'monthly' => BillingPlan.monthly,
         'yearly' => BillingPlan.yearly,
+        'lifetime' => BillingPlan.lifetime,
         _ => BillingPlan.yearly,
       };
     }
@@ -94,12 +96,16 @@ class BillingPlanController extends Notifier<BillingPlan> {
     final paid = amountPhp ?? priceForPlan(plan);
     await prefs.setBool('is_premium', true);
     await prefs.setString(_planKey, plan.name);
-    final renew = DateTime.now().add(
-      plan == BillingPlan.yearly
-          ? const Duration(days: 365)
-          : const Duration(days: 30),
-    );
-    await prefs.setString(_renewKey, renew.toIso8601String());
+    if (plan == BillingPlan.lifetime) {
+      await prefs.remove(_renewKey);
+    } else {
+      final renew = DateTime.now().add(
+        plan == BillingPlan.yearly
+            ? const Duration(days: 365)
+            : const Duration(days: 30),
+      );
+      await prefs.setString(_renewKey, renew.toIso8601String());
+    }
     await _appendHistory(
       prefs,
       BillingHistoryEntry(
@@ -140,7 +146,9 @@ class BillingPlanController extends Notifier<BillingPlan> {
     final prefs = ref.read(sharedPrefsProvider);
     await prefs.setBool('is_premium', true);
     await prefs.setString(_planKey, plan.name);
-    if (expiresAt != null) {
+    if (plan == BillingPlan.lifetime || expiresAt == null) {
+      await prefs.remove(_renewKey);
+    } else {
       await prefs.setString(_renewKey, expiresAt.toIso8601String());
     }
     if (amountPhp != null) {
@@ -154,6 +162,16 @@ class BillingPlanController extends Notifier<BillingPlan> {
         ),
       );
     }
+    ref.invalidateSelf();
+    ref.invalidate(billingHistoryProvider);
+  }
+
+  /// Drop locally cached PayMongo/admin premium after the worker says free.
+  Future<void> clearFromPayMongo() async {
+    final prefs = ref.read(sharedPrefsProvider);
+    await prefs.setBool('is_premium', false);
+    await prefs.remove(_planKey);
+    await prefs.remove(_renewKey);
     ref.invalidateSelf();
     ref.invalidate(billingHistoryProvider);
   }

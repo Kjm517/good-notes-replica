@@ -8,7 +8,10 @@ import {
 } from './paymongo';
 import { resolveVoucherDiscount, validateVoucherPublic } from './vouchers';
 
-export type BillingPlan = 'monthly' | 'yearly';
+export type PaidBillingPlan = 'monthly' | 'yearly';
+export type BillingPlan = PaidBillingPlan | 'lifetime';
+
+export const LIFETIME_EXPIRES_AT = '9999-12-31T23:59:59.000Z';
 
 export interface BillingRecord {
   isPremium: boolean;
@@ -20,10 +23,23 @@ export interface BillingRecord {
   updatedAt: string;
 }
 
-const PLAN_AMOUNTS_CENTAVOS: Record<BillingPlan, number> = {
+const PLAN_AMOUNTS_CENTAVOS: Record<PaidBillingPlan, number> = {
   monthly: 19900,
   yearly: 149900,
 };
+
+/** Admin lifetime grants, or any expiry in year 2099+. */
+export function isLifetimeExpiry(expiresAt: string | null | undefined): boolean {
+  if (!expiresAt) return true;
+  const year = new Date(expiresAt).getUTCFullYear();
+  return Number.isFinite(year) && year >= 2099;
+}
+
+export function isLifetimeRecord(
+  record: Pick<BillingRecord, 'plan' | 'expiresAt'>,
+): boolean {
+  return record.plan === 'lifetime' || isLifetimeExpiry(record.expiresAt);
+}
 
 function billingKey(uid: string): string {
   return `users/${uid}/billing.json`;
@@ -37,7 +53,7 @@ export function payMongoConfigured(env: {
 
 export async function amountCentavosForPlan(
   bucket: R2Bucket,
-  plan: BillingPlan,
+  plan: PaidBillingPlan,
   voucher?: string | null,
 ): Promise<number> {
   const base = PLAN_AMOUNTS_CENTAVOS[plan];
@@ -80,7 +96,7 @@ export async function writeBillingRecord(
   });
 }
 
-function addPlanDuration(from: Date, plan: BillingPlan): Date {
+function addPlanDuration(from: Date, plan: PaidBillingPlan): Date {
   const next = new Date(from);
   if (plan === 'yearly') {
     next.setUTCDate(next.getUTCDate() + 365);
@@ -93,7 +109,7 @@ function addPlanDuration(from: Date, plan: BillingPlan): Date {
 export async function grantPremiumFromPayment(
   bucket: R2Bucket,
   uid: string,
-  plan: BillingPlan,
+  plan: PaidBillingPlan,
   opts?: { paymentIntentId?: string; wallet?: PayMongoWallet },
 ): Promise<BillingRecord> {
   const existing = await readBillingRecord(bucket, uid);
@@ -118,11 +134,23 @@ export async function grantPremiumFromPayment(
 }
 
 export function entitlementResponse(record: BillingRecord | null) {
-  if (!record?.isPremium || !record.expiresAt) {
+  if (!record?.isPremium) {
     return { isPremium: false, plan: null, expiresAt: null, source: null };
   }
-  const expiresAt = new Date(record.expiresAt);
-  if (expiresAt.getTime() <= Date.now()) {
+  // Lifetime: no expiry, far-future expiry, or explicit lifetime plan.
+  // Previously `!expiresAt` was treated as not premium, so admin lifetime
+  // grants never reached the app.
+  if (isLifetimeRecord(record)) {
+    return {
+      isPremium: true,
+      plan: 'lifetime' as const,
+      expiresAt: null,
+      source: record.source,
+      wallet: record.wallet ?? null,
+    };
+  }
+  const expiresAt = new Date(record.expiresAt!);
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
     return { isPremium: false, plan: null, expiresAt: null, source: null };
   }
   return {
@@ -148,7 +176,7 @@ export async function handleBillingCheckout(
   }
 
   const body = (await request.json()) as {
-    plan?: BillingPlan;
+    plan?: PaidBillingPlan;
     wallet?: PayMongoWallet;
     voucher?: string | null;
   };
