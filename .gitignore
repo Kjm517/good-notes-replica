@@ -33,6 +33,7 @@ migrate_working_dir/
 /build
 /build/
 /coverage/
+/vercel_out/
 
 # Symbolication related
 app.*.symbols
@@ -52,3 +53,12 @@ assets/env
 /android/app/debug
 /android/app/profile
 /android/app/release
+.dart_defines.web.json
+
+# Vercel CLI project link (org/project IDs, local only)
+.vercel
+.env*
+
+# Worker deps — regenerated with `npm install`, platform-specific binaries
+# (this is what blew past GitHub's 100MB file limit)
+worker/node_modules/
