@@ -66,6 +66,36 @@ class PayMongoEntitlement {
   }
 }
 
+/// Server-reported state of one payment intent.
+///
+/// `unknown` means "ask again" (PayMongo hiccup, or a card checkout session
+/// whose intent does not exist yet) — never treat it as a failure.
+enum PayMongoPaymentStatus { paid, pending, failed, unknown }
+
+class PayMongoStatus {
+  const PayMongoStatus({
+    required this.status,
+    required this.entitlement,
+  });
+
+  final PayMongoPaymentStatus status;
+  final PayMongoEntitlement entitlement;
+
+  bool get isPaid => status == PayMongoPaymentStatus.paid;
+
+  factory PayMongoStatus.fromJson(Map<String, dynamic> json) {
+    return PayMongoStatus(
+      status: switch (json['status'] as String?) {
+        'paid' => PayMongoPaymentStatus.paid,
+        'pending' => PayMongoPaymentStatus.pending,
+        'failed' => PayMongoPaymentStatus.failed,
+        _ => PayMongoPaymentStatus.unknown,
+      },
+      entitlement: PayMongoEntitlement.fromJson(json),
+    );
+  }
+}
+
 class PayMongoCheckout {
   const PayMongoCheckout({
     this.redirectUrl,
@@ -261,6 +291,25 @@ class PayMongoBillingService {
       throw StateError(message ?? 'Entitlement check failed.');
     }
     return PayMongoEntitlement.fromJson(body as Map<String, dynamic>);
+  }
+
+  /// Asks the worker whether [paymentIntentId] has been paid.
+  ///
+  /// The worker is the only thing that decides this — it retrieves the intent
+  /// from PayMongo and grants premium itself. This call cannot fake a payment.
+  Future<PayMongoStatus> fetchPaymentStatus(String paymentIntentId) async {
+    final headers = await _authHeaders();
+    final response = await _client.get(
+      _uri('/billing/status?paymentIntentId='
+          '${Uri.encodeQueryComponent(paymentIntentId)}'),
+      headers: headers,
+    );
+    final body = jsonDecode(response.body);
+    if (response.statusCode >= 400) {
+      final message = body is Map ? body['error'] as String? : null;
+      throw StateError(message ?? 'Payment check failed.');
+    }
+    return PayMongoStatus.fromJson(body as Map<String, dynamic>);
   }
 
   Future<void> markPendingCheckout(String paymentIntentId) async {

@@ -1,0 +1,4 @@
+{
+  "outputDirectory": "vercel_out",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}

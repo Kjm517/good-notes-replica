@@ -20,6 +20,7 @@ import {
   handleBillingCheckout,
   handleBillingEntitlement,
   handleBillingReturn,
+  handleBillingStatus,
   handleBillingWebhook,
   handleBillingVoucherValidate,
   payMongoConfigured,
@@ -237,6 +238,17 @@ async function handleBilling(
         const uid = await requireUid(request, env);
         return withCors(
           await handleBillingCheckout(request, env, uid, origin),
+        );
+      }
+
+      case 'GET /billing/status': {
+        const uid = await requireUid(request, env);
+        return withCors(
+          await handleBillingStatus(
+            env,
+            uid,
+            url.searchParams.get('paymentIntentId'),
+          ),
         );
       }
 

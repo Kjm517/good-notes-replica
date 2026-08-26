@@ -126,6 +126,24 @@ export async function grantPremiumFromPayment(
   opts?: { paymentIntentId?: string; wallet?: PayMongoMethod },
 ): Promise<BillingRecord> {
   const existing = await readBillingRecord(bucket, uid);
+
+  // Idempotency: the status endpoint polls every few seconds while the payer
+  // is looking at the QR, and the webhook / return page can fire for the same
+  // intent too. Without this guard each poll would extend the expiry again.
+  // Only PayMongo ids are deduped — voucher grants reuse their code as the id
+  // and must stay redeemable for a later renewal.
+  const dedupable =
+    opts?.paymentIntentId != null &&
+    (opts.paymentIntentId.startsWith('pi_') ||
+      opts.paymentIntentId.startsWith('cs_'));
+  if (
+    dedupable &&
+    existing?.isPremium &&
+    existing.paymentIntentId === opts!.paymentIntentId
+  ) {
+    return existing;
+  }
+
   const now = new Date();
   let base = now;
   if (existing?.expiresAt) {
@@ -263,6 +281,99 @@ export async function handleBillingEntitlement(
   return json(entitlementResponse(record));
 }
 
+export type BillingPaymentStatus =
+  | 'paid'
+  | 'pending'
+  | 'failed'
+  | 'unknown';
+
+/**
+ * Polled by the QR checkout screen while the payer is scanning.
+ *
+ * Confirmation is server-side only: we ask PayMongo what the intent's status
+ * is (or trust an already-written billing record). The client never asserts
+ * that it paid, so there is nothing for it to lie about — the same reason the
+ * webhook stays the primary grant path.
+ */
+export async function handleBillingStatus(
+  env: {
+    BUCKET: R2Bucket;
+    PAYMONGO_SECRET_KEY?: string;
+  },
+  uid: string,
+  paymentIntentId: string | null,
+): Promise<Response> {
+  if (!paymentIntentId?.trim()) {
+    return json({ error: 'Missing paymentIntentId.' }, 400);
+  }
+  const intentId = paymentIntentId.trim();
+
+  // Fast path: the webhook already landed for this intent.
+  const record = await readBillingRecord(env.BUCKET, uid);
+  if (record?.isPremium && record.paymentIntentId === intentId) {
+    return json({ status: 'paid', ...entitlementResponse(record) });
+  }
+
+  // Card checkout sessions (cs_...) have no retrievable intent until PayMongo
+  // creates one, so for those the webhook is the only signal.
+  if (!intentId.startsWith('pi_') || !payMongoConfigured(env)) {
+    return json({
+      status: record?.isPremium ? 'paid' : 'pending',
+      ...entitlementResponse(record ?? null),
+    });
+  }
+
+  let intent: { status: string; metadata: Record<string, string> };
+  try {
+    intent = await retrievePaymentIntent(env.PAYMONGO_SECRET_KEY!, intentId);
+  } catch {
+    // Transient PayMongo error — the poller should keep waiting, not fail.
+    return json({ status: 'unknown', ...entitlementResponse(record ?? null) });
+  }
+
+  // The intent id came from the client, so bind it to the caller before it can
+  // grant anything: without this, any signed-in user could poll someone else's
+  // successful intent and be handed their premium.
+  if (intent.metadata.uid !== uid) {
+    return json({ error: 'Payment does not belong to this account.' }, 403);
+  }
+
+  const status = mapIntentStatus(intent.status);
+  if (status === 'paid') {
+    const plan = intent.metadata.plan;
+    if (plan !== 'monthly' && plan !== 'yearly') {
+      return json({ status: 'unknown', ...entitlementResponse(record ?? null) });
+    }
+    const granted = await grantPremiumFromPayment(env.BUCKET, uid, plan, {
+      paymentIntentId: intentId,
+      wallet: (intent.metadata.method ?? intent.metadata.wallet) as
+        | PayMongoMethod
+        | undefined,
+    });
+    return json({ status: 'paid', ...entitlementResponse(granted) });
+  }
+
+  return json({ status, ...entitlementResponse(record ?? null) });
+}
+
+function mapIntentStatus(raw: string): BillingPaymentStatus {
+  switch (raw) {
+    case 'succeeded':
+    case 'paid':
+      return 'paid';
+    case 'awaiting_payment_method':
+    case 'awaiting_next_action':
+    case 'processing':
+      return 'pending';
+    case 'cancelled':
+    case 'canceled':
+    case 'failed':
+      return 'failed';
+    default:
+      return 'unknown';
+  }
+}
+
 export async function handleBillingReturn(
   request: Request,
   env: {
@@ -275,6 +386,8 @@ export async function handleBillingReturn(
     url.searchParams.get('payment_intent_id') ??
     url.searchParams.get('payment_intent');
 
+  let paid = false;
+
   if (paymentIntentId && payMongoConfigured(env)) {
     try {
       const intent = await retrievePaymentIntent(
@@ -282,6 +395,7 @@ export async function handleBillingReturn(
         paymentIntentId,
       );
       if (intent.status === 'succeeded') {
+        paid = true;
         const uid = intent.metadata.uid;
         const plan = intent.metadata.plan as BillingPlan | undefined;
         const wallet = intent.metadata.wallet as PayMongoMethod | undefined;
@@ -297,7 +411,8 @@ export async function handleBillingReturn(
     }
   }
 
-  return htmlReturnPage(url.searchParams.get('status'));
+  const status = url.searchParams.get('status');
+  return htmlReturnPage(paid || status !== 'failed');
 }
 
 export async function handleBillingWebhook(
@@ -384,8 +499,10 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function htmlReturnPage(status: string | null): Response {
-  const paid = status !== 'failed';
+/** Custom scheme already registered natively for Supabase's own OAuth return. */
+const APP_DEEP_LINK = 'io.supabase.notably://billing-callback/';
+
+function htmlReturnPage(paid: boolean): Response {
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -399,16 +516,25 @@ function htmlReturnPage(status: string | null): Response {
     .card { max-width:420px; background:#1c1c1c; border:1px solid #333;
       border-radius:16px; padding:28px; text-align:center; }
     h1 { font-size:22px; margin:0 0 8px; }
-    p { color:#aaa; line-height:1.5; margin:0; }
+    p { color:#aaa; line-height:1.5; margin:0 0 20px; }
+    a.button { display:inline-block; background:#fff; color:#111; text-decoration:none;
+      font-weight:600; padding:12px 22px; border-radius:12px; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>${paid ? 'Payment received' : 'Payment incomplete'}</h1>
     <p>${paid
-      ? 'Return to the Notably app — Premium unlocks automatically once payment is confirmed.'
+      ? 'Taking you back to Notably — Premium unlocks automatically.'
       : 'You can close this page and try again from Notably.'}</p>
+    <a class="button" href="${APP_DEEP_LINK}">Open Notably</a>
   </div>
+  <script>
+    // Most mobile browsers allow one programmatic custom-scheme navigation
+    // right after page load; if the app isn't installed this just no-ops and
+    // the button above stays as a manual fallback.
+    location.href = ${JSON.stringify(APP_DEEP_LINK)};
+  </script>
 </body>
 </html>`;
   return new Response(html, {

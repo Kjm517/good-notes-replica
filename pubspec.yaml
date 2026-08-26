@@ -72,6 +72,8 @@ dependencies:
   # (avoids a second, different splash flash). CLI generators stay in
   # dev_dependencies below.
   flutter_native_splash: ^2.4.7
+  qr_flutter: ^4.1.0
+  app_links: ^7.2.1
 
 dev_dependencies:
   flutter_test:

@@ -15,11 +15,12 @@ import 'entitlements.dart';
 import 'payment_marks.dart';
 import 'paymongo_billing.dart';
 import 'premium_providers.dart';
+import 'qr_checkout_screen.dart';
 import 'revenuecat_billing.dart';
 import 'settings_widgets.dart';
 import '../admin/voucher_api.dart';
 
-enum _PayMethod { store, card, gcash, maya }
+enum _PayMethod { store, card, gcash, maya, qr }
 
 class PaymentSheet extends ConsumerStatefulWidget {
   const PaymentSheet({
@@ -152,6 +153,9 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
         _PayMethod.card => PayMongoMethod.card,
         _PayMethod.gcash => PayMongoMethod.gcash,
         _PayMethod.maya => PayMongoMethod.paymaya,
+        // The QR encodes GCash's hosted payment page, so it is a GCash intent
+        // as far as PayMongo and the webhook are concerned.
+        _PayMethod.qr => PayMongoMethod.gcash,
         _ => null,
       };
 
@@ -231,6 +235,24 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
       await billing.markPendingCheckout(pendingId);
     }
 
+    if (_method == _PayMethod.qr) {
+      if (pendingId == null || pendingId.isEmpty) {
+        throw StateError('Checkout did not return a payment reference.');
+      }
+      if (!mounted) return;
+      // Hand off to the scan screen; it polls the worker and, on success,
+      // refreshes entitlement and routes to Settings itself.
+      await QrCheckoutScreen.show(
+        context,
+        plan: widget.plan,
+        method: method,
+        amountPhp: _subtotal - _discount(true),
+        redirectUrl: redirect,
+        paymentIntentId: pendingId,
+      );
+      return;
+    }
+
     final uri = Uri.parse(redirect);
     final launched = await launchUrl(
       uri,
@@ -247,7 +269,9 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Complete payment, then return to Notably.',
+          kIsWeb
+              ? 'Complete payment, then return to Notably.'
+              : 'Complete payment — you\'ll be brought back to Notably automatically.',
         ),
         duration: const Duration(seconds: 6),
       ),
@@ -404,6 +428,25 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
                   selected: _method == _PayMethod.maya,
                   onTap: () => setState(() => _method = _PayMethod.maya),
                 ),
+                _PayRow(
+                  leading: SizedBox(
+                    width: PaymentMark.slotWidth,
+                    height: PaymentMark.size,
+                    child: Center(
+                      child: Icon(
+                        Icons.qr_code_2_rounded,
+                        size: 22,
+                        color: _method == _PayMethod.qr
+                            ? t.premiumText
+                            : t.textMuted,
+                      ),
+                    ),
+                  ),
+                  label: 'Scan QR code',
+                  subtitle: 'Pay from your phone · confirms automatically',
+                  selected: _method == _PayMethod.qr,
+                  onTap: () => setState(() => _method = _PayMethod.qr),
+                ),
               ],
               if (!_useStore && !_useWallets)
                 Padding(
@@ -447,6 +490,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
 
   String _buttonLabel() {
     if (_method == _PayMethod.store && _useStore) return 'Start free trial';
+    if (_method == _PayMethod.qr) return 'Show QR code';
     if (_selectedPayMongo != null) {
       return _selectedPayMongo == PayMongoMethod.card
           ? 'Pay with card'
@@ -456,6 +500,10 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
   }
 
   String _footnote() {
+    if (_method == _PayMethod.qr) {
+      return 'Scan with your phone. Premium unlocks by itself once PayMongo '
+          'confirms the payment.';
+    }
     if (kIsWeb) {
       return 'On the web, Premium is billed with card, GCash, or Maya.';
     }

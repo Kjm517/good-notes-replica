@@ -43,6 +43,15 @@
                     android:scheme="io.supabase.notably"
                     android:host="login-callback"/>
             </intent-filter>
+            <!-- PayMongo checkout return (io.supabase.notably://billing-callback/). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="io.supabase.notably"
+                    android:host="billing-callback"/>
+            </intent-filter>
         </activity>
         <service
             android:name=".SyncForegroundService"

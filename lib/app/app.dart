@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +11,7 @@ import '../core/sync/user_telemetry.dart';
 import '../core/sync/background_keep_alive.dart';
 import '../features/auth/providers.dart';
 import '../features/settings/paymongo_billing.dart';
+import '../features/settings/premium_providers.dart';
 import '../features/settings/revenuecat_billing.dart';
 import '../features/settings/entitlements.dart';
 import 'supabase_bootstrap.dart';
@@ -34,11 +37,15 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
   bool _heartbeatSent = false;
   bool _nativeSplashRemoved = false;
 
+  StreamSubscription<Uri>? _billingLinkSub;
+  final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     BackgroundKeepAlive.bindNative();
+    if (!kIsWeb) _initBillingDeepLink();
 
     // Auth restore is a network round trip on some devices and can stall on a
     // broken or offline Play services install. Falling through to the router
@@ -52,8 +59,52 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
   @override
   void dispose() {
     _splashTimer?.cancel();
+    unawaited(_billingLinkSub?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// Listens for `io.supabase.notably://billing-callback/` — the app returns
+  /// here after a PayMongo checkout opened in the system browser.
+  ///
+  /// The link itself carries no payment claim; it is only a signal to go
+  /// re-ask the worker (which re-asks PayMongo) what actually happened. Both
+  /// the cold-start link (app was closed while paying) and the live stream
+  /// (app was merely backgrounded) are covered.
+  void _initBillingDeepLink() {
+    final appLinks = AppLinks();
+
+    appLinks.getInitialLink().then((uri) {
+      if (uri != null) _handleBillingLink(uri);
+    });
+
+    _billingLinkSub = appLinks.uriLinkStream.listen(
+      _handleBillingLink,
+      onError: (Object e) => debugPrint('Billing deep link error: $e'),
+    );
+  }
+
+  void _handleBillingLink(Uri uri) {
+    if (uri.host != 'billing-callback') return;
+    unawaited(_settleBillingReturn());
+  }
+
+  Future<void> _settleBillingReturn() async {
+    await ref.read(payMongoEntitlementRefreshProvider)();
+    if (!mounted) return;
+    final router = ref.read(routerProvider);
+    final isPremium = ref.read(payMongoPremiumActiveProvider);
+    router.go('/settings');
+    final messenger = _scaffoldMessengerKey.currentState;
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(
+          isPremium
+              ? 'Payment received — Premium is active.'
+              : 'Back in Notably — checking your payment…',
+        ),
+      ),
+    );
   }
 
   @override
@@ -121,6 +172,7 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
 
     return MaterialApp.router(
       title: 'Notably',
+      scaffoldMessengerKey: _scaffoldMessengerKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
