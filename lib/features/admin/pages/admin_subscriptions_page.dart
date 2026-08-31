@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../app/design.dart';
 import '../admin_api.dart';
 import '../csv_export.dart';
 import '../widgets/admin_widgets.dart';
+import '../widgets/edit_subscription_dialog.dart';
 
 class AdminSubscriptionsPage extends ConsumerStatefulWidget {
   const AdminSubscriptionsPage({super.key});
@@ -36,6 +38,15 @@ class _AdminSubscriptionsPageState extends ConsumerState<AdminSubscriptionsPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
       }
+    }
+  }
+
+  Future<void> _edit(AdminSubscriptionRow row) async {
+    final saved = await EditSubscriptionDialog.show(context, row);
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Subscription updated')),
+      );
     }
   }
 
@@ -101,7 +112,7 @@ class _AdminSubscriptionsPageState extends ConsumerState<AdminSubscriptionsPage>
                     columns: const ['User', 'Plan', 'Expires', 'MRR', ''],
                     // Wider than the icon default: this column holds a
                     // "Revoke"/"Grant" text button, which 52px would clip.
-                    actionWidth: 104,
+                    actionWidth: 148,
                     flex: const [5, 2, 2, 2],
                     emptyMessage: 'No subscription records yet.',
                     rows: [
@@ -121,16 +132,21 @@ class _AdminSubscriptionsPageState extends ConsumerState<AdminSubscriptionsPage>
                             label: s.isPremium ? (s.plan ?? 'premium') : 'lapsed',
                             color: s.isPremium ? t.success : t.textMuted,
                           ),
-                          Text(
-                            s.plan == 'lifetime'
-                                ? 'Never'
-                                : s.expiresAt?.substring(0, 10) ?? '—',
-                            style: AppTokens.mono(size: 11, color: t.textMuted),
-                          ),
+                          _ExpiryCell(row: s, t: t),
                           Text(formatPhp(s.mrrPhp.round()), style: TextStyle(color: t.textSecondary)),
-                          TextButton(
-                            onPressed: () => _toggle(s),
-                            child: Text(s.isPremium ? 'Revoke' : 'Grant'),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Edit plan and expiry',
+                                icon: const Icon(Icons.edit_outlined, size: 18),
+                                onPressed: () => _edit(s),
+                              ),
+                              TextButton(
+                                onPressed: () => _toggle(s),
+                                child: Text(s.isPremium ? 'Revoke' : 'Grant'),
+                              ),
+                            ],
                           ),
                         ],
                     ],
@@ -141,6 +157,45 @@ class _AdminSubscriptionsPageState extends ConsumerState<AdminSubscriptionsPage>
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Expiry with the time of day, since the edit dialog sets minutes and a
+/// date-only column would make two different expiries look identical.
+class _ExpiryCell extends StatelessWidget {
+  const _ExpiryCell({required this.row, required this.t});
+
+  final AdminSubscriptionRow row;
+  final AppTokens t;
+
+  @override
+  Widget build(BuildContext context) {
+    if (row.plan == 'lifetime') {
+      return Text('Never', style: AppTokens.mono(size: 11, color: t.textMuted));
+    }
+    final parsed = row.expiresAt == null
+        ? null
+        : DateTime.tryParse(row.expiresAt!)?.toLocal();
+    if (parsed == null) {
+      return Text('—', style: AppTokens.mono(size: 11, color: t.textMuted));
+    }
+    final past = parsed.isBefore(DateTime.now());
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          DateFormat('MMM d, y').format(parsed),
+          style: AppTokens.mono(
+            size: 11,
+            color: past ? t.textFaint : t.textMuted,
+          ),
+        ),
+        Text(
+          DateFormat('h:mm a').format(parsed),
+          style: AppTokens.mono(size: 9, color: t.textFaint),
+        ),
+      ],
     );
   }
 }

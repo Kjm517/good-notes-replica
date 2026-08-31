@@ -75,5 +75,14 @@ cp -R "$OUT/." "$DEPLOY_DIR/"
 [[ -d "$LINK_BACKUP/.vercel" ]] && cp -R "$LINK_BACKUP/.vercel" "$DEPLOY_DIR/"
 rm -rf "$LINK_BACKUP"
 
+# go_router does client-side routing, so every path must serve index.html.
+# Generated rather than copied: this directory is wiped on each build, and a
+# missing rewrite 404s every deep link (/settings, /doc/<id>) on refresh.
+cat > "$DEPLOY_DIR/vercel.json" <<'JSON'
+{
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
+JSON
+
 echo "Built: $OUT"
 echo "Mirrored for Vercel: $DEPLOY_DIR"
