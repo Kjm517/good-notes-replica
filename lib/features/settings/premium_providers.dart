@@ -16,6 +16,7 @@ const _planKey = 'billing_plan';
 const _renewKey = 'premium_renews_at';
 const _methodKey = 'premium_paid_with';
 const _reminderKey = 'premium_renewal_reminder';
+const _cancelledKey = 'premium_cancelled_at';
 
 /// How far ahead of expiry we start nudging.
 const kRenewalReminderWindow = Duration(days: 3);
@@ -165,6 +166,8 @@ class BillingPlanController extends Notifier<BillingPlan> {
     await prefs.setBool('is_premium', true);
     await prefs.setString(_planKey, plan.name);
     if (method != null) await prefs.setString(_methodKey, method);
+    // Paying again un-cancels: the user clearly wants to continue.
+    await prefs.remove(_cancelledKey);
     if (plan == BillingPlan.lifetime || expiresAt == null) {
       await prefs.remove(_renewKey);
     } else {
@@ -197,6 +200,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
     await prefs.remove(_planKey);
     await prefs.remove(_renewKey);
     await prefs.remove(_methodKey);
+    await prefs.remove(_cancelledKey);
     state = BillingPlan.none;
   }
 
@@ -207,6 +211,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
     await prefs.remove(_planKey);
     await prefs.remove(_renewKey);
     await prefs.remove(_methodKey);
+    await prefs.remove(_cancelledKey);
     ref.invalidateSelf();
     ref.invalidate(billingHistoryProvider);
   }
@@ -298,6 +303,41 @@ final premiumAutoRenewsProvider = Provider<bool>((ref) {
       ref.watch(rcPremiumActiveProvider);
 });
 
+/// When the user cancelled, or null if they have not.
+///
+/// Cancelling never shortens the paid term — entitlement is derived from
+/// `expiresAt` alone, so this only records intent and changes what the UI
+/// offers. For wallet terms there is no recurring charge to stop in the first
+/// place; for store subscriptions Apple/Google own the real cancellation.
+final premiumCancelledAtProvider = StateProvider<DateTime?>((ref) {
+  ref.watch(billingPlanProvider);
+  final raw = ref.watch(sharedPrefsProvider).getString(_cancelledKey);
+  return raw == null ? null : DateTime.tryParse(raw);
+});
+
+final premiumCancelledProvider = Provider<bool>((ref) {
+  return ref.watch(premiumCancelledAtProvider) != null;
+});
+
+/// Marks the plan as not continuing. Access runs to the existing expiry.
+Future<void> cancelPremiumRenewal(WidgetRef ref) async {
+  final now = DateTime.now();
+  await ref.read(sharedPrefsProvider).setString(
+        _cancelledKey,
+        now.toIso8601String(),
+      );
+  ref.read(premiumCancelledAtProvider.notifier).state = now;
+  // Nothing left to remind them about.
+  await setRenewalReminder(ref, false);
+}
+
+/// Undoes a cancellation without taking payment — the term never lapsed.
+Future<void> resumePremiumRenewal(WidgetRef ref) async {
+  await ref.read(sharedPrefsProvider).remove(_cancelledKey);
+  ref.read(premiumCancelledAtProvider.notifier).state = null;
+  await setRenewalReminder(ref, true);
+}
+
 /// Whether the user wants to be reminded before Premium lapses. Default on:
 /// a one-time term that ends silently is the whole problem this solves.
 final renewalReminderEnabledProvider = StateProvider<bool>((ref) {
@@ -317,6 +357,7 @@ Future<void> setRenewalReminder(WidgetRef ref, bool enabled) async {
 /// subscription (nothing to do), or still comfortably far from expiry.
 final premiumExpiringSoonProvider = Provider<int?>((ref) {
   if (!ref.watch(renewalReminderEnabledProvider)) return null;
+  if (ref.watch(premiumCancelledProvider)) return null;
   if (!ref.watch(isPremiumProvider)) return null;
   if (ref.watch(premiumAutoRenewsProvider)) return null;
   if (ref.watch(billingPlanProvider) == BillingPlan.lifetime) return null;

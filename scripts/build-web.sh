@@ -65,9 +65,15 @@ PY
 # Mirror the real output into a plain on-disk directory so `vercel.json`'s
 # outputDirectory has real files to find.
 DEPLOY_DIR="$ROOT/vercel_out"
+# Preserve the Vercel project link across rebuilds — wiping it makes the next
+# `vercel --prod` try to create a new project instead of updating this one.
+LINK_BACKUP="$(mktemp -d)"
+[[ -d "$DEPLOY_DIR/.vercel" ]] && cp -R "$DEPLOY_DIR/.vercel" "$LINK_BACKUP/"
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
 cp -R "$OUT/." "$DEPLOY_DIR/"
+[[ -d "$LINK_BACKUP/.vercel" ]] && cp -R "$LINK_BACKUP/.vercel" "$DEPLOY_DIR/"
+rm -rf "$LINK_BACKUP"
 
 echo "Built: $OUT"
 echo "Mirrored for Vercel: $DEPLOY_DIR"

@@ -81,7 +81,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             const RenewalReminderCard(),
-                            _ActivePlanCard(plan: plan, renewsAt: renews),
+                            _ActivePlanCard(
+                              plan: plan,
+                              renewsAt: renews,
+                              cancelled: ref.watch(premiumCancelledProvider),
+                            ),
                           ],
                         )
                       : ent?.isTrialActive == true
@@ -376,10 +380,15 @@ class _GoPremiumCard extends StatelessWidget {
 }
 
 class _ActivePlanCard extends StatelessWidget {
-  const _ActivePlanCard({required this.plan, this.renewsAt});
+  const _ActivePlanCard({
+    required this.plan,
+    this.renewsAt,
+    this.cancelled = false,
+  });
 
   final BillingPlan plan;
   final DateTime? renewsAt;
+  final bool cancelled;
 
   @override
   Widget build(BuildContext context) {
@@ -390,7 +399,9 @@ class _ActivePlanCard extends StatelessWidget {
         ? 'Never expires'
         : renewsAt == null
             ? 'Active subscription'
-            : 'Renews ${DateFormat.yMMMd().format(renewsAt!)}';
+            : cancelled
+                ? 'Cancelled · active until ${DateFormat.yMMMd().format(renewsAt!)}'
+                : 'Renews ${DateFormat.yMMMd().format(renewsAt!)}';
 
     return PremiumGradientCard(
       child: Column(
@@ -419,7 +430,10 @@ class _ActivePlanCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const TierBadge(label: 'Active', premium: true),
+              TierBadge(
+                label: cancelled ? 'Ending' : 'Active',
+                premium: true,
+              ),
             ],
           ),
           const SizedBox(height: 14),

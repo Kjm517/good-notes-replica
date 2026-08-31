@@ -40,6 +40,7 @@ class ManagePlanSheet extends ConsumerWidget {
     final renewsAt = ref.watch(premiumRenewsAtProvider);
     final autoRenews = ref.watch(premiumAutoRenewsProvider);
     final paidWith = ref.watch(premiumPaidWithProvider);
+    final cancelled = ref.watch(premiumCancelledProvider);
     final lifetime = plan == BillingPlan.lifetime;
     final error = Theme.of(context).colorScheme.error;
 
@@ -64,7 +65,7 @@ class ManagePlanSheet extends ConsumerWidget {
                 _statusLine(
                   lifetime: lifetime,
                   autoRenews: autoRenews,
-                  renewsAt: renewsAt,
+                  cancelled: cancelled,
                 ),
                 style: AppTokens.mono(size: 11, color: t.textFaint),
               ),
@@ -89,9 +90,9 @@ class ManagePlanSheet extends ConsumerWidget {
                   _DetailRow(
                     label: lifetime
                         ? 'Expires'
-                        : autoRenews
+                        : (autoRenews && !cancelled)
                             ? 'Renews'
-                            : 'Ends',
+                            : 'Access until',
                     value: lifetime
                         ? 'Never'
                         : renewsAt == null
@@ -106,7 +107,7 @@ class ManagePlanSheet extends ConsumerWidget {
                     ),
                 ],
               ),
-              if (!lifetime && !autoRenews) ...[
+              if (!lifetime && !autoRenews && !cancelled) ...[
                 const SizedBox(height: 10),
                 SettingsGroupCard(
                   children: [
@@ -128,20 +129,28 @@ class ManagePlanSheet extends ConsumerWidget {
                 ),
               ],
               const SizedBox(height: 14),
-              _RenewalNotice(autoRenews: autoRenews, lifetime: lifetime),
+              _RenewalNotice(
+                autoRenews: autoRenews,
+                lifetime: lifetime,
+                cancelled: cancelled,
+                renewsAt: renewsAt,
+              ),
               const SizedBox(height: 18),
               if (!lifetime) ...[
-                if (autoRenews)
+                if (cancelled)
+                  // Nothing was taken away — offer the way back.
                   OutlinedButton(
-                    onPressed: () => _openStoreSubscriptions(context),
+                    onPressed: () => resumePremiumRenewal(ref),
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size.fromHeight(48),
-                      foregroundColor: error,
-                      side: BorderSide(color: error.withValues(alpha: 0.4)),
+                      foregroundColor: t.premiumText,
+                      side: BorderSide(
+                        color: t.premium.withValues(alpha: 0.4),
+                      ),
                     ),
-                    child: const Text('Cancel subscription'),
+                    child: const Text('Keep Premium'),
                   )
-                else
+                else ...[
                   FilledButton(
                     onPressed: () {
                       Navigator.of(context).pop();
@@ -152,8 +161,28 @@ class ManagePlanSheet extends ConsumerWidget {
                       backgroundColor: t.premium,
                       foregroundColor: t.premiumOn,
                     ),
-                    child: const Text('Extend Premium'),
+                    child: Text(
+                      autoRenews ? 'Change plan' : 'Extend Premium',
+                    ),
                   ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: () => _confirmCancel(
+                      context,
+                      ref,
+                      autoRenews: autoRenews,
+                      renewsAt: renewsAt,
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      foregroundColor: error,
+                      side: BorderSide(color: error.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(
+                      autoRenews ? 'Cancel subscription' : 'Cancel Premium',
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 10),
               ],
               Text(
@@ -171,9 +200,10 @@ class ManagePlanSheet extends ConsumerWidget {
   String _statusLine({
     required bool lifetime,
     required bool autoRenews,
-    required DateTime? renewsAt,
+    required bool cancelled,
   }) {
     if (lifetime) return 'Lifetime access · never expires';
+    if (cancelled) return 'Cancelled · active until it ends';
     if (autoRenews) return 'Active · renews automatically';
     return 'Active · one-time term';
   }
@@ -200,6 +230,55 @@ class ManagePlanSheet extends ConsumerWidget {
     }
     if (left.inHours >= 1) return '${left.inHours}h';
     return 'Less than an hour';
+  }
+
+  /// Confirms before cancelling, and is explicit that access is not lost now.
+  Future<void> _confirmCancel(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool autoRenews,
+    required DateTime? renewsAt,
+  }) async {
+    final until = renewsAt == null
+        ? 'the end of your current term'
+        : DateFormat.yMMMd().format(renewsAt);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cancel Premium?'),
+        content: Text(
+          autoRenews
+              ? 'You will keep Premium until $until, and will not be charged '
+                  'again. Cancelling happens in your app store account — we '
+                  'will take you there next.'
+              : 'You will keep Premium until $until. Nothing is refunded and '
+                  'nothing further is charged.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep Premium'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            child: const Text('Cancel Premium'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await cancelPremiumRenewal(ref);
+
+    // Apple and Google own the actual subscription; the local flag alone would
+    // not stop their billing, so send the user where it can be stopped.
+    if (autoRenews && context.mounted) {
+      await _openStoreSubscriptions(context);
+    }
   }
 
   String _footnote({required bool autoRenews, required bool lifetime}) {
@@ -230,15 +309,45 @@ class ManagePlanSheet extends ConsumerWidget {
 
 /// Explains what happens at the end of the term, which differs per platform.
 class _RenewalNotice extends StatelessWidget {
-  const _RenewalNotice({required this.autoRenews, required this.lifetime});
+  const _RenewalNotice({
+    required this.autoRenews,
+    required this.lifetime,
+    required this.cancelled,
+    required this.renewsAt,
+  });
 
   final bool autoRenews;
   final bool lifetime;
+  final bool cancelled;
+  final DateTime? renewsAt;
 
   @override
   Widget build(BuildContext context) {
     if (lifetime) return const SizedBox.shrink();
     final t = context.tokens;
+    final until =
+        renewsAt == null ? null : DateFormat.yMMMd().format(renewsAt!);
+
+    final (IconData icon, String message) = cancelled
+        ? (
+            Icons.check_circle_outline_rounded,
+            until == null
+                ? 'Cancelled. Premium stays active until the end of your '
+                    'current term.'
+                : 'Cancelled. Premium stays fully active until $until — '
+                    'nothing changes before then.',
+          )
+        : autoRenews
+            ? (
+                Icons.autorenew_rounded,
+                'Renews automatically. You will be charged again on the date '
+                    'above unless you cancel.',
+              )
+            : (
+                Icons.event_busy_outlined,
+                'Premium ends on the date above. Wallet payments (GCash, '
+                    'Maya, QR Ph) are one-time — nothing is charged again.',
+              );
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -249,21 +358,11 @@ class _RenewalNotice extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            autoRenews
-                ? Icons.autorenew_rounded
-                : Icons.event_busy_outlined,
-            size: 18,
-            color: t.textMuted,
-          ),
+          Icon(icon, size: 18, color: t.textMuted),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              autoRenews
-                  ? 'Renews automatically. You will be charged again on the '
-                      'date above unless you cancel.'
-                  : 'Premium ends on the date above. Wallet payments (GCash, '
-                      'Maya, QR Ph) are one-time — nothing is charged again.',
+              message,
               style: TextStyle(fontSize: 12, height: 1.4, color: t.textMuted),
             ),
           ),
