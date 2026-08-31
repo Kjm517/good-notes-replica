@@ -14,6 +14,11 @@ export 'billing_plan.dart';
 
 const _planKey = 'billing_plan';
 const _renewKey = 'premium_renews_at';
+const _methodKey = 'premium_paid_with';
+const _reminderKey = 'premium_renewal_reminder';
+
+/// How far ahead of expiry we start nudging.
+const kRenewalReminderWindow = Duration(days: 3);
 const _historyKey = 'billing_history_json';
 
 /// Live premium flag from RevenueCat when configured.
@@ -154,10 +159,12 @@ class BillingPlanController extends Notifier<BillingPlan> {
     required BillingPlan plan,
     DateTime? expiresAt,
     double? amountPhp,
+    String? method,
   }) async {
     final prefs = ref.read(sharedPrefsProvider);
     await prefs.setBool('is_premium', true);
     await prefs.setString(_planKey, plan.name);
+    if (method != null) await prefs.setString(_methodKey, method);
     if (plan == BillingPlan.lifetime || expiresAt == null) {
       await prefs.remove(_renewKey);
     } else {
@@ -189,6 +196,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
     await prefs.setBool('is_premium', false);
     await prefs.remove(_planKey);
     await prefs.remove(_renewKey);
+    await prefs.remove(_methodKey);
     state = BillingPlan.none;
   }
 
@@ -198,6 +206,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
     await prefs.setBool('is_premium', false);
     await prefs.remove(_planKey);
     await prefs.remove(_renewKey);
+    await prefs.remove(_methodKey);
     ref.invalidateSelf();
     ref.invalidate(billingHistoryProvider);
   }
@@ -272,6 +281,55 @@ final premiumRenewsAtProvider = Provider<DateTime?>((ref) {
   if (raw == null) return null;
   return DateTime.tryParse(raw);
 });
+/// How the active term was paid for ('card', 'gcash', 'paymaya', 'qrph'),
+/// or null for store purchases and admin grants.
+final premiumPaidWithProvider = Provider<String?>((ref) {
+  ref.watch(billingPlanProvider);
+  return ref.watch(sharedPrefsProvider).getString(_methodKey);
+});
+
+/// Whether the current Premium renews itself when the term ends.
+///
+/// Store subscriptions (Apple/Google) do. PayMongo terms are one-time charges
+/// — GCash and QR Ph cannot be auto-debited at all, so those simply lapse.
+final premiumAutoRenewsProvider = Provider<bool>((ref) {
+  if (!ref.watch(isPremiumProvider)) return false;
+  return ref.watch(revenueCatConfiguredProvider) &&
+      ref.watch(rcPremiumActiveProvider);
+});
+
+/// Whether the user wants to be reminded before Premium lapses. Default on:
+/// a one-time term that ends silently is the whole problem this solves.
+final renewalReminderEnabledProvider = StateProvider<bool>((ref) {
+  return ref.watch(sharedPrefsProvider).getBool(_reminderKey) ?? true;
+});
+
+/// Takes the widget-side [WidgetRef] since both callers (the reminder card and
+/// the manage sheet) are widgets.
+Future<void> setRenewalReminder(WidgetRef ref, bool enabled) async {
+  await ref.read(sharedPrefsProvider).setBool(_reminderKey, enabled);
+  ref.read(renewalReminderEnabledProvider.notifier).state = enabled;
+}
+
+/// Days until Premium lapses, when it is close enough to warn about.
+///
+/// Null when not premium, on a lifetime plan, on an auto-renewing store
+/// subscription (nothing to do), or still comfortably far from expiry.
+final premiumExpiringSoonProvider = Provider<int?>((ref) {
+  if (!ref.watch(renewalReminderEnabledProvider)) return null;
+  if (!ref.watch(isPremiumProvider)) return null;
+  if (ref.watch(premiumAutoRenewsProvider)) return null;
+  if (ref.watch(billingPlanProvider) == BillingPlan.lifetime) return null;
+
+  final renewsAt = ref.watch(premiumRenewsAtProvider);
+  if (renewsAt == null) return null;
+
+  final left = renewsAt.difference(DateTime.now());
+  if (left.isNegative) return 0;
+  if (left > kRenewalReminderWindow) return null;
+  return left.inDays;
+});
+
 /// Quizzes completed this calendar month (all documents).
 final monthlyQuizUsageProvider = FutureProvider<({int used, int limit})>(
   (ref) async {

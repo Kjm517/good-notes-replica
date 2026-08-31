@@ -10,6 +10,7 @@ import {
   listBugReports,
   readBugAttachment,
   listDocuments,
+  listPayments,
   listSubscriptions,
   listTeam,
   listUsers,
@@ -230,6 +231,13 @@ export async function handleAdmin(
   }
 
   // ---- Subscriptions ----------------------------------------------
+  // Read-only, so viewers get it too — same rule as the subscriptions list.
+  if (path === '/admin/payments' && method === 'GET') {
+    await requireStaff(request, env);
+    const payments = await listPayments(env.BUCKET);
+    return json({ payments });
+  }
+
   if (path === '/admin/subscriptions' && method === 'GET') {
     await requireStaff(request, env);
     const subscriptions = await listSubscriptions(env.BUCKET);

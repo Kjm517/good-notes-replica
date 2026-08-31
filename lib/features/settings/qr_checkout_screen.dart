@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -31,17 +33,26 @@ class QrCheckoutScreen extends ConsumerStatefulWidget {
     required this.plan,
     required this.method,
     required this.amountPhp,
-    required this.redirectUrl,
     required this.paymentIntentId,
-  });
+    this.redirectUrl,
+    this.qrImageUrl,
+  }) : assert(
+          redirectUrl != null || qrImageUrl != null,
+          'Need something to show: a URL to encode or a QR image.',
+        );
 
   final BillingPlan plan;
   final PayMongoMethod method;
   final double amountPhp;
 
-  /// PayMongo's hosted payment page. This is what the QR encodes — scanning it
-  /// with a phone camera opens the wallet's own checkout.
-  final String redirectUrl;
+  /// Wallet methods: PayMongo's hosted payment page, which this screen encodes
+  /// into a QR so a second device can open it.
+  final String? redirectUrl;
+
+  /// QR Ph: a base64 data URI PayMongo generated. Displayed as-is — it encodes
+  /// the national QR Ph payload, which we must not re-encode ourselves.
+  final String? qrImageUrl;
+
   final String paymentIntentId;
 
   static Future<void> show(
@@ -49,8 +60,9 @@ class QrCheckoutScreen extends ConsumerStatefulWidget {
     required BillingPlan plan,
     required PayMongoMethod method,
     required double amountPhp,
-    required String redirectUrl,
     required String paymentIntentId,
+    String? redirectUrl,
+    String? qrImageUrl,
   }) {
     return Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -59,8 +71,9 @@ class QrCheckoutScreen extends ConsumerStatefulWidget {
           plan: plan,
           method: method,
           amountPhp: amountPhp,
-          redirectUrl: redirectUrl,
           paymentIntentId: paymentIntentId,
+          redirectUrl: redirectUrl,
+          qrImageUrl: qrImageUrl,
         ),
       ),
     );
@@ -207,8 +220,11 @@ class _QrCheckoutScreenState extends ConsumerState<QrCheckoutScreen>
           ),
           const SizedBox(height: 6),
           Text(
-            'Open ${widget.method.label} or your camera and scan this code. '
-            'This screen updates on its own once payment clears.',
+            widget.qrImageUrl != null
+                ? 'Scan with GCash, Maya, or any bank app that supports QR Ph. '
+                    'This screen updates on its own once payment clears.'
+                : 'Open ${widget.method.label} or your camera and scan this '
+                    'code. This screen updates on its own once payment clears.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, height: 1.4, color: t.textMuted),
           ),
@@ -223,19 +239,9 @@ class _QrCheckoutScreenState extends ConsumerState<QrCheckoutScreen>
                 borderRadius: BorderRadius.circular(Radii.card),
                 border: Border.all(color: t.line),
               ),
-              child: QrImageView(
-                data: widget.redirectUrl,
-                version: QrVersions.auto,
-                size: 232,
-                backgroundColor: Colors.white,
-                eyeStyle: const QrEyeStyle(
-                  eyeShape: QrEyeShape.square,
-                  color: Colors.black,
-                ),
-                dataModuleStyle: const QrDataModuleStyle(
-                  dataModuleShape: QrDataModuleShape.square,
-                  color: Colors.black,
-                ),
+              child: _QrCode(
+                redirectUrl: widget.redirectUrl,
+                qrImageUrl: widget.qrImageUrl,
               ),
             ),
           ),
@@ -293,6 +299,55 @@ class _QrCheckoutScreenState extends ConsumerState<QrCheckoutScreen>
         ],
       ),
     );
+  }
+}
+
+/// Either PayMongo's own QR Ph image, or a QR we generate from a checkout URL.
+class _QrCode extends StatelessWidget {
+  const _QrCode({this.redirectUrl, this.qrImageUrl});
+
+  final String? redirectUrl;
+  final String? qrImageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    const size = 232.0;
+    final data = qrImageUrl;
+
+    if (data != null) {
+      final bytes = _decodeDataUri(data);
+      if (bytes != null) {
+        return Image.memory(bytes, width: size, height: size);
+      }
+      // Not a data URI — PayMongo also serves hosted image URLs.
+      return Image.network(data, width: size, height: size);
+    }
+
+    return QrImageView(
+      data: redirectUrl!,
+      version: QrVersions.auto,
+      size: size,
+      backgroundColor: Colors.white,
+      eyeStyle: const QrEyeStyle(
+        eyeShape: QrEyeShape.square,
+        color: Colors.black,
+      ),
+      dataModuleStyle: const QrDataModuleStyle(
+        dataModuleShape: QrDataModuleShape.square,
+        color: Colors.black,
+      ),
+    );
+  }
+
+  static Uint8List? _decodeDataUri(String value) {
+    if (!value.startsWith('data:')) return null;
+    final comma = value.indexOf(',');
+    if (comma < 0) return null;
+    try {
+      return base64Decode(value.substring(comma + 1));
+    } catch (_) {
+      return null;
+    }
   }
 }
 

@@ -15,7 +15,7 @@ import 'billing_plan.dart';
 import 'entitlements.dart';
 import 'premium_providers.dart';
 
-enum PayMongoMethod { card, gcash, paymaya }
+enum PayMongoMethod { card, gcash, paymaya, qrph }
 
 /// Legacy alias — prefer [PayMongoMethod].
 typedef PayMongoWallet = PayMongoMethod;
@@ -25,18 +25,21 @@ extension PayMongoMethodApi on PayMongoMethod {
         PayMongoMethod.card => 'card',
         PayMongoMethod.gcash => 'gcash',
         PayMongoMethod.paymaya => 'paymaya',
+        PayMongoMethod.qrph => 'qrph',
       };
 
   String get label => switch (this) {
         PayMongoMethod.card => 'Card',
         PayMongoMethod.gcash => 'GCash',
         PayMongoMethod.paymaya => 'Maya',
+        PayMongoMethod.qrph => 'QR Ph',
       };
 
   String get subtitle => switch (this) {
         PayMongoMethod.card => 'Visa · Mastercard · JCB',
         PayMongoMethod.gcash => '',
         PayMongoMethod.paymaya => '',
+        PayMongoMethod.qrph => 'Any bank or e-wallet app',
       };
 }
 
@@ -45,11 +48,15 @@ class PayMongoEntitlement {
     required this.isPremium,
     this.plan,
     this.expiresAt,
+    this.method,
   });
 
   final bool isPremium;
   final BillingPlan? plan;
   final DateTime? expiresAt;
+
+  /// How the active term was paid for, when known.
+  final PayMongoMethod? method;
 
   factory PayMongoEntitlement.fromJson(Map<String, dynamic> json) {
     final planRaw = json['plan'] as String?;
@@ -57,11 +64,19 @@ class PayMongoEntitlement {
         ? null
         : BillingPlan.values.asNameMap()[planRaw];
     final expiresRaw = json['expiresAt'] as String?;
+    final walletRaw = json['wallet'] as String?;
     return PayMongoEntitlement(
       isPremium: json['isPremium'] as bool? ?? false,
       plan: plan,
       expiresAt:
           expiresRaw == null ? null : DateTime.tryParse(expiresRaw),
+      method: switch (walletRaw) {
+        'card' => PayMongoMethod.card,
+        'gcash' => PayMongoMethod.gcash,
+        'paymaya' => PayMongoMethod.paymaya,
+        'qrph' => PayMongoMethod.qrph,
+        _ => null,
+      },
     );
   }
 }
@@ -99,11 +114,17 @@ class PayMongoStatus {
 class PayMongoCheckout {
   const PayMongoCheckout({
     this.redirectUrl,
+    this.qrImageUrl,
     this.paymentIntentId,
     this.granted = false,
   });
 
+  /// Set for redirect methods (card, GCash, Maya) — a page to open.
   final String? redirectUrl;
+
+  /// Set for QR Ph only — a base64 data URI of the code to display.
+  final String? qrImageUrl;
+
   final String? paymentIntentId;
   final bool granted;
 }
@@ -205,6 +226,7 @@ Future<void> applyPayMongoEntitlement(
     await ref.read(billingPlanProvider.notifier).syncFromPayMongo(
           plan: entitlement.plan!,
           expiresAt: entitlement.expiresAt,
+          method: entitlement.method?.apiValue,
         );
   } else {
     await ref.read(billingPlanProvider.notifier).clearLocalPremium(force: true);
@@ -275,6 +297,7 @@ class PayMongoBillingService {
     return PayMongoCheckout(
       granted: map['granted'] == true,
       redirectUrl: map['redirectUrl'] as String?,
+      qrImageUrl: map['qrImageUrl'] as String?,
       paymentIntentId: map['paymentIntentId'] as String?,
     );
   }

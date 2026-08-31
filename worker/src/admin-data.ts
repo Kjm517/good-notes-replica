@@ -3,6 +3,7 @@ import {
   isLifetimeRecord,
   LIFETIME_EXPIRES_AT,
   readBillingRecord,
+  readPaymentLedger,
   type BillingRecord,
   type BillingPlan,
 } from './billing';
@@ -68,6 +69,17 @@ export interface AdminSubscriptionRow {
   source: string;
   updatedAt: string;
   mrrPhp: number;
+}
+
+export interface AdminPaymentRow {
+  uid: string;
+  email?: string;
+  paymentIntentId: string | null;
+  plan: string;
+  method: string | null;
+  amountPhp: number;
+  paidAt: string;
+  expiresAt: string;
 }
 
 export interface AdminDocumentRow {
@@ -270,6 +282,38 @@ export async function listSubscriptions(
                 : 0) / 100
         : 0,
     }));
+}
+
+/**
+ * Every settled payment across all users, newest first.
+ *
+ * Reads the per-user ledger written by `grantPremiumFromPayment` — the billing
+ * record alone cannot answer this, since it only keeps the latest intent.
+ */
+export async function listPayments(
+  bucket: R2Bucket,
+): Promise<AdminPaymentRow[]> {
+  const rows = await loadUserRows(bucket);
+  const payments: AdminPaymentRow[] = [];
+
+  for (const user of rows) {
+    const entries = await readPaymentLedger(bucket, user.uid);
+    for (const entry of entries) {
+      payments.push({
+        uid: user.uid,
+        email: user.email,
+        paymentIntentId: entry.paymentIntentId ?? null,
+        plan: entry.plan,
+        method: entry.method ?? null,
+        amountPhp: (entry.amountCentavos ?? 0) / 100,
+        paidAt: entry.paidAt,
+        expiresAt: entry.expiresAt,
+      });
+    }
+  }
+
+  payments.sort((a, b) => b.paidAt.localeCompare(a.paidAt));
+  return payments;
 }
 
 export async function setSubscription(

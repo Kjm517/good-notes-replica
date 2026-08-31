@@ -119,6 +119,56 @@ function addPlanDuration(from: Date, plan: PaidBillingPlan): Date {
   return next;
 }
 
+/** One settled payment. Appended per successful charge, never overwritten. */
+export interface PaymentLedgerEntry {
+  paymentIntentId?: string;
+  plan: PaidBillingPlan;
+  /** card | gcash | paymaya | qrph, or absent for admin/voucher grants. */
+  method?: PayMongoMethod;
+  amountCentavos: number;
+  paidAt: string;
+  /** Expiry this payment bought, after any stacking onto an existing term. */
+  expiresAt: string;
+}
+
+function paymentsKey(uid: string): string {
+  return `users/${uid}/payments.json`;
+}
+
+export async function readPaymentLedger(
+  bucket: R2Bucket,
+  uid: string,
+): Promise<PaymentLedgerEntry[]> {
+  const object = await bucket.get(paymentsKey(uid));
+  if (!object) return [];
+  try {
+    const parsed = JSON.parse(await object.text());
+    return Array.isArray(parsed) ? (parsed as PaymentLedgerEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function appendPaymentLedger(
+  bucket: R2Bucket,
+  uid: string,
+  entry: PaymentLedgerEntry,
+): Promise<void> {
+  const entries = await readPaymentLedger(bucket, uid);
+  // The caller already deduped by intent id, but a webhook and a status poll
+  // racing on the same intent could still both land here.
+  if (
+    entry.paymentIntentId &&
+    entries.some((e) => e.paymentIntentId === entry.paymentIntentId)
+  ) {
+    return;
+  }
+  entries.push(entry);
+  await bucket.put(paymentsKey(uid), JSON.stringify(entries), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+}
+
 export async function grantPremiumFromPayment(
   bucket: R2Bucket,
   uid: string,
@@ -161,6 +211,18 @@ export async function grantPremiumFromPayment(
     updatedAt: now.toISOString(),
   };
   await writeBillingRecord(bucket, uid, record);
+
+  // The billing record only ever holds the *latest* payment; the ledger is
+  // what makes renewals and payment history visible in the admin console.
+  await appendPaymentLedger(bucket, uid, {
+    paymentIntentId: opts?.paymentIntentId,
+    plan,
+    method: opts?.wallet,
+    amountCentavos: PLAN_AMOUNTS_CENTAVOS[plan],
+    paidAt: now.toISOString(),
+    expiresAt: record.expiresAt!,
+  });
+
   return record;
 }
 
@@ -204,7 +266,7 @@ export async function handleBillingCheckout(
 ): Promise<Response> {
   const body = (await request.json()) as {
     plan?: PaidBillingPlan;
-    /** Preferred: card | gcash | paymaya */
+    /** Preferred: card | gcash | paymaya | qrph */
     method?: string;
     /** Legacy alias for method */
     wallet?: string;
@@ -217,7 +279,10 @@ export async function handleBillingCheckout(
     return json({ error: 'Invalid plan.' }, 400);
   }
   if (!isPayMongoMethod(methodRaw)) {
-    return json({ error: 'Invalid payment method. Use card, gcash, or paymaya.' }, 400);
+    return json(
+      { error: 'Invalid payment method. Use card, gcash, paymaya, or qrph.' },
+      400,
+    );
   }
   const method = methodRaw;
 
@@ -265,6 +330,7 @@ export async function handleBillingCheckout(
 
   return json({
     redirectUrl: checkout.redirectUrl,
+    qrImageUrl: checkout.qrImageUrl,
     paymentIntentId: checkout.paymentIntentId,
     amountCentavos,
     plan,

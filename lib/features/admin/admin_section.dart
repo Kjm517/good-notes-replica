@@ -5,6 +5,7 @@ enum AdminSection {
   overview('overview', 'Overview', Icons.dashboard_outlined),
   users('users', 'Users', Icons.group_outlined),
   subscriptions('subscriptions', 'Subscriptions', Icons.card_membership_outlined),
+  payments('payments', 'Payments', Icons.payments_outlined),
   vouchers('vouchers', 'Vouchers', Icons.local_activity_outlined),
   bugs('bugs', 'Bug reports', Icons.bug_report_outlined),
   ai('ai', 'AI usage', Icons.auto_awesome_outlined),

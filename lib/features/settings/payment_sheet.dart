@@ -20,7 +20,7 @@ import 'revenuecat_billing.dart';
 import 'settings_widgets.dart';
 import '../admin/voucher_api.dart';
 
-enum _PayMethod { store, card, gcash, maya, qr }
+enum _PayMethod { store, card, gcash, maya, qrph }
 
 class PaymentSheet extends ConsumerStatefulWidget {
   const PaymentSheet({
@@ -153,9 +153,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
         _PayMethod.card => PayMongoMethod.card,
         _PayMethod.gcash => PayMongoMethod.gcash,
         _PayMethod.maya => PayMongoMethod.paymaya,
-        // The QR encodes GCash's hosted payment page, so it is a GCash intent
-        // as far as PayMongo and the webhook are concerned.
-        _PayMethod.qr => PayMongoMethod.gcash,
+        _PayMethod.qrph => PayMongoMethod.qrph,
         _ => null,
       };
 
@@ -226,31 +224,34 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
       _finish('Premium activated — enjoy unlimited quizzes!');
       return;
     }
-    final redirect = checkout.redirectUrl;
-    if (redirect == null || redirect.isEmpty) {
-      throw StateError('Checkout did not return a payment URL.');
-    }
     final pendingId = checkout.paymentIntentId;
     if (pendingId != null && pendingId.isNotEmpty) {
       await billing.markPendingCheckout(pendingId);
     }
 
-    if (_method == _PayMethod.qr) {
+    // QR Ph returns a code to display rather than a page to open.
+    final qrImage = checkout.qrImageUrl;
+    if (qrImage != null && qrImage.isNotEmpty) {
       if (pendingId == null || pendingId.isEmpty) {
         throw StateError('Checkout did not return a payment reference.');
       }
       if (!mounted) return;
-      // Hand off to the scan screen; it polls the worker and, on success,
-      // refreshes entitlement and routes to Settings itself.
+      // The scan screen polls the worker and, on success, refreshes
+      // entitlement and routes to Settings itself.
       await QrCheckoutScreen.show(
         context,
         plan: widget.plan,
         method: method,
         amountPhp: _subtotal - _discount(true),
-        redirectUrl: redirect,
+        qrImageUrl: qrImage,
         paymentIntentId: pendingId,
       );
       return;
+    }
+
+    final redirect = checkout.redirectUrl;
+    if (redirect == null || redirect.isEmpty) {
+      throw StateError('Checkout did not return a payment URL.');
     }
 
     final uri = Uri.parse(redirect);
@@ -436,16 +437,16 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
                       child: Icon(
                         Icons.qr_code_2_rounded,
                         size: 22,
-                        color: _method == _PayMethod.qr
+                        color: _method == _PayMethod.qrph
                             ? t.premiumText
                             : t.textMuted,
                       ),
                     ),
                   ),
-                  label: 'Scan QR code',
-                  subtitle: 'Pay from your phone · confirms automatically',
-                  selected: _method == _PayMethod.qr,
-                  onTap: () => setState(() => _method = _PayMethod.qr),
+                  label: 'QR Ph',
+                  subtitle: 'Any bank or e-wallet · confirms automatically',
+                  selected: _method == _PayMethod.qrph,
+                  onTap: () => setState(() => _method = _PayMethod.qrph),
                 ),
               ],
               if (!_useStore && !_useWallets)
@@ -490,7 +491,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
 
   String _buttonLabel() {
     if (_method == _PayMethod.store && _useStore) return 'Start free trial';
-    if (_method == _PayMethod.qr) return 'Show QR code';
+    if (_method == _PayMethod.qrph) return 'Show QR code';
     if (_selectedPayMongo != null) {
       return _selectedPayMongo == PayMongoMethod.card
           ? 'Pay with card'
@@ -500,12 +501,12 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
   }
 
   String _footnote() {
-    if (_method == _PayMethod.qr) {
+    if (_method == _PayMethod.qrph) {
       return 'Scan with your phone. Premium unlocks by itself once PayMongo '
           'confirms the payment.';
     }
     if (kIsWeb) {
-      return 'On the web, Premium is billed with card, GCash, or Maya.';
+      return 'On the web, Premium is billed with card, GCash, Maya, or QR Ph.';
     }
     if (_method == _PayMethod.store && _useStore) {
       return 'Subscriptions are managed by ${defaultTargetPlatform == TargetPlatform.iOS ? 'Apple' : 'Google'}.';

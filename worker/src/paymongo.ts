@@ -1,8 +1,8 @@
 const PAYMONGO_BASE = 'https://api.paymongo.com/v1';
 const PAYMONGO_V2_BASE = 'https://api.paymongo.com/v2';
 
-/** E-wallets plus debit/credit card (card uses hosted Checkout). */
-export type PayMongoMethod = 'gcash' | 'paymaya' | 'card';
+/** E-wallets, QR Ph, plus debit/credit card (card uses hosted Checkout). */
+export type PayMongoMethod = 'gcash' | 'paymaya' | 'card' | 'qrph';
 
 /** @deprecated Prefer [PayMongoMethod]. */
 export type PayMongoWallet = PayMongoMethod;
@@ -12,10 +12,20 @@ export interface PayMongoEnv {
   PAYMONGO_WEBHOOK_SECRET?: string;
 }
 
-export const PAYMONGO_METHODS: PayMongoMethod[] = ['card', 'gcash', 'paymaya'];
+export const PAYMONGO_METHODS: PayMongoMethod[] = [
+  'card',
+  'gcash',
+  'paymaya',
+  'qrph',
+];
 
 export function isPayMongoMethod(value: unknown): value is PayMongoMethod {
-  return value === 'gcash' || value === 'paymaya' || value === 'card';
+  return (
+    value === 'gcash' ||
+    value === 'paymaya' ||
+    value === 'card' ||
+    value === 'qrph'
+  );
 }
 
 interface PayMongoResource<T> {
@@ -67,9 +77,23 @@ async function payMongoRequest<T>(
 }
 
 /**
- * Creates a PayMongo redirect checkout for GCash, Maya, or card.
+ * One checkout, two shapes: redirect-based methods hand back a URL to open,
+ * QR Ph hands back a QR image to display. Exactly one is set.
+ */
+export interface PayMongoCheckoutResult {
+  paymentIntentId: string;
+  redirectUrl?: string;
+  /** Base64 data URI of the QR Ph code, for QR Ph only. */
+  qrImageUrl?: string;
+}
+
+/**
+ * Creates a PayMongo checkout for GCash, Maya, card, or QR Ph.
  * Card uses hosted Checkout Sessions (card details never touch our app).
  * Wallets keep the Payment Intent + attach redirect flow.
+ * QR Ph uses the same intent/attach flow but returns a scannable code
+ * instead of a redirect — nothing to open, the payer scans it from any bank
+ * or e-wallet app that supports the national QR Ph standard.
  */
 export async function createMethodCheckout(
   secretKey: string,
@@ -81,14 +105,84 @@ export async function createMethodCheckout(
     description: string;
     metadata: Record<string, string>;
   },
-): Promise<{ redirectUrl: string; paymentIntentId: string }> {
+): Promise<PayMongoCheckoutResult> {
   if (opts.method === 'card') {
     return createCardCheckoutSession(secretKey, opts);
+  }
+  if (opts.method === 'qrph') {
+    return createQrPhCheckout(secretKey, opts);
   }
   return createWalletCheckout(secretKey, {
     ...opts,
     wallet: opts.method,
   });
+}
+
+/** How long a generated QR Ph code stays payable. Matches the app's window. */
+const QRPH_EXPIRY_SECONDS = 900;
+
+/**
+ * QR Ph: create intent, create a `qrph` payment method, attach, then read the
+ * generated code out of `next_action.code.image_url`.
+ */
+async function createQrPhCheckout(
+  secretKey: string,
+  opts: {
+    amountCentavos: number;
+    description: string;
+    metadata: Record<string, string>;
+  },
+): Promise<PayMongoCheckoutResult> {
+  const intent = await payMongoRequest<{
+    client_key?: string;
+    status: string;
+  }>(secretKey, '/payment_intents', {
+    body: {
+      data: {
+        attributes: {
+          amount: opts.amountCentavos,
+          currency: 'PHP',
+          payment_method_allowed: ['qrph'],
+          capture_type: 'automatic',
+          description: opts.description,
+          metadata: opts.metadata,
+        },
+      },
+    },
+  });
+
+  const paymentMethod = await payMongoRequest<{ type: string }>(
+    secretKey,
+    '/payment_methods',
+    {
+      body: { data: { attributes: { type: 'qrph' } } },
+    },
+  );
+
+  const attached = await payMongoRequest<{
+    status: string;
+    next_action?: {
+      type?: string;
+      code?: { image_url?: string };
+    };
+  }>(secretKey, `/payment_intents/${intent.data.id}/attach`, {
+    body: {
+      data: {
+        attributes: {
+          payment_method: paymentMethod.data.id,
+          client_key: intent.data.attributes.client_key,
+          expiry_seconds: QRPH_EXPIRY_SECONDS,
+        },
+      },
+    },
+  });
+
+  const qrImageUrl = attached.data.attributes.next_action?.code?.image_url;
+  if (!qrImageUrl) {
+    throw new Error('PayMongo did not return a QR Ph code.');
+  }
+
+  return { qrImageUrl, paymentIntentId: intent.data.id };
 }
 
 /** @deprecated Use [createMethodCheckout]. */
@@ -101,7 +195,7 @@ export async function createWalletCheckout(
     description: string;
     metadata: Record<string, string>;
   },
-): Promise<{ redirectUrl: string; paymentIntentId: string }> {
+): Promise<PayMongoCheckoutResult> {
   const intent = await payMongoRequest<{
     client_key?: string;
     status: string;
@@ -169,7 +263,7 @@ async function createCardCheckoutSession(
     description: string;
     metadata: Record<string, string>;
   },
-): Promise<{ redirectUrl: string; paymentIntentId: string }> {
+): Promise<PayMongoCheckoutResult> {
   const session = await payMongoRequest<{
     checkout_url?: string;
     payment_intent?: { id?: string } | null;

@@ -135,6 +135,55 @@ class AdminSubscriptionRow {
   }
 }
 
+/// One settled payment from the per-user ledger.
+class AdminPaymentRow {
+  const AdminPaymentRow({
+    required this.uid,
+    required this.plan,
+    required this.amountPhp,
+    required this.paidAt,
+    required this.expiresAt,
+    this.email,
+    this.paymentIntentId,
+    this.method,
+  });
+
+  final String uid;
+  final String? email;
+  final String? paymentIntentId;
+  final String plan;
+
+  /// card | gcash | paymaya | qrph, or null for admin/voucher grants.
+  final String? method;
+
+  final double amountPhp;
+  final String paidAt;
+  final String expiresAt;
+
+  factory AdminPaymentRow.fromJson(Map<String, dynamic> json) {
+    return AdminPaymentRow(
+      uid: json['uid'] as String,
+      email: json['email'] as String?,
+      paymentIntentId: json['paymentIntentId'] as String?,
+      plan: json['plan'] as String? ?? '',
+      method: json['method'] as String?,
+      amountPhp: (json['amountPhp'] as num?)?.toDouble() ?? 0,
+      paidAt: json['paidAt'] as String? ?? '',
+      expiresAt: json['expiresAt'] as String? ?? '',
+    );
+  }
+
+  /// How the payment reached us, for display.
+  String get methodLabel => switch (method) {
+        'card' => 'Card',
+        'gcash' => 'GCash',
+        'paymaya' => 'Maya',
+        'qrph' => 'QR Ph',
+        null => 'Granted',
+        _ => method!,
+      };
+}
+
 class AdminDocumentRow {
   const AdminDocumentRow({
     required this.uid,
@@ -445,6 +494,15 @@ class AdminApiService {
         .toList();
   }
 
+  Future<List<AdminPaymentRow>> fetchPayments() async {
+    final headers = await _authHeaders();
+    final response = await _client.get(_uri('/admin/payments'), headers: headers);
+    final body = await _decode(response);
+    return (body['payments'] as List<dynamic>? ?? [])
+        .map((e) => AdminPaymentRow.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<void> updateSubscription(
     String uid, {
     required bool isPremium,
@@ -738,6 +796,12 @@ final adminSubscriptionsProvider = FutureProvider<List<AdminSubscriptionRow>>((r
   final api = ref.watch(adminApiServiceProvider);
   if (api == null) return [];
   return api.fetchSubscriptions();
+});
+
+final adminPaymentsProvider = FutureProvider<List<AdminPaymentRow>>((ref) async {
+  final api = ref.watch(adminApiServiceProvider);
+  if (api == null) return [];
+  return api.fetchPayments();
 });
 
 final adminDocumentsProvider = FutureProvider<List<AdminDocumentRow>>((ref) async {

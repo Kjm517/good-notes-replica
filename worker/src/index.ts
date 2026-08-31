@@ -224,7 +224,7 @@ async function handleBilling(
           json({
             paymongo: payMongoConfigured(env),
             wallets: ['card', 'gcash', 'paymaya'],
-            methods: ['card', 'gcash', 'paymaya'],
+            methods: ['card', 'gcash', 'paymaya', 'qrph'],
           }),
         );
 

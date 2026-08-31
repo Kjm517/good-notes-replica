@@ -19,6 +19,8 @@ import 'entitlements.dart';
 import 'about_notably_sheet.dart';
 import 'bug_report_sheet.dart';
 import 'paymongo_billing.dart';
+import 'manage_plan_sheet.dart';
+import 'renewal_reminder_card.dart';
 import 'premium_plan_sheet.dart';
 import 'premium_providers.dart';
 import 'settings_widgets.dart';
@@ -75,7 +77,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 SettingsSection(
                   label: 'Plan',
                   child: ent?.isPremium == true
-                      ? _ActivePlanCard(plan: plan, renewsAt: renews)
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const RenewalReminderCard(),
+                            _ActivePlanCard(plan: plan, renewsAt: renews),
+                          ],
+                        )
                       : ent?.isTrialActive == true
                           ? _TrialPlanCard(entitlement: ent!)
                           : _GoPremiumCard(trialExpired: ent?.trialExpired ?? false),
@@ -419,7 +427,7 @@ class _ActivePlanCard extends StatelessWidget {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => PremiumPlanSheet.show(context),
+                  onPressed: () => ManagePlanSheet.show(context),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: t.premiumText,
                     side: BorderSide(color: t.premium.withValues(alpha: 0.4)),
