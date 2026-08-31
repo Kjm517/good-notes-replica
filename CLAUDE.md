@@ -13,7 +13,7 @@ Cross-platform (Android/iOS/web) note-taking app built with **Flutter**, replica
 - Run (Chrome, loads `.env`): `./scripts/run-chrome.sh` or `./scripts/run-chrome.ps1`
 - Run: `flutter run -d <device>` (Android device/emulator recommended for stylus).
 - Analyze: `flutter analyze`
-- Tests: `flutter test test/core_logic_test.dart test/widget_test.dart test/editor_top_bar_test.dart test/billing_ladder_test.dart test/billing_pricing_test.dart test/entitlement_logic_test.dart test/paymongo_model_test.dart`
+- Tests: `flutter test test/core_logic_test.dart test/widget_test.dart test/editor_top_bar_test.dart test/billing_ladder_test.dart test/billing_pricing_test.dart test/entitlement_logic_test.dart test/paymongo_model_test.dart test/billing_ui_test.dart`
 - Worker tests: `cd worker && npm test` (vitest; billing grant/entitlement logic)
   - `test/pdf_page_text_test.dart` is excluded: pdfrx's native engine never
     loads under `flutter test`, so those four tests time out at 30s.

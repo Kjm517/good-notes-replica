@@ -26,6 +26,9 @@ export interface BillingRecord {
   updatedAt: string;
 }
 
+/** PayMongo rejects any charge below ₱20. */
+const PAYMONGO_MINIMUM_CENTAVOS = 2000;
+
 const PLAN_AMOUNTS_CENTAVOS: Record<PaidBillingPlan, number> = {
   monthly: 19900,
   yearly: 149900,
@@ -63,16 +66,19 @@ export async function amountCentavosForPlan(
   if (base <= 0) return 0;
   const resolved = await resolveVoucherDiscount(bucket, voucher);
   if (resolved) {
-    if (
+    const discounted =
       resolved.discountKind === 'amount' &&
       (resolved.discountAmountCentavos ?? 0) > 0
-    ) {
-      return Math.max(0, base - (resolved.discountAmountCentavos ?? 0));
-    }
-    const discounted = Math.round(base * (1 - resolved.discountRate));
-    // 100% off is free. Anything else still has PayMongo's ₱20 floor.
+        ? base - (resolved.discountAmountCentavos ?? 0)
+        : Math.round(base * (1 - resolved.discountRate));
+
+    // Free is free — the caller grants premium without touching PayMongo.
     if (discounted <= 0) return 0;
-    return Math.max(2000, discounted);
+    // Anything still payable must clear PayMongo's ₱20 minimum, or checkout
+    // fails with an error the user cannot act on. This floor once applied to
+    // percentage vouchers only, so a large peso-off code produced an
+    // unchargeable amount.
+    return Math.max(PAYMONGO_MINIMUM_CENTAVOS, discounted);
   }
   return base;
 }
