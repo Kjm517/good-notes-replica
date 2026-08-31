@@ -1,0 +1,13 @@
+# Copy to android/key.properties and fill in. That file is gitignored —
+# never commit it, and never commit the .jks it points at.
+#
+# Create the keystore once with:
+#   keytool -genkey -v -keystore ~/notably-upload-key.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+# Keep the .jks and these passwords backed up somewhere safe. Play ties your
+# app to this key permanently; losing it means you cannot ship updates.
+storePassword=
+keyPassword=
+keyAlias=upload
+storeFile=/Users/you/notably-upload-key.jks

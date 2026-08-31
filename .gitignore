@@ -62,3 +62,8 @@ assets/env
 # Worker deps — regenerated with `npm install`, platform-specific binaries
 # (this is what blew past GitHub's 100MB file limit)
 worker/node_modules/
+
+# Android release signing — never commit
+android/key.properties
+*.jks
+*.keystore
