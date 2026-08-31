@@ -173,7 +173,12 @@ export async function grantPremiumFromPayment(
   bucket: R2Bucket,
   uid: string,
   plan: PaidBillingPlan,
-  opts?: { paymentIntentId?: string; wallet?: PayMongoMethod },
+  opts?: {
+    paymentIntentId?: string;
+    wallet?: PayMongoMethod;
+    /** Actually charged, in centavos. Falls back to list price when unknown. */
+    amountCentavos?: number | null;
+  },
 ): Promise<BillingRecord> {
   const existing = await readBillingRecord(bucket, uid);
 
@@ -218,7 +223,10 @@ export async function grantPremiumFromPayment(
     paymentIntentId: opts?.paymentIntentId,
     plan,
     method: opts?.wallet,
-    amountCentavos: PLAN_AMOUNTS_CENTAVOS[plan],
+    // The real charge, not the list price — a voucher may have discounted it,
+    // and recording the sticker price makes revenue reports disagree with
+    // PayMongo's own numbers.
+    amountCentavos: opts?.amountCentavos ?? PLAN_AMOUNTS_CENTAVOS[plan],
     paidAt: now.toISOString(),
     expiresAt: record.expiresAt!,
   });
@@ -296,6 +304,7 @@ export async function handleBillingCheckout(
     const record = await grantPremiumFromPayment(env.BUCKET, uid, plan, {
       paymentIntentId: `voucher:${(body.voucher ?? 'free').trim()}`,
       wallet: method,
+      amountCentavos: 0,
     });
     return json({
       granted: true,
@@ -405,7 +414,7 @@ export async function handleBillingStatus(
     });
   }
 
-  let intent: { status: string; metadata: Record<string, string> };
+  let intent: Awaited<ReturnType<typeof retrievePaymentIntent>>;
   try {
     intent = await retrievePaymentIntent(env.PAYMONGO_SECRET_KEY!, intentId);
   } catch {
@@ -431,6 +440,7 @@ export async function handleBillingStatus(
       wallet: (intent.metadata.method ?? intent.metadata.wallet) as
         | PayMongoMethod
         | undefined,
+      amountCentavos: intent.amountCentavos,
     });
     return json({ status: 'paid', ...entitlementResponse(granted) });
   }
@@ -485,6 +495,7 @@ export async function handleBillingReturn(
           await grantPremiumFromPayment(env.BUCKET, uid, plan, {
             paymentIntentId,
             wallet,
+            amountCentavos: intent.amountCentavos,
           });
         }
       }

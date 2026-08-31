@@ -311,15 +311,19 @@ export async function retrievePaymentIntent(
 ): Promise<{
   status: string;
   metadata: Record<string, string>;
+  /** What was actually charged, which a voucher may have discounted. */
+  amountCentavos: number | null;
 }> {
   const intent = await payMongoRequest<{
     status: string;
+    amount?: number;
     metadata?: Record<string, string>;
   }>(secretKey, `/payment_intents/${paymentIntentId}`);
 
   return {
     status: intent.data.attributes.status,
     metadata: intent.data.attributes.metadata ?? {},
+    amountCentavos: intent.data.attributes.amount ?? null,
   };
 }
 
