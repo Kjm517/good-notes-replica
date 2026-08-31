@@ -356,11 +356,11 @@ class _GoPremiumCard extends StatelessWidget {
           Text(
             trialExpired
                 ? (kIsWeb
-                    ? 'Your trial has ended. On the web, Premium is card, GCash, or Maya from ${monthlyPriceLabel()}.'
+                    ? 'Your trial has ended. Premium is QR Ph — scan from GCash, Maya, or your bank app — from ${monthlyPriceLabel()}.'
                     : 'Your 7-day trial has ended. Premium from ${monthlyPriceLabel()} '
                         'keeps unlimited AI quizzes, history, and 15 GB storage.')
                 : (kIsWeb
-                    ? 'Premium on the web is billed with card, GCash, or Maya from ${monthlyPriceLabel()} — not Google Play.'
+                    ? 'Premium on the web is billed with QR Ph from ${monthlyPriceLabel()} — not Google Play.'
                     : 'Start a 7-day trial with $kTrialQuizLimit AI quizzes, or go Premium from '
                         '${monthlyPriceLabel()} — ${yearlyPriceLabel()} ${yearlySavingsLabel().toLowerCase()}.'),
             style: TextStyle(fontSize: 13, color: t.textSecondary, height: 1.4),

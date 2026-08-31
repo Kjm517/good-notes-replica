@@ -22,6 +22,15 @@ import '../admin/voucher_api.dart';
 
 enum _PayMethod { store, card, gcash, maya, qrph }
 
+/// Channels PayMongo has not activated on this merchant account yet.
+///
+/// Offering them only produces "payment method is not allowed" at checkout,
+/// which reads like a broken app. QR Ph covers the same payers — GCash, Maya
+/// and every major bank app scan it — so nothing is lost by hiding these
+/// until the dashboard enables them. Flip to false per method to restore.
+const _showCardOption = false;
+const _showWalletOptions = false;
+
 class PaymentSheet extends ConsumerStatefulWidget {
   const PaymentSheet({
     super.key,
@@ -293,7 +302,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
     if (!_defaultMethodSet) {
       _defaultMethodSet = true;
       if (!_useStore && _useWallets) {
-        _method = _PayMethod.card;
+        _method = _showCardOption ? _PayMethod.card : _PayMethod.qrph;
       }
     }
     final t = context.tokens;
@@ -413,25 +422,28 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
                   onTap: () => setState(() => _method = _PayMethod.store),
                 ),
               if (_useWallets) ...[
-                _PayRow(
-                  leading: const PaymentMark.card(),
-                  label: 'Debit / Credit card',
-                  subtitle: PayMongoMethod.card.subtitle,
-                  selected: _method == _PayMethod.card,
-                  onTap: () => setState(() => _method = _PayMethod.card),
-                ),
-                _PayRow(
-                  leading: const PaymentMark.gcash(),
-                  label: 'GCash',
-                  selected: _method == _PayMethod.gcash,
-                  onTap: () => setState(() => _method = _PayMethod.gcash),
-                ),
-                _PayRow(
-                  leading: const PaymentMark.maya(),
-                  label: 'Maya',
-                  selected: _method == _PayMethod.maya,
-                  onTap: () => setState(() => _method = _PayMethod.maya),
-                ),
+                if (_showCardOption)
+                  _PayRow(
+                    leading: const PaymentMark.card(),
+                    label: 'Debit / Credit card',
+                    subtitle: PayMongoMethod.card.subtitle,
+                    selected: _method == _PayMethod.card,
+                    onTap: () => setState(() => _method = _PayMethod.card),
+                  ),
+                if (_showWalletOptions) ...[
+                  _PayRow(
+                    leading: const PaymentMark.gcash(),
+                    label: 'GCash',
+                    selected: _method == _PayMethod.gcash,
+                    onTap: () => setState(() => _method = _PayMethod.gcash),
+                  ),
+                  _PayRow(
+                    leading: const PaymentMark.maya(),
+                    label: 'Maya',
+                    selected: _method == _PayMethod.maya,
+                    onTap: () => setState(() => _method = _PayMethod.maya),
+                  ),
+                ],
                 _PayRow(
                   leading: SizedBox(
                     width: PaymentMark.slotWidth,
@@ -447,7 +459,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
                     ),
                   ),
                   label: 'QR Ph',
-                  subtitle: 'Any bank or e-wallet · confirms automatically',
+                  subtitle: 'Scan with GCash, Maya, or any bank app',
                   selected: _method == _PayMethod.qrph,
                   onTap: () => setState(() => _method = _PayMethod.qrph),
                 ),
@@ -531,7 +543,7 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
           'confirms the payment.';
     }
     if (kIsWeb) {
-      return 'On the web, Premium is billed with card, GCash, Maya, or QR Ph.';
+      return 'Pay with QR Ph — scan from GCash, Maya, or your bank app.';
     }
     if (_method == _PayMethod.store && _useStore) {
       return 'Subscriptions are managed by ${defaultTargetPlatform == TargetPlatform.iOS ? 'Apple' : 'Google'}.';
