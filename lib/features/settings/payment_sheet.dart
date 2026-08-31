@@ -180,7 +180,10 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
       if (isPurchaseCancelled(e)) return;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
+        SnackBar(
+          content: Text(_readableError(e)),
+          duration: const Duration(seconds: 8),
+        ),
       );
     } finally {
       if (mounted) setState(() => _processing = false);
@@ -487,6 +490,28 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
         ],
       ),
     );
+  }
+
+  /// Turns PayMongo's wording into something the user can act on.
+  ///
+  /// "payment method is not allowed" means the channel is not switched on for
+  /// the merchant account — nothing the payer did, and nothing retrying fixes.
+  String _readableError(Object e) {
+    final raw = e.toString().replaceFirst('Bad state: ', '');
+    final lower = raw.toLowerCase();
+
+    if (lower.contains('not allowed') || lower.contains('not enabled')) {
+      final method = _selectedPayMongo?.label ?? 'That method';
+      return '$method is not switched on for this account yet. '
+          'Try another payment method.';
+    }
+    if (lower.contains('sign in')) {
+      return 'Sign in to pay.';
+    }
+    if (lower.contains('not configured')) {
+      return 'Payments are not set up on the server yet.';
+    }
+    return raw;
   }
 
   String _buttonLabel() {

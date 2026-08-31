@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../app/design.dart';
 import 'billing_plan.dart';
@@ -265,7 +268,14 @@ class _QrCheckoutScreenState extends ConsumerState<QrCheckoutScreen>
               style: AppTokens.mono(size: 10, color: t.textFaint),
             ),
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 14),
+          _QrActions(
+            qrImageUrl: widget.qrImageUrl,
+            redirectUrl: widget.redirectUrl,
+            plan: widget.plan,
+            amountPhp: widget.amountPhp,
+          ),
+          const SizedBox(height: 18),
           _StatusStrip(
             failed: failed,
             expired: _expired,
@@ -303,43 +313,19 @@ class _QrCheckoutScreenState extends ConsumerState<QrCheckoutScreen>
 }
 
 /// Either PayMongo's own QR Ph image, or a QR we generate from a checkout URL.
-class _QrCode extends StatelessWidget {
+/// Either PayMongo's own QR Ph image, or a QR we generate from a checkout URL.
+///
+/// Stateful so the decoded bytes survive rebuilds: the countdown ticks every
+/// few seconds, and decoding afresh each time handed `Image.memory` a new
+/// Uint8List, which re-decoded and made the code visibly blink.
+class _QrCode extends StatefulWidget {
   const _QrCode({this.redirectUrl, this.qrImageUrl});
 
   final String? redirectUrl;
   final String? qrImageUrl;
 
-  @override
-  Widget build(BuildContext context) {
-    const size = 232.0;
-    final data = qrImageUrl;
-
-    if (data != null) {
-      final bytes = _decodeDataUri(data);
-      if (bytes != null) {
-        return Image.memory(bytes, width: size, height: size);
-      }
-      // Not a data URI — PayMongo also serves hosted image URLs.
-      return Image.network(data, width: size, height: size);
-    }
-
-    return QrImageView(
-      data: redirectUrl!,
-      version: QrVersions.auto,
-      size: size,
-      backgroundColor: Colors.white,
-      eyeStyle: const QrEyeStyle(
-        eyeShape: QrEyeShape.square,
-        color: Colors.black,
-      ),
-      dataModuleStyle: const QrDataModuleStyle(
-        dataModuleShape: QrDataModuleShape.square,
-        color: Colors.black,
-      ),
-    );
-  }
-
-  static Uint8List? _decodeDataUri(String value) {
+  /// Pulls the bytes out of a `data:image/png;base64,...` URI.
+  static Uint8List? decodeDataUri(String value) {
     if (!value.startsWith('data:')) return null;
     final comma = value.indexOf(',');
     if (comma < 0) return null;
@@ -348,6 +334,155 @@ class _QrCode extends StatelessWidget {
     } catch (_) {
       return null;
     }
+  }
+
+  @override
+  State<_QrCode> createState() => _QrCodeState();
+}
+
+class _QrCodeState extends State<_QrCode> {
+  static const _size = 232.0;
+
+  Uint8List? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _decode();
+  }
+
+  @override
+  void didUpdateWidget(_QrCode oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only re-decode when the code itself actually changed.
+    if (oldWidget.qrImageUrl != widget.qrImageUrl) _decode();
+  }
+
+  void _decode() {
+    final data = widget.qrImageUrl;
+    _bytes = data == null ? null : _QrCode.decodeDataUri(data);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.qrImageUrl;
+
+    // RepaintBoundary keeps the surrounding countdown repaints off the code.
+    return RepaintBoundary(
+      child: switch ((data, _bytes)) {
+        (null, _) => QrImageView(
+            data: widget.redirectUrl!,
+            version: QrVersions.auto,
+            size: _size,
+            backgroundColor: Colors.white,
+            eyeStyle: const QrEyeStyle(
+              eyeShape: QrEyeShape.square,
+              color: Colors.black,
+            ),
+            dataModuleStyle: const QrDataModuleStyle(
+              dataModuleShape: QrDataModuleShape.square,
+              color: Colors.black,
+            ),
+          ),
+        (_, final bytes?) => Image.memory(
+            bytes,
+            width: _size,
+            height: _size,
+            // Without this the image fades in again on every rebuild.
+            gaplessPlayback: true,
+          ),
+        // PayMongo can also hand back a hosted image URL.
+        (final url?, _) => Image.network(url, width: _size, height: _size),
+      },
+    );
+  }
+}
+
+/// Save or copy the code, so someone can pay from a different device or come
+/// back to it after leaving this screen.
+class _QrActions extends StatelessWidget {
+  const _QrActions({
+    required this.qrImageUrl,
+    required this.redirectUrl,
+    required this.plan,
+    required this.amountPhp,
+  });
+
+  final String? qrImageUrl;
+  final String? redirectUrl;
+  final BillingPlan plan;
+  final double amountPhp;
+
+  Future<void> _saveImage(BuildContext context) async {
+    final data = qrImageUrl;
+    if (data == null) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+
+    final bytes = _QrCode.decodeDataUri(data);
+    if (bytes == null) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('This code cannot be saved.')),
+      );
+      return;
+    }
+
+    try {
+      // Written to a temp file first: the share sheet is what offers "Save to
+      // Photos", and it needs a real file rather than raw bytes.
+      final dir = await getTemporaryDirectory();
+      final file = File(
+        '${dir.path}/notably-qr-${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      await file.writeAsBytes(bytes);
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'Notably Premium — ${formatPhp(amountPhp)}. '
+              'Scan with GCash, Maya, or any bank app.',
+        ),
+      );
+    } catch (e) {
+      messenger?.showSnackBar(SnackBar(content: Text('Could not save: $e')));
+    }
+  }
+
+  Future<void> _copyLink(BuildContext context) async {
+    final link = redirectUrl;
+    if (link == null) return;
+    await Clipboard.setData(ClipboardData(text: link));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Payment link copied')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final hasImage = qrImageUrl != null;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (hasImage)
+          OutlinedButton.icon(
+            onPressed: () => _saveImage(context),
+            icon: const Icon(Icons.download_rounded, size: 18),
+            label: const Text('Save QR'),
+            style: OutlinedButton.styleFrom(foregroundColor: t.textSecondary),
+          ),
+        if (redirectUrl != null) ...[
+          if (hasImage) const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: () => _copyLink(context),
+            icon: const Icon(Icons.link_rounded, size: 18),
+            label: const Text('Copy link'),
+            style: OutlinedButton.styleFrom(foregroundColor: t.textSecondary),
+          ),
+        ],
+      ],
+    );
   }
 }
 
