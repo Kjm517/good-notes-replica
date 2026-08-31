@@ -1,4 +1,11 @@
 {
-  "outputDirectory": "vercel_out",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": "Flutter web cannot be built by Vercel's builders. This project is deployed manually from vercel_out/ (see scripts/build-web.sh). That directory is gitignored, so a git-triggered build from this repo publishes an EMPTY site over the real one. Disabling git deployments is what stops that.",
+
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  }
 }
