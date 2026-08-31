@@ -18,6 +18,19 @@ const _methodKey = 'premium_paid_with';
 const _reminderKey = 'premium_renewal_reminder';
 const _cancelledKey = 'premium_cancelled_at';
 
+/// Bumped on every write to billing prefs.
+///
+/// Providers below read SharedPreferences directly, and prefs is not a
+/// reactive source — the instance never changes identity. Without this, an
+/// extension that leaves premium true and the plan unchanged invalidates
+/// nothing, so the cached expiry date survives the renewal. Watch this in
+/// anything that reads a billing pref.
+final billingRevisionProvider = StateProvider<int>((ref) => 0);
+
+void _bumpBillingRevision(Ref ref) {
+  ref.read(billingRevisionProvider.notifier).state++;
+}
+
 /// How far ahead of expiry we start nudging.
 const kRenewalReminderWindow = Duration(days: 3);
 const _historyKey = 'billing_history_json';
@@ -135,6 +148,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
       ),
     );
     state = plan;
+    _bumpBillingRevision(ref);
   }
 
   /// Cache RevenueCat state locally for plan labels and renewal dates.
@@ -150,9 +164,13 @@ class BillingPlanController extends Notifier<BillingPlan> {
         await prefs.setString(_renewKey, renew.toIso8601String());
       }
       state = plan;
+      _bumpBillingRevision(ref);
+    _bumpBillingRevision(ref);
     } else {
       await prefs.setBool('is_premium', false);
       state = BillingPlan.none;
+      _bumpBillingRevision(ref);
+    _bumpBillingRevision(ref);
     }
   }
 
@@ -185,6 +203,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
       );
     }
     state = plan;
+    _bumpBillingRevision(ref);
   }
 
   /// Drop local Premium cache after the worker reports no active entitlement
@@ -202,6 +221,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
     await prefs.remove(_methodKey);
     await prefs.remove(_cancelledKey);
     state = BillingPlan.none;
+    _bumpBillingRevision(ref);
   }
 
   /// Drop locally cached PayMongo/admin premium after the worker says free.
@@ -212,6 +232,7 @@ class BillingPlanController extends Notifier<BillingPlan> {
     await prefs.remove(_renewKey);
     await prefs.remove(_methodKey);
     await prefs.remove(_cancelledKey);
+    _bumpBillingRevision(ref);
     ref.invalidateSelf();
     ref.invalidate(billingHistoryProvider);
   }
@@ -264,12 +285,14 @@ List<BillingHistoryEntry> billingHistoryFromPrefs(SharedPreferences prefs) {
 }
 
 final billingHistoryProvider = Provider<List<BillingHistoryEntry>>((ref) {
+  ref.watch(billingRevisionProvider);
   ref.watch(billingPlanProvider);
   final prefs = ref.watch(sharedPrefsProvider);
   return billingHistoryFromPrefs(prefs);
 });
 
 final premiumRenewsAtProvider = Provider<DateTime?>((ref) {
+  ref.watch(billingRevisionProvider);
   final prefs = ref.watch(sharedPrefsProvider);
   if (ref.watch(revenueCatConfiguredProvider) &&
       ref.watch(rcPremiumActiveProvider)) {
@@ -289,6 +312,7 @@ final premiumRenewsAtProvider = Provider<DateTime?>((ref) {
 /// How the active term was paid for ('card', 'gcash', 'paymaya', 'qrph'),
 /// or null for store purchases and admin grants.
 final premiumPaidWithProvider = Provider<String?>((ref) {
+  ref.watch(billingRevisionProvider);
   ref.watch(billingPlanProvider);
   return ref.watch(sharedPrefsProvider).getString(_methodKey);
 });
@@ -310,6 +334,7 @@ final premiumAutoRenewsProvider = Provider<bool>((ref) {
 /// offers. For wallet terms there is no recurring charge to stop in the first
 /// place; for store subscriptions Apple/Google own the real cancellation.
 final premiumCancelledAtProvider = StateProvider<DateTime?>((ref) {
+  ref.watch(billingRevisionProvider);
   ref.watch(billingPlanProvider);
   final raw = ref.watch(sharedPrefsProvider).getString(_cancelledKey);
   return raw == null ? null : DateTime.tryParse(raw);
@@ -327,6 +352,7 @@ Future<void> cancelPremiumRenewal(WidgetRef ref) async {
         now.toIso8601String(),
       );
   ref.read(premiumCancelledAtProvider.notifier).state = now;
+  ref.read(billingRevisionProvider.notifier).state++;
   // Nothing left to remind them about.
   await setRenewalReminder(ref, false);
 }
@@ -335,6 +361,7 @@ Future<void> cancelPremiumRenewal(WidgetRef ref) async {
 Future<void> resumePremiumRenewal(WidgetRef ref) async {
   await ref.read(sharedPrefsProvider).remove(_cancelledKey);
   ref.read(premiumCancelledAtProvider.notifier).state = null;
+  ref.read(billingRevisionProvider.notifier).state++;
   await setRenewalReminder(ref, true);
 }
 
