@@ -19,6 +19,7 @@ import { handleUserTelemetry } from './user-telemetry';
 import {
   handleBillingCheckout,
   handleBillingEntitlement,
+  handleBillingPayments,
   handleBillingReturn,
   handleBillingStatus,
   handleBillingWebhook,
@@ -250,6 +251,11 @@ async function handleBilling(
             url.searchParams.get('paymentIntentId'),
           ),
         );
+      }
+
+      case 'GET /billing/payments': {
+        const uid = await requireUid(request, env);
+        return withCors(await handleBillingPayments(env, uid));
       }
 
       case 'GET /billing/entitlement': {

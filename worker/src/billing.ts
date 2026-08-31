@@ -339,6 +339,22 @@ export async function handleBillingCheckout(
   });
 }
 
+/// The caller's own payment history, newest first.
+///
+/// Same ledger the admin console reads, scoped to one uid — the app used to
+/// keep this only in device prefs, so a reinstall or a second device showed an
+/// empty history for someone who had paid.
+export async function handleBillingPayments(
+  env: { BUCKET: R2Bucket },
+  uid: string,
+): Promise<Response> {
+  const entries = await readPaymentLedger(env.BUCKET, uid);
+  const payments = [...entries].sort((a, b) =>
+    (b.paidAt ?? '').localeCompare(a.paidAt ?? ''),
+  );
+  return json({ payments });
+}
+
 export async function handleBillingEntitlement(
   env: { BUCKET: R2Bucket },
   uid: string,

@@ -111,6 +111,44 @@ class PayMongoStatus {
   }
 }
 
+/// One settled payment from the worker's ledger.
+class PayMongoPayment {
+  const PayMongoPayment({
+    required this.plan,
+    required this.amountPhp,
+    required this.paidAt,
+    this.method,
+    this.paymentIntentId,
+  });
+
+  final BillingPlan plan;
+  final double amountPhp;
+  final DateTime paidAt;
+  final PayMongoMethod? method;
+  final String? paymentIntentId;
+
+  factory PayMongoPayment.fromJson(Map<String, dynamic> json) {
+    return PayMongoPayment(
+      plan: BillingPlan.values.asNameMap()[json['plan'] as String? ?? ''] ??
+          BillingPlan.none,
+      amountPhp: ((json['amountCentavos'] as num?)?.toDouble() ?? 0) / 100,
+      paidAt:
+          DateTime.tryParse(json['paidAt'] as String? ?? '') ?? DateTime.now(),
+      method: switch (json['method'] as String?) {
+        'card' => PayMongoMethod.card,
+        'gcash' => PayMongoMethod.gcash,
+        'paymaya' => PayMongoMethod.paymaya,
+        'qrph' => PayMongoMethod.qrph,
+        _ => null,
+      },
+      paymentIntentId: json['paymentIntentId'] as String?,
+    );
+  }
+
+  String get statusLabel =>
+      method == null ? 'Paid' : 'Paid · ${method!.label}';
+}
+
 class PayMongoCheckout {
   const PayMongoCheckout({
     this.redirectUrl,
@@ -192,6 +230,17 @@ final payMongoSyncProvider = Provider<void>((ref) {
   unawaited(tick());
   final timer = Timer.periodic(_entitlementPollInterval, (_) => unawaited(tick()));
   ref.onDispose(timer.cancel);
+});
+
+/// The signed-in user's payment history, straight from the worker.
+///
+/// Auto-disposed so reopening Billing history refetches instead of showing a
+/// cached list from an earlier session.
+final payMongoPaymentsProvider =
+    FutureProvider.autoDispose<List<PayMongoPayment>>((ref) async {
+  final service = ref.watch(payMongoBillingServiceProvider);
+  if (service == null) return const [];
+  return service.fetchPayments();
 });
 
 /// Refreshes PayMongo premium state from the worker (safe from widgets & providers).
@@ -333,6 +382,24 @@ class PayMongoBillingService {
       throw StateError(message ?? 'Payment check failed.');
     }
     return PayMongoStatus.fromJson(body as Map<String, dynamic>);
+  }
+
+  /// The signed-in user's own settled payments, newest first.
+  Future<List<PayMongoPayment>> fetchPayments() async {
+    final headers = await _authHeaders();
+    final response = await _client.get(
+      _uri('/billing/payments'),
+      headers: headers,
+    );
+    final body = jsonDecode(response.body);
+    if (response.statusCode >= 400) {
+      final message = body is Map ? body['error'] as String? : null;
+      throw StateError(message ?? 'Could not load payments.');
+    }
+    final list = (body as Map<String, dynamic>)['payments'] as List<dynamic>?;
+    return (list ?? [])
+        .map((e) => PayMongoPayment.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> markPendingCheckout(String paymentIntentId) async {

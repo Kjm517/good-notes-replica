@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/design.dart';
 import 'billing_plan.dart';
+import 'paymongo_billing.dart';
 import 'premium_providers.dart';
 import 'premium_plan_sheet.dart';
 import 'settings_widgets.dart';
@@ -20,7 +21,11 @@ const _googleSubscriptions =
 
 /// Details of an active Premium plan: what was bought, how it was paid for,
 /// when it ends, and whether it renews on its own.
-class ManagePlanSheet extends ConsumerWidget {
+///
+/// Refetches entitlement on open: the local cache goes stale whenever the term
+/// changes anywhere else — an admin edit, a webhook, or a payment made on
+/// another device — and this sheet is exactly where that would be noticed.
+class ManagePlanSheet extends ConsumerStatefulWidget {
   const ManagePlanSheet({super.key});
 
   static Future<void> show(BuildContext context) {
@@ -34,7 +39,22 @@ class ManagePlanSheet extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ManagePlanSheet> createState() => _ManagePlanSheetState();
+}
+
+class _ManagePlanSheetState extends ConsumerState<ManagePlanSheet> {
+  @override
+  void initState() {
+    super.initState();
+    // Off the build frame — this writes to providers the sheet also watches.
+    Future.microtask(() async {
+      if (!mounted) return;
+      await ref.read(payMongoEntitlementRefreshProvider)();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final t = context.tokens;
     final plan = ref.watch(billingPlanProvider);
     final renewsAt = ref.watch(premiumRenewsAtProvider);
