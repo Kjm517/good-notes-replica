@@ -6,6 +6,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Page scanning (ImportService.captureScanPage). -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Reading imported images. On Android 13+ the photo picker needs no
+         permission at all, so READ_MEDIA_IMAGES is scoped to older releases
+         and READ_EXTERNAL_STORAGE stops at 32. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"
+        android:maxSdkVersion="34"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <!-- Re-post scheduled reminders after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <application

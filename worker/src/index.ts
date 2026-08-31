@@ -16,6 +16,7 @@
 import { requireUid } from './auth';
 import { handleAdmin } from './admin';
 import { handleUserTelemetry } from './user-telemetry';
+import { deleteDeviceToken, saveDeviceToken } from './notifications';
 import {
   handleBillingCheckout,
   handleBillingEntitlement,
@@ -30,6 +31,8 @@ import {
 export interface Env {
   /** R2 bucket binding (see wrangler.toml). */
   BUCKET: R2Bucket;
+  /** Firebase service-account JSON, for FCM push. Optional. */
+  FIREBASE_SERVICE_ACCOUNT?: string;
   /** Supabase project URL, e.g. https://xxxx.supabase.co */
   SUPABASE_URL: string;
   /** Public anon key — admins lookups with the caller's JWT. */
@@ -181,6 +184,33 @@ async function handleUserRoutes(
   url: URL,
 ): Promise<Response> {
   try {
+    const route = `${request.method} ${url.pathname}`;
+
+    // Device push tokens. Registered by the app after the user allows
+    // notifications, and deleted on sign-out so a shared phone does not keep
+    // receiving the previous account's pushes.
+    if (route === 'POST /user/devices' || route === 'DELETE /user/devices') {
+      const uid = await requireUid(request, env);
+      const body = (await request.json()) as {
+        token?: string;
+        platform?: string;
+      };
+      const token = body.token?.trim();
+      if (!token) return withCors(json({ error: 'Missing token.' }, 400));
+
+      if (request.method === 'DELETE') {
+        await deleteDeviceToken(env.BUCKET, uid, token);
+        return withCors(json({ ok: true }));
+      }
+
+      const platform =
+        body.platform === 'ios' || body.platform === 'web'
+          ? body.platform
+          : 'android';
+      await saveDeviceToken(env.BUCKET, uid, token, platform);
+      return withCors(json({ ok: true }));
+    }
+
     return withCors(await handleUserTelemetry(request, env, url));
   } catch (e) {
     const message = (e as Error).message;

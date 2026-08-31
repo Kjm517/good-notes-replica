@@ -14,6 +14,7 @@ import 'pages/admin_ai_page.dart';
 import 'pages/admin_bugs_page.dart';
 import 'pages/admin_documents_page.dart';
 import 'pages/admin_overview_page.dart';
+import 'pages/admin_notifications_page.dart';
 import 'pages/admin_payments_page.dart';
 import 'pages/admin_subscriptions_page.dart';
 import 'pages/admin_team_page.dart';
@@ -44,6 +45,7 @@ class _AdminConsoleShellState extends ConsumerState<AdminConsoleShell> {
       AdminSection.users => const AdminUsersPage(),
       AdminSection.subscriptions => const AdminSubscriptionsPage(),
       AdminSection.payments => const AdminPaymentsPage(),
+      AdminSection.notifications => const AdminNotificationsPage(),
       AdminSection.vouchers => const AdminVouchersPage(),
       AdminSection.bugs => const AdminBugsPage(),
       AdminSection.ai => const AdminAiPage(),

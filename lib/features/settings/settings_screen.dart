@@ -20,6 +20,7 @@ import 'about_notably_sheet.dart';
 import 'bug_report_sheet.dart';
 import 'paymongo_billing.dart';
 import 'manage_plan_sheet.dart';
+import 'notification_settings_card.dart';
 import 'renewal_reminder_card.dart';
 import 'premium_plan_sheet.dart';
 import 'premium_providers.dart';
@@ -98,6 +99,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     entitlement: ent,
                     hasPremiumFeatures: hasPremiumFeatures,
                   ),
+                ),
+                SettingsSection(
+                  label: 'Notifications',
+                  child: const NotificationSettingsCard(),
                 ),
                 SettingsSection(
                   label: 'Appearance',

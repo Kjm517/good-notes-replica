@@ -1,5 +1,13 @@
 import { requireUser } from './auth';
 import {
+  appendSentNotification,
+  firebaseConfigured,
+  readDeviceTokens,
+  readSentNotifications,
+  sendPush,
+  type SentNotification,
+} from './notifications';
+import {
   addTeamMember,
   clearAudit,
   deleteUserData,
@@ -228,6 +236,83 @@ export async function handleAdmin(
       authDeleted,
       authError: authDeleted ? null : authError ?? null,
     });
+  }
+
+  // ---- Notifications ----------------------------------------------
+  if (path === '/admin/notifications' && method === 'GET') {
+    await requireStaff(request, env);
+    const [sent, subscriptions] = await Promise.all([
+      readSentNotifications(env.BUCKET),
+      listSubscriptions(env.BUCKET),
+    ]);
+    return json({
+      sent,
+      configured: firebaseConfigured(env),
+      audienceCounts: {
+        all: subscriptions.length,
+        premium: subscriptions.filter((s) => s.isPremium).length,
+        free: subscriptions.filter((s) => !s.isPremium).length,
+      },
+    });
+  }
+
+  if (path === '/admin/notifications' && method === 'POST') {
+    const actor = await requireAdmin(request, env);
+    const body = (await request.json()) as {
+      title?: string;
+      body?: string;
+      audience?: 'all' | 'premium' | 'free';
+    };
+    const title = body.title?.trim();
+    const message = body.body?.trim();
+    if (!title || !message) {
+      return json({ error: 'Title and message are required.' }, 400);
+    }
+    if (!firebaseConfigured(env)) {
+      return json(
+        { error: 'Push is not configured. Set FIREBASE_SERVICE_ACCOUNT.' },
+        503,
+      );
+    }
+
+    const audience = body.audience ?? 'all';
+    const subscriptions = await listSubscriptions(env.BUCKET);
+    const recipients = subscriptions.filter((s) =>
+      audience === 'premium'
+        ? s.isPremium
+        : audience === 'free'
+          ? !s.isPremium
+          : true,
+    );
+
+    const tokens: string[] = [];
+    for (const row of recipients) {
+      const devices = await readDeviceTokens(env.BUCKET, row.uid);
+      for (const d of devices) tokens.push(d.token);
+    }
+
+    const result = await sendPush(env, tokens, { title, body: message });
+
+    const entry: SentNotification = {
+      id: crypto.randomUUID(),
+      title,
+      body: message,
+      audience,
+      sentAt: new Date().toISOString(),
+      sentBy: actor.email ?? actor.uid,
+      delivered: result.delivered,
+      failed: result.failed,
+    };
+    await appendSentNotification(env.BUCKET, entry);
+    await appendAudit(env.BUCKET, {
+      action: 'notification.send',
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      target: audience,
+      detail: `${title} (${result.delivered} delivered, ${result.failed} failed)`,
+    });
+
+    return json({ sent: entry });
   }
 
   // ---- Subscriptions ----------------------------------------------

@@ -45,6 +45,8 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Notably uses the camera to scan pages into your notebooks.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Notably saves exported pages and PDFs to your photo library when you choose to.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

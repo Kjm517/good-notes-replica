@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/notifications/notification_providers.dart';
 import '../core/sync/sync_providers.dart';
 import '../core/sync/user_telemetry.dart';
 import '../core/sync/background_keep_alive.dart';
@@ -126,6 +127,7 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
     // soon as someone signs in.
     ref.watch(revenueCatSyncProvider);
     ref.watch(payMongoSyncProvider);
+    ref.watch(pushRegistrationProvider);
     ref.watch(syncEngineProvider);
     final themeMode = ref.watch(themeModeProvider);
     final authState = ref.watch(authStateProvider);

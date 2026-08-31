@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app/app.dart';
 import 'app/crash_guard.dart';
 import 'app/supabase_bootstrap.dart';
+import 'core/notifications/notification_service.dart';
 import 'app/providers.dart';
 import 'core/prefs/shared_preferences_bootstrap.dart';
 import 'features/admin/admin_supabase.dart';
@@ -51,6 +52,7 @@ Future<Widget> bootstrap() async {
 
   // Never fatal: if Supabase isn't configured the app runs local-only.
   await initSupabase();
+  unawaited(NotificationService.instance.init());
   await initAdminSupabase();
 
   await configureRevenueCat();

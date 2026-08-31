@@ -74,6 +74,10 @@ dependencies:
   flutter_native_splash: ^2.4.7
   qr_flutter: ^4.1.0
   app_links: ^7.2.1
+  permission_handler: ^13.0.1
+  flutter_local_notifications: ^22.3.0
+  firebase_core: ^4.14.0
+  firebase_messaging: ^16.6.0
 
 dev_dependencies:
   flutter_test:

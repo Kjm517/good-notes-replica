@@ -184,6 +184,75 @@ class AdminPaymentRow {
       };
 }
 
+/// One announcement that was pushed to devices.
+class AdminSentNotification {
+  const AdminSentNotification({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.audience,
+    required this.sentAt,
+    required this.delivered,
+    required this.failed,
+    this.sentBy,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final String audience;
+  final String sentAt;
+  final String? sentBy;
+  final int delivered;
+  final int failed;
+
+  factory AdminSentNotification.fromJson(Map<String, dynamic> json) {
+    return AdminSentNotification(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      body: json['body'] as String? ?? '',
+      audience: json['audience'] as String? ?? 'all',
+      sentAt: json['sentAt'] as String? ?? '',
+      sentBy: json['sentBy'] as String?,
+      delivered: json['delivered'] as int? ?? 0,
+      failed: json['failed'] as int? ?? 0,
+    );
+  }
+}
+
+/// Notification console state: history, push readiness, audience sizes.
+class AdminNotificationsData {
+  const AdminNotificationsData({
+    required this.sent,
+    required this.configured,
+    required this.audienceAll,
+    required this.audiencePremium,
+    required this.audienceFree,
+  });
+
+  final List<AdminSentNotification> sent;
+
+  /// False when the worker has no FIREBASE_SERVICE_ACCOUNT — sending will fail.
+  final bool configured;
+
+  final int audienceAll;
+  final int audiencePremium;
+  final int audienceFree;
+
+  factory AdminNotificationsData.fromJson(Map<String, dynamic> json) {
+    final counts = json['audienceCounts'] as Map<String, dynamic>? ?? const {};
+    return AdminNotificationsData(
+      sent: (json['sent'] as List<dynamic>? ?? [])
+          .map((e) => AdminSentNotification.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      configured: json['configured'] as bool? ?? false,
+      audienceAll: counts['all'] as int? ?? 0,
+      audiencePremium: counts['premium'] as int? ?? 0,
+      audienceFree: counts['free'] as int? ?? 0,
+    );
+  }
+}
+
 class AdminDocumentRow {
   const AdminDocumentRow({
     required this.uid,
@@ -503,6 +572,34 @@ class AdminApiService {
         .toList();
   }
 
+  Future<AdminNotificationsData> fetchNotifications() async {
+    final headers = await _authHeaders();
+    final response =
+        await _client.get(_uri('/admin/notifications'), headers: headers);
+    return AdminNotificationsData.fromJson(await _decode(response));
+  }
+
+  Future<AdminSentNotification> sendNotification({
+    required String title,
+    required String body,
+    required String audience,
+  }) async {
+    final headers = await _authHeaders();
+    final response = await _client.post(
+      _uri('/admin/notifications'),
+      headers: headers,
+      body: jsonEncode({
+        'title': title,
+        'body': body,
+        'audience': audience,
+      }),
+    );
+    final decoded = await _decode(response);
+    return AdminSentNotification.fromJson(
+      decoded['sent'] as Map<String, dynamic>,
+    );
+  }
+
   Future<void> updateSubscription(
     String uid, {
     required bool isPremium,
@@ -802,6 +899,21 @@ final adminPaymentsProvider = FutureProvider<List<AdminPaymentRow>>((ref) async 
   final api = ref.watch(adminApiServiceProvider);
   if (api == null) return [];
   return api.fetchPayments();
+});
+
+final adminNotificationsProvider =
+    FutureProvider<AdminNotificationsData>((ref) async {
+  final api = ref.watch(adminApiServiceProvider);
+  if (api == null) {
+    return const AdminNotificationsData(
+      sent: [],
+      configured: false,
+      audienceAll: 0,
+      audiencePremium: 0,
+      audienceFree: 0,
+    );
+  }
+  return api.fetchNotifications();
 });
 
 final adminDocumentsProvider = FutureProvider<List<AdminDocumentRow>>((ref) async {
