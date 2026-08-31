@@ -13,6 +13,7 @@ import '../core/sync/background_keep_alive.dart';
 import '../features/auth/providers.dart';
 import '../features/settings/paymongo_billing.dart';
 import '../features/settings/premium_providers.dart';
+import '../features/settings/renewal_scheduler.dart';
 import '../features/settings/revenuecat_billing.dart';
 import '../features/settings/entitlements.dart';
 import 'supabase_bootstrap.dart';
@@ -128,6 +129,7 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
     ref.watch(revenueCatSyncProvider);
     ref.watch(payMongoSyncProvider);
     ref.watch(pushRegistrationProvider);
+    ref.watch(renewalReminderSyncProvider);
     ref.watch(syncEngineProvider);
     final themeMode = ref.watch(themeModeProvider);
     final authState = ref.watch(authStateProvider);

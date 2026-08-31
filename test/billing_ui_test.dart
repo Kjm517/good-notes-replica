@@ -168,6 +168,34 @@ void main() {
       expect(find.textContaining('Premium ends'), findsNothing);
     });
 
+    testWidgets('stays hidden just outside the five-day window',
+        (tester) async {
+      await tester.pumpWidget(
+        await _host(
+          const RenewalReminderCard(),
+          prefs: premiumPrefs(expiresIn: const Duration(days: 6)),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.textContaining('Premium ends'), findsNothing);
+    });
+
+    testWidgets('appears five days out, when Extend should first show',
+        (tester) async {
+      await tester.pumpWidget(
+        await _host(
+          const RenewalReminderCard(),
+          // Just inside five days.
+          prefs: premiumPrefs(expiresIn: const Duration(days: 4, hours: 20)),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.textContaining('Premium ends'), findsOneWidget);
+      expect(find.textContaining('Extend · '), findsOneWidget);
+    });
+
     testWidgets('warns inside the reminder window', (tester) async {
       await tester.pumpWidget(
         await _host(

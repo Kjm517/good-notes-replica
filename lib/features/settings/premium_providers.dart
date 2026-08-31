@@ -31,8 +31,11 @@ void _bumpBillingRevision(Ref ref) {
   ref.read(billingRevisionProvider.notifier).state++;
 }
 
-/// How far ahead of expiry we start nudging.
-const kRenewalReminderWindow = Duration(days: 3);
+/// When the in-app "Extend Premium" prompt starts appearing.
+const kRenewalReminderWindow = Duration(days: 5);
+
+/// Second nudge, for someone who saw the card at five days and did nothing.
+const kRenewalSecondNoticeWindow = Duration(days: 3);
 const _historyKey = 'billing_history_json';
 
 /// Live premium flag from RevenueCat when configured.
