@@ -10,6 +10,12 @@
 #
 # Flutter Swift Package Manager is disabled in pubspec.yaml — Xcode 16/26
 # crashes resolving plugin graphs after Firebase was removed.
+# jsDelivr, which backs the default CDN trunk source, serves a 400 for some
+# FirebaseMessaging podspecs the resolver walks through, breaking `pod install`
+# outright. The git-backed spec repo has no such gap. First install clones a
+# large repo; later ones are incremental.
+source 'https://github.com/CocoaPods/Specs.git'
+
 platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously, which slows every
