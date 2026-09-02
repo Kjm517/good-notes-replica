@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -160,6 +161,17 @@ class AuthRepository {
         10;
   }
 
+  /// Message shown when the browser hands control back without a session.
+  ///
+  /// Almost always one thing: the return URL is not on the project's allow
+  /// list, so GoTrue redirects to the Site URL instead of back into the app
+  /// and the browser shows "site can't be reached".
+  static const _redirectNotAllowed =
+      'Google sign-in did not come back to the app. In Supabase → '
+      'Authentication → URL Configuration, add this return URL under '
+      'Redirect URLs: $nativeOAuthRedirect (and your web origin, e.g. '
+      'http://localhost:5000, for the browser build).';
+
   Future<AuthResult> signInWithGoogle() async {
     try {
       final pending = Completer<AuthResult>();
@@ -172,6 +184,22 @@ class AuthRepository {
           );
         }
       });
+      // On native the browser is a separate app, so coming back to Notably
+      // without a session means the round trip failed. Detecting that beats
+      // spinning for the full timeout, which is what a bad redirect URL used
+      // to look like.
+      AppLifecycleListener? lifecycle;
+      if (!kIsWeb) {
+        lifecycle = AppLifecycleListener(
+          onResume: () async {
+            // Let the deep link land first — it arrives around the resume.
+            await Future<void>.delayed(const Duration(seconds: 2));
+            if (pending.isCompleted) return;
+            if (_auth.currentSession != null) return;
+            pending.completeError(const AuthFailure(_redirectNotAllowed));
+          },
+        );
+      }
       try {
         final ok = await _auth.signInWithOAuth(
           OAuthProvider.google,
@@ -184,14 +212,10 @@ class AuthRepository {
         // Web navigates away; mobile returns via the deep link.
         return await pending.future.timeout(
           const Duration(minutes: 2),
-          onTimeout: () => throw const AuthFailure(
-            'Google sign-in timed out. In Supabase → Authentication, enable the '
-            'Google provider and add this app’s URL under Redirect URLs '
-            '(http://localhost:<port> for Chrome, and '
-            '$nativeOAuthRedirect for iOS/Android).',
-          ),
+          onTimeout: () => throw const AuthFailure(_redirectNotAllowed),
         );
       } finally {
+        lifecycle?.dispose();
         await sub.cancel();
       }
     } on AuthException catch (e) {
