@@ -221,6 +221,7 @@ class AiQuizGenerator {
       'multipleChoice' => QuizKind.multipleChoice,
       'trueFalse' => QuizKind.trueFalse,
       'shortAnswer' => QuizKind.shortAnswer,
+      'identification' => QuizKind.identification,
       _ => QuizKind.multipleChoice,
     };
 
@@ -252,6 +253,7 @@ class AiQuizGenerator {
         QuizKind.multipleChoice => 'multipleChoice',
         QuizKind.trueFalse => 'trueFalse',
         QuizKind.shortAnswer => 'shortAnswer',
+        QuizKind.identification => 'identification',
       };
 
   String _difficultyName(QuizDifficulty d) => switch (d) {
@@ -301,10 +303,15 @@ class LocalQuizGenerator {
     if (sentences.isEmpty) return const [];
 
     sentences.shuffle(_random);
-    final kinds = config.kinds.isEmpty
-        ? {QuizKind.multipleChoice}
-        : config.kinds;
-    final kindList = kinds.toList();
+    // Identification is deliberately absent here: this path only has sentences,
+    // and an identification item without a figure to point at is unanswerable.
+    // Asking for it alone falls back to multiple choice rather than returning
+    // an empty quiz.
+    final kinds = {
+      for (final kind in config.kinds)
+        if (kind != QuizKind.identification) kind,
+    };
+    final kindList = (kinds.isEmpty ? {QuizKind.multipleChoice} : kinds).toList();
     final out = <QuizQuestion>[];
     final used = <String>{};
 
@@ -318,6 +325,8 @@ class LocalQuizGenerator {
         QuizKind.multipleChoice => _multipleChoice(source, sentences),
         QuizKind.trueFalse => _trueFalse(source, sentences),
         QuizKind.shortAnswer => _shortAnswer(source),
+        // Unreachable — filtered out of kindList above.
+        QuizKind.identification => null,
       };
       if (question != null && isExamStyleQuestion(question)) out.add(question);
     }

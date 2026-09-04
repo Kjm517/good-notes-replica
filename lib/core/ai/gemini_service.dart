@@ -269,6 +269,16 @@ Return a JSON array only. Each element:
   "highlight": {"x": 0.08, "y": 0.40, "w": 0.38, "h": 0.019}
 }
 ${kinds.contains('shortAnswer') ? 'For shortAnswer, choices is []. ' : 'Do not emit shortAnswer. '}${kinds.contains('trueFalse') ? 'For trueFalse, choices must be ["True", "False"]. ' : ''}pageIndex is 0-based from the source headings.
+${kinds.contains('identification') && hasImages ? '''
+IDENTIFICATION (label-the-diagram items)
+The student is shown the page image with a marker drawn on it and types what the marked thing is.
+- Only write these for an actual figure you can SEE in an attached page image: a labelled diagram, a micrograph, a chart, an anatomical plate. Never from prose.
+- "highlight" is REQUIRED and is the thing being asked about, not the passage describing it. Make it tight around the single structure — roughly 0.03–0.12 wide and tall. A box covering half the figure is useless.
+- "prompt" must not name the answer. Write "What is the marked structure?" or "Name the marked layer.", never "Where is the Golgi?".
+- "acceptedAnswer" is the label a student would write: "Golgi apparatus", "mitochondrion", "left ventricle".
+- "choices" is [].
+- If a page has no figure worth labelling, write a different kind instead. Do not invent a marker position.
+''' : 'Do not emit identification.'}
 
 SOURCE QUOTE (this is what the student is shown)
 "sourceQuote" is ONE sentence copied CHARACTER FOR CHARACTER out of the page text above — the sentence that states the answer.
@@ -296,6 +306,8 @@ ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstru
         '{"kind":"multipleChoice","prompt":"Why do eukaryotic cells contain ribosomes?","choices":["They synthesise proteins from amino acids","They store the cell\'s genetic material","They generate ATP by respiration","They digest worn-out organelles"],"correctIndex":0,"acceptedAnswer":"They synthesise proteins from amino acids","explanation":"Ribosomes synthesise proteins from amino acids. The nucleus stores DNA, and mitochondria produce ATP by respiration. See page 14.","pageIndex":13,"highlight":{"x":0.08,"y":0.10,"w":0.38,"h":0.019}}';
     const tf =
         '{"kind":"trueFalse","prompt":"Mitochondria generate ATP through cellular respiration in animal cells.","choices":["True","False"],"correctIndex":0,"acceptedAnswer":"True","explanation":"Mitochondria generate ATP through cellular respiration. That pathway oxidises fuel molecules at the inner mitochondrial membrane. See page 15.","pageIndex":14,"highlight":{"x":0.08,"y":0.18,"w":0.38,"h":0.019}}';
+    const ident =
+        '{"kind":"identification","prompt":"What is the marked structure?","choices":[],"correctIndex":0,"acceptedAnswer":"Golgi apparatus","explanation":"The marked stack of flattened membrane sacs beside the nucleus is the Golgi apparatus, which packages proteins into vesicles. The rough ER, labelled to its left, is studded with ribosomes instead. See page 14.","pageIndex":13,"highlight":{"x":0.44,"y":0.31,"w":0.07,"h":0.06}}';
     const sa =
         '{"kind":"shortAnswer","prompt":"What do you call the organelle that packages proteins for transport across the membrane?","choices":[],"correctIndex":0,"acceptedAnswer":"Golgi apparatus","explanation":"The Golgi apparatus packages proteins and lipids into vesicles for delivery to other organelles or the cell surface. Cargo typically arrives from the rough endoplasmic reticulum, which synthesises those proteins. See page 14.","pageIndex":13,"highlight":{"x":0.08,"y":0.42,"w":0.38,"h":0.019}}';
 
@@ -308,6 +320,9 @@ ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstru
     }
     if (kinds.contains('shortAnswer')) {
       examples.add(sa);
+    }
+    if (kinds.contains('identification')) {
+      examples.add(ident);
     }
     if (examples.isEmpty) {
       examples.addAll([mc1, mc2]);

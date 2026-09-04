@@ -392,7 +392,7 @@ class PageBackgroundService {
         }
 
         final size = await _assets.sizeOf(assetId);
-        if (size != null && size > kMaxInMemoryAssetBytes) {
+        if (size != null && size > maxOpenableAssetBytes) {
           throw StateError(
             'PDF asset $assetId is ${(size / 1e6).round()} MB and cannot be '
             'opened from memory on this platform',

@@ -75,19 +75,51 @@ class ImportService {
   /// Account that will own the imported document (null when signed out).
   final String? ownerUid;
 
-  /// Prompts for image files and creates a document with one page per image.
-  /// Returns the new document id, or null if cancelled.
-  Future<String?> importImages({
-    String? parentId,
-    ImportProgress? onProgress,
-  }) async {
-    final result = await FilePicker.pickFiles(
+  /// Opens the system file dialog for images.
+  ///
+  /// Call this *synchronously from the tap handler* and pass the future to
+  /// [importImages]. WebKit — which every browser on iPad uses — only opens a
+  /// file dialog while the originating tap is still on the call stack, so
+  /// anything awaited first (a closing sheet, a database read) leaves
+  /// `input.click()` silently ignored. See [pickPdfFiles].
+  static Future<FilePickerResult?> pickImageFiles() {
+    return FilePicker.pickFiles(
       type: FileType.image,
       allowMultiple: true,
       // Only load bytes on web. On iOS/Android the picker can OOM on large
       // files when withData is true; import from the path instead.
       withData: kIsWeb,
     );
+  }
+
+  /// Opens the system file dialog for a PDF (Office formats included so the
+  /// user gets an explanation instead of an unselectable file).
+  ///
+  /// Must be started on the user's tap — see [pickImageFiles].
+  static Future<FilePickerResult?> pickPdfFiles() {
+    return FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', ...kOfficeExtensions],
+      // Only ask for bytes on web. On Android the picker loads the whole file
+      // into a single Java byte[] before it ever reaches Dart, and anything
+      // past the ~192 MB heap limit throws OutOfMemoryError on a plugin
+      // coroutine — an uncaught crash that kills the process where no Dart
+      // catch can see it. Native imports stream from the path instead.
+      withData: kIsWeb,
+    );
+  }
+
+  /// Creates a document with one page per image.
+  ///
+  /// [picked] is a dialog already opened by the tap handler; when null the
+  /// dialog is opened here, which works everywhere except WebKit.
+  /// Returns the new document id, or null if cancelled.
+  Future<String?> importImages({
+    String? parentId,
+    ImportProgress? onProgress,
+    Future<FilePickerResult?>? picked,
+  }) async {
+    final result = await (picked ?? pickImageFiles());
     if (result == null || result.files.isEmpty) return null;
 
     final images = <ImagePayload>[];
@@ -189,23 +221,16 @@ class ImportService {
     return docId;
   }
 
-  /// Prompts for a PDF and creates a document with one page per PDF page.
+  /// Creates a document with one page per PDF page.
+  ///
+  /// [picked] is a dialog already opened by the tap handler; when null the
+  /// dialog is opened here, which works everywhere except WebKit.
   Future<String?> importPdf({
     String? parentId,
     ImportProgress? onProgress,
+    Future<FilePickerResult?>? picked,
   }) async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      // Office formats are accepted by the picker so selecting one gives a
-      // useful explanation instead of the file being silently unselectable.
-      allowedExtensions: ['pdf', ...kOfficeExtensions],
-      // Only ask for bytes on web. On Android the picker loads the whole file
-      // into a single Java byte[] before it ever reaches Dart, and anything
-      // past the ~192 MB heap limit throws OutOfMemoryError on a plugin
-      // coroutine — an uncaught crash that kills the process where no Dart
-      // catch can see it. Native imports stream from the path instead.
-      withData: kIsWeb,
-    );
+    final result = await (picked ?? pickPdfFiles());
     if (result == null || result.files.isEmpty) return null;
     final file = result.files.first;
 

@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -977,7 +978,18 @@ Future<void> runCreateFlow(
   WidgetRef ref, {
   required String? parentId,
 }) async {
-  final action = await CreateSheet.show(context);
+  // Opened by the tap itself, not after the sheet closes: on WebKit (every
+  // browser on iPad) a file dialog only opens while the tap is still the
+  // active gesture, so awaiting the dismiss animation — let alone the storage
+  // query below — used to leave the dialog silently unopened.
+  Future<FilePickerResult?>? picked;
+  final action = await CreateSheet.show(
+    context,
+    onTapAction: (a) {
+      if (a == CreateAction.importPdf) picked = ImportService.pickPdfFiles();
+      if (a == CreateAction.importImages) picked = ImportService.pickImageFiles();
+    },
+  );
   if (action == null || !context.mounted) return;
 
   switch (action) {
@@ -990,14 +1002,13 @@ Future<void> runCreateFlow(
             .read(libraryRepositoryProvider)
             .createFolder(parentId: parentId, title: name);
       }
+    // The quota check now runs *after* the dialog is already open, so it can
+    // no longer delay it. A full library still blocks the import, just at the
+    // point the file comes back rather than before the picker.
     case CreateAction.importPdf:
-      if (!await _ensureStorageAvailable(context, ref)) return;
-      if (!context.mounted) return;
-      await _import(context, ref, isPdf: true, parentId: parentId);
+      await _import(context, ref, isPdf: true, parentId: parentId, picked: picked);
     case CreateAction.importImages:
-      if (!await _ensureStorageAvailable(context, ref)) return;
-      if (!context.mounted) return;
-      await _import(context, ref, isPdf: false, parentId: parentId);
+      await _import(context, ref, isPdf: false, parentId: parentId, picked: picked);
     case CreateAction.scan:
       if (!await _ensureStorageAvailable(context, ref)) return;
       if (!context.mounted) return;
@@ -1139,6 +1150,7 @@ Future<void> _import(
   WidgetRef ref, {
   required bool isPdf,
   required String? parentId,
+  Future<FilePickerResult?>? picked,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
   final router = GoRouter.of(context);
@@ -1159,9 +1171,18 @@ Future<void> _import(
   }
 
   try {
+    // Nothing chosen: the user cancelled the dialog, so there is nothing to
+    // check the quota against and nothing to report.
+    final chosen = await (picked ?? Future<FilePickerResult?>.value());
+    if (picked != null && (chosen == null || chosen.files.isEmpty)) return;
+    if (!context.mounted) return;
+    if (!await _ensureStorageAvailable(context, ref)) return;
+    if (!context.mounted) return;
+
     final id = isPdf
         ? await service.importPdf(
             parentId: parentId,
+            picked: picked == null ? null : Future.value(chosen),
             onProgress: (f, label) {
               if (!dialogOpen) showProgressDialog();
               progress.value = (f, label);
@@ -1169,6 +1190,7 @@ Future<void> _import(
           )
         : await service.importImages(
             parentId: parentId,
+            picked: picked == null ? null : Future.value(chosen),
             onProgress: (f, label) {
               if (!dialogOpen) showProgressDialog();
               progress.value = (f, label);

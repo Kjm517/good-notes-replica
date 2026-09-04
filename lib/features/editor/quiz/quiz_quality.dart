@@ -157,10 +157,18 @@ bool isExamStyleQuestion(QuizQuestion question) {
   if (_cloze.hasMatch(blob)) return false;
   if (_questionJunk.hasMatch(blob) || _authorList.hasMatch(blob)) return false;
   final prompt = question.prompt.trim();
-  if (prompt.length < 20) return false;
-  if (needsUnseenFigure(prompt)) return false;
-  if (_whichOfTheFollowing.hasMatch(prompt)) return false;
-  if (_pastedPredicateStem.hasMatch(prompt)) return false;
+
+  final identification = question.kind == QuizKind.identification;
+  // Identification is the one kind that legitimately points at a figure — the
+  // student is looking at it — so the "unseen figure" and stem rules that
+  // protect the text kinds would reject every valid item. Its prompts are also
+  // short by design ("What is the marked structure?").
+  if (!identification) {
+    if (prompt.length < 20) return false;
+    if (needsUnseenFigure(prompt)) return false;
+  }
+  if (!identification && _whichOfTheFollowing.hasMatch(prompt)) return false;
+  if (!identification && _pastedPredicateStem.hasMatch(prompt)) return false;
   if (question.explanation.trim().length < 40) return false;
   if (_metaExplain.hasMatch(question.explanation)) return false;
   // Long factual explanations don't always use "because" / "fact". Only
@@ -169,6 +177,19 @@ bool isExamStyleQuestion(QuizQuestion question) {
   if (question.explanation.trim().length < 80 &&
       !_teaching.hasMatch(question.explanation)) {
     return false;
+  }
+
+  // The marker is what makes the item answerable, so it is mandatory here.
+  if (identification) {
+    final hl = question.highlight;
+    if (hl == null) return false;
+    // A box over half the page points at nothing.
+    if (hl.w > 0.5 || hl.h > 0.5) return false;
+    if (question.choices.isNotEmpty) return false;
+    final answer = question.acceptedAnswer.trim();
+    if (answer.isEmpty || isGenericAnswer(answer)) return false;
+    // A prompt naming the answer gives the whole thing away.
+    if (prompt.toLowerCase().contains(answer.toLowerCase())) return false;
   }
 
   if (question.kind == QuizKind.multipleChoice) {

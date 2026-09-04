@@ -22,6 +22,7 @@ import 'quiz_align.dart';
 import 'quiz_generator.dart';
 import 'quiz_history.dart';
 import 'quiz_history_page.dart';
+import 'quiz_figure_view.dart';
 import 'quiz_models.dart';
 import 'quiz_queue.dart';
 import 'quiz_source_locator.dart';
@@ -659,7 +660,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
       return;
     }
     final q = _current;
-    if (q.kind == QuizKind.shortAnswer) {
+    if (q.kind.isWritten) {
       _submitWritten();
     } else {
       setState(() {
@@ -683,8 +684,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
       _index++;
       _revealed = _answers.containsKey(_index);
       _shortAnswer.clear();
-      if (_answers[_index]?.written != null &&
-          _current.kind == QuizKind.shortAnswer) {
+      if (_answers[_index]?.written != null && _current.kind.isWritten) {
         _shortAnswer.text = _answers[_index]!.written!;
       }
     });
@@ -949,6 +949,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
               status: _status,
             ),
             _Phase.taking => _TakingView(
+              documentId: widget.documentId,
               question: _current,
               index: _index,
               total: _questions.length,
@@ -1160,6 +1161,13 @@ class _SetupView extends StatelessWidget {
               label: 'Short answer',
               selected: config.kinds.contains(QuizKind.shortAnswer),
               onTap: () => onChanged(_toggleKind(config, QuizKind.shortAnswer)),
+            ),
+            _TypeTile(
+              label: 'Identification',
+              subtitle: 'Name the marked part of a diagram',
+              selected: config.kinds.contains(QuizKind.identification),
+              onTap: () =>
+                  onChanged(_toggleKind(config, QuizKind.identification)),
             ),
             const SizedBox(height: 18),
             Text('DIFFICULTY', style: AppTokens.sectionLabel(t.textFaint)),
@@ -1425,9 +1433,11 @@ class _TypeTile extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.subtitle,
   });
 
   final String label;
+  final String? subtitle;
   final bool selected;
   final VoidCallback onTap;
 
@@ -1444,6 +1454,9 @@ class _TypeTile extends StatelessWidget {
         color: selected ? t.premium : t.textMuted,
       ),
       title: Text(label),
+      subtitle: subtitle == null
+          ? null
+          : Text(subtitle!, style: TextStyle(color: t.textMuted, fontSize: 12)),
     );
   }
 }
@@ -1563,6 +1576,7 @@ class _GeneratingView extends StatelessWidget {
 
 class _TakingView extends StatelessWidget {
   const _TakingView({
+    required this.documentId,
     required this.question,
     required this.index,
     required this.total,
@@ -1578,6 +1592,7 @@ class _TakingView extends StatelessWidget {
     required this.onOpenPage,
   });
 
+  final String documentId;
   final QuizQuestion question;
   final int index;
   final int total;
@@ -1613,6 +1628,7 @@ class _TakingView extends StatelessWidget {
                     QuizKind.multipleChoice => 'Multiple choice',
                     QuizKind.trueFalse => 'True / false',
                     QuizKind.shortAnswer => 'Short answer',
+                    QuizKind.identification => 'Identification',
                   },
                   style: TextStyle(
                     fontSize: tablet ? 16 : 14,
@@ -1674,6 +1690,14 @@ class _TakingView extends StatelessWidget {
               ),
             ),
             SizedBox(height: tablet ? 22 : 18),
+            if (question.kind.needsFigure) ...[
+              QuizFigureView(
+                documentId: documentId,
+                question: question,
+                height: tablet ? 340 : 240,
+              ),
+              SizedBox(height: tablet ? 20 : 16),
+            ],
             if (question.choices.isNotEmpty)
               for (var i = 0; i < question.choices.length; i++)
                 _ChoiceTile(

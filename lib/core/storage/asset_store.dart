@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+
 import 'asset_store_io.dart'
     if (dart.library.js_interop) 'asset_store_web.dart'
     as impl;
@@ -46,6 +48,25 @@ Future<String> plannedAssetPath(String id, {String extension = 'bin'}) =>
 /// the app killed outright. Anything above this has to be streamed from its
 /// file instead, or skipped where the API in question only accepts bytes.
 const int kMaxInMemoryAssetBytes = 64 * 1024 * 1024;
+
+/// Largest asset this platform can actually open.
+///
+/// [kMaxInMemoryAssetBytes] assumes the caller can fall back to streaming the
+/// file — which is true on native and false on web, where
+/// [supportsFileStorage] is false and there is no file at all. Applying the
+/// Android heap number there did not make a big PDF stream; it made it
+/// permanently unopenable in the browser, reported as "PDF not available on
+/// this device" no matter how many times sync succeeded.
+///
+/// A desktop browser tab handles a few hundred MB comfortably. Mobile WebKit
+/// does not, so it keeps a tighter number — still above the native cap,
+/// because failing outright is the only alternative on offer.
+int get maxOpenableAssetBytes {
+  if (!kIsWeb) return kMaxInMemoryAssetBytes;
+  final mobileBrowser = defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android;
+  return mobileBrowser ? 96 * 1024 * 1024 : 256 * 1024 * 1024;
+}
 
 /// Streams [bytes] straight to storage, so a 150 MB textbook never has to be
 /// held in one allocation. Web has no filesystem and buffers instead.

@@ -10,10 +10,23 @@ enum CreateAction { notebook, folder, importPdf, importImages, scan }
 /// Returns the chosen [CreateAction] and does nothing else — the caller owns
 /// the work, so this stays a pure presentation widget that both the phone FAB
 /// and the desktop "New" button can share.
+///
+/// The one exception is [onTapAction], which runs *synchronously* on the tap
+/// before the sheet starts closing. WebKit (every browser on iPad) only opens
+/// a file dialog while the originating tap is still on the call stack, so an
+/// import has to start its picker here — by the time `show` returns, the
+/// dismiss animation has ended the gesture and `input.click()` is ignored
+/// with no error. Callers that do not pick files can leave it null.
 class CreateSheet extends StatelessWidget {
-  const CreateSheet({super.key});
+  const CreateSheet({super.key, this.onTapAction});
 
-  static Future<CreateAction?> show(BuildContext context) {
+  /// Runs on the tap itself, before the sheet pops. See the class doc.
+  final void Function(CreateAction action)? onTapAction;
+
+  static Future<CreateAction?> show(
+    BuildContext context, {
+    void Function(CreateAction action)? onTapAction,
+  }) {
     final desktop =
         MediaQuery.sizeOf(context).width >= AppBreakpoints.librarySidebar;
     if (desktop) {
@@ -26,7 +39,7 @@ class CreateSheet extends StatelessWidget {
           ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
-            child: const CreateSheet(),
+            child: CreateSheet(onTapAction: onTapAction),
           ),
         ),
       );
@@ -36,7 +49,7 @@ class CreateSheet extends StatelessWidget {
       showDragHandle: true,
       isScrollControlled: true,
       constraints: const BoxConstraints(maxWidth: 600),
-      builder: (_) => const CreateSheet(),
+      builder: (_) => CreateSheet(onTapAction: onTapAction),
     );
   }
 
@@ -59,6 +72,7 @@ class CreateSheet extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           _Tile(
+            onTapAction: onTapAction,
             icon: Icons.menu_book_rounded,
             iconColor: t.accentText,
             iconBackground: t.accentSoft,
@@ -67,6 +81,7 @@ class CreateSheet extends StatelessWidget {
             action: CreateAction.notebook,
           ),
           _Tile(
+            onTapAction: onTapAction,
             icon: Icons.create_new_folder_rounded,
             iconColor: t.textSecondary,
             iconBackground: t.fill,
@@ -75,6 +90,7 @@ class CreateSheet extends StatelessWidget {
             action: CreateAction.folder,
           ),
           _Tile(
+            onTapAction: onTapAction,
             icon: Icons.picture_as_pdf_rounded,
             iconColor: t.pdfBadge,
             iconBackground: t.fill,
@@ -83,6 +99,7 @@ class CreateSheet extends StatelessWidget {
             action: CreateAction.importPdf,
           ),
           _Tile(
+            onTapAction: onTapAction,
             icon: Icons.image_rounded,
             iconColor: const Color(0xFF2F9D7B),
             iconBackground: t.fill,
@@ -91,6 +108,7 @@ class CreateSheet extends StatelessWidget {
             action: CreateAction.importImages,
           ),
           _Tile(
+            onTapAction: onTapAction,
             icon: Icons.document_scanner_rounded,
             iconColor: const Color(0xFFC08A2E),
             iconBackground: t.fill,
@@ -107,6 +125,7 @@ class CreateSheet extends StatelessWidget {
 
 class _Tile extends StatelessWidget {
   const _Tile({
+    required this.onTapAction,
     required this.icon,
     required this.iconColor,
     required this.iconBackground,
@@ -115,6 +134,7 @@ class _Tile extends StatelessWidget {
     required this.action,
   });
 
+  final void Function(CreateAction action)? onTapAction;
   final IconData icon;
   final Color iconColor;
   final Color iconBackground;
@@ -129,7 +149,12 @@ class _Tile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: () => Navigator.pop(context, action),
+        onTap: () {
+          // Synchronous, before the pop: the file dialog must be opened while
+          // this tap is still the active user gesture (see the class doc).
+          onTapAction?.call(action);
+          Navigator.pop(context, action);
+        },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
           child: Row(

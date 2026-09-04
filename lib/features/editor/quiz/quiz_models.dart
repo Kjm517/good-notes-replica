@@ -6,7 +6,28 @@ import 'dart:math' as math;
 
 import '../../../core/models/outline_entry.dart';
 
-enum QuizKind { multipleChoice, trueFalse, shortAnswer }
+/// [identification] shows the figure itself — a marked spot on the page — and
+/// asks the student to name it ("label the parts of a cell"). It is written
+/// like [shortAnswer], but it cannot be generated from page text alone: the
+/// model has to see the diagram to place the marker, so it is only ever
+/// emitted when page images are sent, and it always carries a highlight.
+enum QuizKind { multipleChoice, trueFalse, shortAnswer, identification }
+
+extension QuizKindX on QuizKind {
+  /// Answered by typing rather than picking an option.
+  bool get isWritten =>
+      this == QuizKind.shortAnswer || this == QuizKind.identification;
+
+  /// Needs the page image on screen to be answerable at all.
+  bool get needsFigure => this == QuizKind.identification;
+
+  String get label => switch (this) {
+        QuizKind.multipleChoice => 'Multiple choice',
+        QuizKind.trueFalse => 'True / false',
+        QuizKind.shortAnswer => 'Short answer',
+        QuizKind.identification => 'Identification',
+      };
+}
 
 enum QuizDifficulty { easy, medium, hard }
 

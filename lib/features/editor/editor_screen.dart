@@ -62,17 +62,45 @@ class EditorScreen extends ConsumerWidget {
     }
 
     return docAsync.when(
-      loading: () =>
-          const Scaffold(body: Center(child: CircularProgressIndicator())),
-      error: (e, _) => Scaffold(body: Center(child: Text('Error: $e'))),
+      loading: () => const _EditorPlaceholder(
+        child: CircularProgressIndicator(),
+      ),
+      error: (e, _) => _EditorPlaceholder(child: Text('Error: $e')),
       data: (doc) {
         if (doc == null) {
-          return const Scaffold(
-            body: Center(child: Text('Notebook not found')),
-          );
+          return const _EditorPlaceholder(child: Text('Notebook not found'));
         }
         return _Editor(document: doc);
       },
+    );
+  }
+}
+
+/// Loading / error / missing-document states.
+///
+/// These carry a back button of their own: without one, a document that fails
+/// to load is a dead end on web, where there is no system back gesture to fall
+/// back on.
+class _EditorPlaceholder extends StatelessWidget {
+  const _EditorPlaceholder({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: context.tokens.canvas,
+      appBar: AppBar(
+        backgroundColor: context.tokens.canvas,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: 'Back to library',
+          onPressed: () =>
+              context.canPop() ? context.pop() : context.go('/'),
+        ),
+      ),
+      body: Center(child: child),
     );
   }
 }
@@ -309,6 +337,10 @@ class _EditorState extends ConsumerState<_Editor> {
 
   /// Lets this device supply the original PDF when sync only brought metadata.
   Future<bool> _attachMissingFile(String assetId) async {
+    // Opened from the button's own tap: WebKit (every browser on iPad) only
+    // shows a file dialog while the tap is still the active gesture, so it
+    // cannot be started after this dialog's close animation.
+    Future<FilePickerResult?>? picked;
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -325,7 +357,14 @@ class _EditorState extends ConsumerState<_Editor> {
               child: Text('Later', style: TextStyle(color: t.textMuted)),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
+              onPressed: () {
+                picked = FilePicker.pickFiles(
+                  type: FileType.custom,
+                  allowedExtensions: const ['pdf'],
+                  withData: kIsWeb,
+                );
+                Navigator.pop(ctx, true);
+              },
               child: const Text('Choose file'),
             ),
           ],
@@ -334,11 +373,12 @@ class _EditorState extends ConsumerState<_Editor> {
     );
     if (go != true || !mounted) return false;
 
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['pdf'],
-      withData: kIsWeb,
-    );
+    final result = await (picked ??
+        FilePicker.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['pdf'],
+          withData: kIsWeb,
+        ));
     if (result == null || result.files.isEmpty || !mounted) return false;
     final file = result.files.first;
     final assets = ref.read(assetRepositoryProvider);
@@ -405,6 +445,11 @@ class _EditorState extends ConsumerState<_Editor> {
     final from =
         ref.read(editorControllerProvider(widget.document.id)).currentIndex;
     if (from == index) return;
+    // Stepping to the next or previous page is reading, not navigating. The
+    // toolbar's ‹ › arrows go through jumpToPage like everything else, so
+    // recording those made a 30-page read into 30 entries of back history —
+    // which is what stopped back from ever reaching the library.
+    if ((from - index).abs() <= 1) return;
     _pageHistory.add(from);
     if (_pageHistory.length > 50) _pageHistory.removeAt(0);
   }
@@ -449,19 +494,14 @@ class _EditorState extends ConsumerState<_Editor> {
     return _pageHistory.isNotEmpty;
   }
 
-  /// Toolbar ← restores the last page jumped to (thumbnail, outline, find,
-  /// page field). It does not undo ink, dismiss the sidebar, or clear a
-  /// selection — those are activities, not navigation.
-  void _handleToolbarBack() {
-    if (_pageHistory.isNotEmpty) {
-      final index = _pageHistory.removeLast();
-      _restoringPage = true;
-      _canvasController.jumpToPage(index);
-      _restoringPage = false;
-      return;
-    }
-    _leaveDocument();
-  }
+  /// Toolbar ← closes the document and returns to where it was opened from.
+  ///
+  /// It used to unwind page jumps first, which reads as "back" from inside the
+  /// editor but not from the user's side: the arrow sits next to the document
+  /// title, so it means "leave this". Unwinding a long read one page at a time
+  /// left no reachable way out. The system / browser back still steps back
+  /// through real jumps (outline, thumbnails, find) before leaving.
+  void _handleToolbarBack() => _leaveDocument();
 
   /// Unwinds the last overlay, page jump, or route — same as the system back.
   void _handleBack() {

@@ -165,7 +165,7 @@ class DocumentTextService {
       // than the platform allows, and the process is killed with no error —
       // so a very large PDF stays unindexed rather than taking the app down.
       final size = await _assets.sizeOf(assetId);
-      if (size != null && size > kMaxInMemoryAssetBytes) {
+      if (size != null && size > maxOpenableAssetBytes) {
         debugPrint(
           'Skipping in-memory text extraction for $documentId: '
           '${(size / 1e6).round()} MB exceeds the Dart heap limit',
@@ -323,7 +323,7 @@ class DocumentTextService {
     if (doc.outline != null) return;
 
     final size = await _assets.sizeOf(assetId);
-    if (size != null && size > kMaxInMemoryAssetBytes) {
+    if (size != null && size > maxOpenableAssetBytes) {
       debugPrint(
         'Skipping in-memory outline for $documentId: '
         '${(size / 1e6).round()} MB exceeds the Dart heap limit',
