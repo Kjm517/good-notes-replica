@@ -1590,11 +1590,19 @@ class _VerticalPageScrubber extends StatelessWidget {
         if (!controller.hasClients) {
           return const IgnorePointer(child: SizedBox.expand());
         }
-        final max = controller.position.maxScrollExtent;
+        // Attached but not laid out yet: the controller has a client while its
+        // position still has no content dimensions, and maxScrollExtent
+        // null-checks those. Opening the editor threw
+        // "Null check operator used on a null value" here on the first frame.
+        final position = controller.position;
+        if (!position.hasContentDimensions || !position.hasPixels) {
+          return const IgnorePointer(child: SizedBox.expand());
+        }
+        final max = position.maxScrollExtent;
         if (max <= 0) {
           return const IgnorePointer(child: SizedBox.expand());
         }
-        final progress = (controller.offset / max).clamp(0.0, 1.0);
+        final progress = (position.pixels / max).clamp(0.0, 1.0);
         return LayoutBuilder(
           builder: (context, constraints) {
             final height = constraints.maxHeight;
@@ -2020,7 +2028,14 @@ class _PageTileState extends ConsumerState<_PageTile> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Check your connection and reopen the notebook',
+                            // On web the usual cause is not the network: a
+                            // large PDF cannot be stored in the browser at
+                            // all, so telling the user to reconnect sends
+                            // them after something that will never help.
+                            kIsWeb
+                                ? 'It may be too large for a browser to store. '
+                                    'Open it in the app, or check your connection.'
+                                : 'Check your connection and reopen the notebook',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 11.5,

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -44,7 +45,8 @@ class _QuizFigureViewState extends ConsumerState<QuizFigureView> {
   @override
   void didUpdateWidget(QuizFigureView old) {
     super.didUpdateWidget(old);
-    if (old.question.pageIndex != widget.question.pageIndex) {
+    if (old.question.pageIndex != widget.question.pageIndex ||
+        old.question.figure?.region.w != widget.question.figure?.region.w) {
       _loading = true;
       _load();
     }
@@ -67,9 +69,16 @@ class _QuizFigureViewState extends ConsumerState<QuizFigureView> {
     }
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final width = MediaQuery.sizeOf(context).width;
-    // Rendered larger than the card: the crop below throws most of it away,
-    // so the source has to carry the detail the zoom will need.
-    final target = (width * dpr * 1.6).clamp(720.0, 2200.0);
+    // Resolution has to scale with the crop, not sit at a fixed multiplier.
+    // Showing a fifth of the page from a 1.6x render leaves roughly a third of
+    // the pixels the card actually paints, which is why the figure looked
+    // soft. Ask for what the visible slice needs, then cap it: a page is
+    // decoded into memory, and on web that memory is the whole ceiling.
+    final slice = widget.question.figure?.region.w ??
+        widget.question.highlight?.w ??
+        1.0;
+    final zoom = (1 / slice.clamp(0.05, 1.0)).clamp(1.0, 6.0);
+    final target = (width * dpr * zoom).clamp(900.0, 3600.0);
     final image = await ref
         .read(pageBackgroundServiceProvider)
         .loadThumbnail(page, targetWidth: target);
@@ -114,8 +123,12 @@ class _QuizFigureViewState extends ConsumerState<QuizFigureView> {
               : CustomPaint(
                   painter: _FigurePainter(
                     image: image,
+                    figure: widget.question.figure,
                     spot: widget.question.highlight,
                     marker: t.premium,
+                    markerOn: t.premiumOn,
+                    coverColor: t.surface,
+                    coverLine: t.line,
                   ),
                   size: Size.infinite,
                 ),
@@ -127,18 +140,38 @@ class _QuizFigureViewState extends ConsumerState<QuizFigureView> {
 class _FigurePainter extends CustomPainter {
   _FigurePainter({
     required this.image,
+    required this.figure,
     required this.spot,
     required this.marker,
+    required this.markerOn,
+    required this.coverColor,
+    required this.coverLine,
   });
 
   final ui.Image image;
+
+  /// Set for a blanked diagram: crop to it, cover every label, number them.
+  final QuizFigure? figure;
+
+  /// Used when there is no [figure] — a model-written item marks a structure.
   final QuizHighlight? spot;
+
   final Color marker;
+  final Color markerOn;
+  final Color coverColor;
+  final Color coverLine;
 
   @override
   void paint(Canvas canvas, Size size) {
     final iw = image.width.toDouble();
     final ih = image.height.toDouble();
+
+    final diagram = figure;
+    if (diagram != null) {
+      _paintBlankedFigure(canvas, size, diagram, iw, ih);
+      return;
+    }
+
     final hl = spot;
 
     // Without a marker there is nothing to zoom to, so show the whole page.
@@ -185,6 +218,9 @@ class _FigurePainter extends CustomPainter {
       hl.h * ih * sy,
     ).inflate(6);
 
+    // Nothing is covered on this path: it draws a model-written item, where
+    // the marker is the structure being asked about. Painting over it would
+    // hide the very thing the student has to name.
     canvas.drawRRect(
       RRect.fromRectAndRadius(target, const Radius.circular(8)),
       Paint()
@@ -198,6 +234,95 @@ class _FigurePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5
         ..color = marker.withValues(alpha: 0.35),
+    );
+  }
+
+  /// Draws the figure with every label covered and numbered.
+  void _paintBlankedFigure(
+    Canvas canvas,
+    Size size,
+    QuizFigure diagram,
+    double iw,
+    double ih,
+  ) {
+    final region = diagram.region;
+    var src = Rect.fromLTWH(
+      region.x * iw,
+      region.y * ih,
+      math.max(region.w * iw, 1),
+      math.max(region.h * ih, 1),
+    );
+    src = _shiftInside(src, Rect.fromLTWH(0, 0, iw, ih));
+
+    // Fit rather than fill: stretching a diagram to the card's aspect ratio
+    // misshapes the very thing being identified.
+    final dst = _fit(Rect.fromLTWH(0, 0, src.width, src.height), size);
+    canvas.drawImageRect(
+      image,
+      src,
+      dst,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+
+    final sx = dst.width / src.width;
+    final sy = dst.height / src.height;
+    Rect toView(QuizHighlight box) => Rect.fromLTWH(
+          dst.left + (box.x * iw - src.left) * sx,
+          dst.top + (box.y * ih - src.top) * sy,
+          box.w * iw * sx,
+          box.h * ih * sy,
+        );
+
+    for (var i = 0; i < diagram.erase.length; i++) {
+      final box = toView(diagram.erase[i]).inflate(3);
+      final isTarget = i == diagram.targetIndex;
+      final rrect = RRect.fromRectAndRadius(box, const Radius.circular(5));
+
+      // Opaque: a translucent wash leaves the word readable underneath, which
+      // is the whole failure this exists to prevent.
+      canvas.drawRRect(rrect, Paint()..color = coverColor);
+      canvas.drawRRect(
+        rrect,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = isTarget ? 2.5 : 1
+          ..color = isTarget ? marker : coverLine,
+      );
+      _paintNumber(canvas, box, i + 1, isTarget);
+    }
+  }
+
+  /// The number a student answers against. The asked-about one is filled.
+  void _paintNumber(Canvas canvas, Rect box, int number, bool isTarget) {
+    const radius = 9.0;
+    final centre = Offset(box.left - radius * 0.2, box.center.dy);
+    canvas.drawCircle(
+      centre,
+      radius,
+      Paint()..color = isTarget ? marker : coverColor,
+    );
+    canvas.drawCircle(
+      centre,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = isTarget ? marker : coverLine,
+    );
+    final painter = TextPainter(
+      text: TextSpan(
+        text: '$number',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: isTarget ? markerOn : coverLine,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    painter.paint(
+      canvas,
+      centre - Offset(painter.width / 2, painter.height / 2),
     );
   }
 
@@ -229,5 +354,9 @@ class _FigurePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_FigurePainter old) =>
-      old.image != image || old.spot != spot || old.marker != marker;
+      old.image != image ||
+      old.spot != spot ||
+      old.figure != figure ||
+      old.marker != marker ||
+      old.coverColor != coverColor;
 }

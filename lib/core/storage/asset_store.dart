@@ -49,6 +49,20 @@ Future<String> plannedAssetPath(String id, {String extension = 'bin'}) =>
 /// file instead, or skipped where the API in question only accepts bytes.
 const int kMaxInMemoryAssetBytes = 64 * 1024 * 1024;
 
+/// Largest file worth storing inline in the browser database.
+///
+/// Web has no file storage, so bytes are base64 in a TEXT column. Measured in
+/// Chrome for a 100 MB PDF: ~2.8 s to build the binary string and ~0.4 s to
+/// encode, all on the one thread the UI runs on, producing 140 MB of text for
+/// a 1.6 GB origin quota. The write then fails or times out, the download
+/// restarts from zero, and the cycle repeats — which is what made a synced
+/// textbook sit at "Downloading 63%" forever while taps went missing.
+///
+/// Refusing early is not a fix for opening big PDFs on web; it stops the app
+/// from destroying itself trying. The fix is real file storage (OPFS), after
+/// which this ceiling can go.
+const int kMaxWebInlineAssetBytes = 48 * 1024 * 1024;
+
 /// Largest asset this platform can actually open.
 ///
 /// [kMaxInMemoryAssetBytes] assumes the caller can fall back to streaming the

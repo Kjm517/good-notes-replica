@@ -84,6 +84,11 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Drives the real app in a real browser (`flutter drive -d chrome`), which is
+  # the only place the web implementations actually run: `flutter test` always
+  # compiles the io ones, and DB-backed widget tests hang on unsettled spinners.
+  integration_test:
+    sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

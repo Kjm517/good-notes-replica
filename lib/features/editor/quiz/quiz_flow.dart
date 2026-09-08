@@ -238,6 +238,44 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
       for (final page in notePages)
         if (pagesToExtract.contains(page.pageIndex)) page,
     ];
+    // Identification first, and for free: a figure's labels are already in the
+    // PDF's text layer with their boxes, so those questions need no model at
+    // all. Only what is left over is worth spending page images on — and this
+    // still works when the API is rate-limited.
+    final harvested = <QuizQuestion>[];
+    var harvest = const FigureHarvest.empty();
+    if (_config.kinds.contains(QuizKind.identification)) {
+      if (mounted) {
+        setState(() {
+          _status = 'Reading figure labels…';
+          _progress = 0.45;
+        });
+      }
+      harvest = await ref.read(quizSourceLocatorProvider).figureQuestions(
+            selectedPages,
+            maxQuestions: _config.count,
+            backgrounds: ref.read(pageBackgroundServiceProvider),
+          );
+      harvested.addAll(harvest.questions);
+      debugPrint(
+        'Harvested ${harvested.length} labelled figure questions: '
+        '${harvest.pagesWithFigure} pages had an illustration, '
+        '${harvest.pagesWithText} of ${harvest.pagesRead} had text',
+      );
+    }
+    if (!mounted) return;
+
+    final remaining = _config.count - harvested.length;
+    // Identification-only and the figures covered it: nothing to ask for.
+    final aiKinds = {
+      for (final kind in _config.kinds)
+        if (kind != QuizKind.identification || remaining > 0) kind,
+    };
+    if (remaining <= 0 && aiKinds.length <= 1) {
+      await _finishWithQuestions(harvested);
+      return;
+    }
+
     final backgrounds = ref.read(pageBackgroundServiceProvider);
     final canRender = selectedPages.any(backgrounds.hasBackground);
     final images = <QuizSourceImage>[];
@@ -256,12 +294,19 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
       questions = await generateExamQuiz(
         passages: passages,
         images: images,
-        config: _config,
+        config: _config.copyWith(count: remaining),
         ai: ai,
       );
     } catch (e) {
       debugPrint('Gemini quiz failed: $e');
       if (!mounted) return;
+      // The figures were read locally and cost nothing; a rate-limited model
+      // is no reason to throw them away.
+      if (harvested.isNotEmpty) {
+        debugPrint('Falling back to ${harvested.length} figure questions');
+        await _finishWithQuestions(harvested);
+        return;
+      }
       setState(() {
         _phase = _Phase.setup;
         _status = '';
@@ -274,14 +319,21 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
         );
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_aiFailureMessage(e))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _config.kinds.contains(QuizKind.identification) && harvest.isEmpty
+                ? _noFiguresMessage(harvest, e)
+                : _aiFailureMessage(e),
+          ),
+        ),
+      );
       return;
     }
     if (!mounted) return;
     await ref.read(quizQueueProvider.notifier).remove(widget.documentId);
     if (!mounted) return;
+    questions = [...harvested, ...questions];
     if (questions.isEmpty) {
       setState(() {
         _phase = _Phase.setup;
@@ -306,11 +358,41 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
       );
       return;
     }
+    await _finishWithQuestions(questions);
+  }
+
+  /// Why an identification quiz produced nothing, when the model is also out.
+  ///
+  /// Labels are read from the PDF's text layer. A scan or an image import has
+  /// none, so no amount of retrying will help — which is worth saying rather
+  /// than showing the same "try again" as a transient API error.
+  String _noFiguresMessage(FigureHarvest harvest, Object error) {
+    if (harvest.hasNoTextLayer) {
+      return 'These pages are images, so there are no labels to read from '
+          'them, and the AI is unavailable right now. A PDF with selectable '
+          'text works without the AI.';
+    }
+    if (harvest.pagesWithFigure == 0) {
+      return 'No diagrams were found on these pages — identification needs an '
+          'illustration with labels, not slides or prose. The AI is also '
+          'unavailable right now.';
+    }
+    return 'No labelled diagrams found on these pages, and the AI is '
+        'unavailable right now. ${_aiFailureMessage(error)}';
+  }
+
+  /// Marks the answers, saves the quiz, and enters it.
+  ///
+  /// Extracted so the figure-label path can reach it without a model round
+  /// trip — including when the model failed and the harvested questions are
+  /// the whole quiz.
+  Future<void> _finishWithQuestions(List<QuizQuestion> questions) async {
+    if (!mounted || questions.isEmpty) return;
     setState(() {
       _status = 'Marking the answers on the page…';
       _progress = 0.94;
     });
-    questions = await _markAnswers(questions);
+    final marked = await _markAnswers(questions);
     if (!mounted) return;
     final familyId = ref.read(uuidProvider).v4();
     String? draftId;
@@ -325,7 +407,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
               outline: _outlineTree,
               pageCount: widget.pageCount,
             ),
-            questions: questions,
+            questions: marked,
           );
     } catch (e) {
       debugPrint('Quiz history save failed: $e');
@@ -333,7 +415,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     ref.read(entitlementServiceProvider).refresh();
     if (!mounted) return;
     setState(() {
-      _questions = questions;
+      _questions = marked;
       _familyId = familyId;
       _draftId = draftId;
       _savedAttempt = false;

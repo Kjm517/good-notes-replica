@@ -126,6 +126,10 @@ class FileSync {
   ///
   /// Used when a document is opened on a device that has the notes but not the
   /// file yet. Returns false if the file isn't available.
+  /// True when the last [download] was refused because this platform cannot
+  /// store a file that size — a permanent condition, not a transient failure.
+  bool oversizedForThisPlatform = false;
+
   Future<bool> download(
     String assetId, {
     void Function(double fraction)? onProgress,
@@ -158,6 +162,19 @@ class FileSync {
 
     final key = asset.remoteKey;
     if (key == null) return false;
+
+    // Web stores bytes as base64 in the database, so a large file cannot be
+    // downloaded here at any speed — it is the storing that fails, and the
+    // retry then re-downloads the whole thing. Refuse before spending the
+    // bandwidth, and say why, so the caller can stop asking.
+    final size = asset.sizeBytes ?? 0;
+    if (!supportsFileStorage && size > kMaxWebInlineAssetBytes) {
+      lastDownloadError = 'This file is ${(size / 1e6).round()} MB, which is '
+          'too large to store in a browser. Open it in the app instead.';
+      oversizedForThisPlatform = true;
+      return false;
+    }
+    oversizedForThisPlatform = false;
 
     await BackgroundKeepAlive.acquire();
     try {

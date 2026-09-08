@@ -69,7 +69,10 @@ class QuizConfig {
 
   static const defaults = QuizConfig(
     count: 25,
-    kinds: {QuizKind.multipleChoice, QuizKind.trueFalse},
+    // Nothing preselected: the student picks what they want to be asked.
+    // Preselecting two kinds also quietly decided how a quiz was generated for
+    // anyone who never opened the section.
+    kinds: {},
     difficulty: QuizDifficulty.medium,
     timer: QuizTimerMode.off,
   );
@@ -123,7 +126,9 @@ class QuizConfig {
     };
     return QuizConfig(
       count: (json['count'] as num?)?.toInt() ?? defaults.count,
-      kinds: kinds.isEmpty ? defaults.kinds : kinds,
+      // No substitution: an empty selection is a real state now, and the
+      // Generate button stays disabled until the student picks a kind.
+      kinds: kinds,
       difficulty: QuizDifficulty.values.firstWhere(
         (d) => d.name == json['difficulty'],
         orElse: () => QuizDifficulty.medium,
@@ -253,6 +258,7 @@ class QuizQuestion {
     this.sourceQuote = '',
     this.highlight,
     this.location,
+    this.figure,
   });
 
   final QuizKind kind;
@@ -273,6 +279,12 @@ class QuizQuestion {
   /// Where on the page the answer lives, as 0–1 fractions of width/height.
   final QuizHighlight? highlight;
 
+  /// The diagram this item is asking about, when it is a blanked figure.
+  ///
+  /// Null for model-written items, where [highlight] marks the structure
+  /// itself and there is nothing to erase.
+  final QuizFigure? figure;
+
   /// Where the answer was actually found, once the source has been read.
   /// Kept on the question so the lookup runs once per answer and travels with
   /// the attempt into history.
@@ -288,6 +300,7 @@ class QuizQuestion {
         'pageIndex': pageIndex,
         if (sourceQuote.isNotEmpty) 'sourceQuote': sourceQuote,
         'highlight': highlight?.toJson(),
+        if (figure != null) 'figure': figure!.toJson(),
         if (location != null) 'location': location!.toJson(),
       };
 
@@ -307,6 +320,7 @@ class QuizQuestion {
       pageIndex: (json['pageIndex'] as num?)?.toInt() ?? 0,
       sourceQuote: json['sourceQuote'] as String? ?? '',
       highlight: QuizHighlight.tryParse(json['highlight']),
+      figure: QuizFigure.tryParse(json['figure']),
       location: QuizAnswerLocation.tryParse(json['location']),
     );
   }
@@ -459,6 +473,92 @@ class QuizAnswerLocation {
 }
 
 /// A rectangle on a page image, in 0–1 coordinates (left, top, width, height).
+/// A diagram with its printed labels blanked out.
+///
+/// Erasing only the asked-about label leaves the rest of the figure legible,
+/// and a student can read the answer off a neighbour — or off the same word
+/// appearing twice. So every label is covered and each position gets a number,
+/// which is how a printed exam does it.
+///
+/// One figure carries several questions: same [region], same [erase] boxes,
+/// a different [targetIndex] each time. The page is rendered once and the
+/// questions share it.
+class QuizFigure {
+  const QuizFigure({
+    required this.region,
+    required this.erase,
+    required this.targetIndex,
+  });
+
+  /// The part of the page to show, in 0–1 page space.
+  final QuizHighlight region;
+
+  /// Every label box on the figure. All are painted over.
+  final List<QuizHighlight> erase;
+
+  /// Which of [erase] this question asks about; it gets the emphasised marker.
+  final int targetIndex;
+
+  /// The box being asked about, or null if the index is out of range.
+  QuizHighlight? get target =>
+      targetIndex >= 0 && targetIndex < erase.length ? erase[targetIndex] : null;
+
+  Map<String, dynamic> toJson() => {
+        'region': region.toJson(),
+        'erase': [for (final box in erase) box.toJson()],
+        'targetIndex': targetIndex,
+      };
+
+  /// Reads a region without the area cap [QuizHighlight.tryParse] applies.
+  ///
+  /// That cap rejects anything covering most of the page, which is right for a
+  /// highlighter stroke and wrong here: a figure can legitimately fill the
+  /// sheet, and dropping the region would lose the whole question.
+  static QuizHighlight? _parseRegion(Object? raw) {
+    if (raw is! Map) return null;
+    double? at(String a, String b) {
+      final v = raw[a] ?? raw[b];
+      return v is num ? v.toDouble() : null;
+    }
+
+    final x = at('x', 'left');
+    final y = at('y', 'top');
+    final w = at('w', 'width');
+    final h = at('h', 'height');
+    if (x == null || y == null || w == null || h == null) return null;
+    final left = x.clamp(0.0, 1.0);
+    final top = y.clamp(0.0, 1.0);
+    return QuizHighlight(
+      x: left,
+      y: top,
+      w: w.clamp(0.01, 1.0 - left),
+      h: h.clamp(0.01, 1.0 - top),
+      precise: raw['precise'] == true,
+    );
+  }
+
+  static QuizFigure? tryParse(Object? raw) {
+    if (raw is! Map) return null;
+    final region = _parseRegion(raw['region']);
+    if (region == null) return null;
+    final boxes = <QuizHighlight>[];
+    final list = raw['erase'];
+    if (list is List) {
+      for (final item in list) {
+        final box = QuizHighlight.tryParse(item);
+        if (box != null) boxes.add(box);
+      }
+    }
+    if (boxes.isEmpty) return null;
+    final index = (raw['targetIndex'] as num?)?.toInt() ?? 0;
+    return QuizFigure(
+      region: region,
+      erase: boxes,
+      targetIndex: index.clamp(0, boxes.length - 1),
+    );
+  }
+}
+
 class QuizHighlight {
   const QuizHighlight({
     required this.x,

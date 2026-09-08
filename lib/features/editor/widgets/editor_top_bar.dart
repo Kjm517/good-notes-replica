@@ -274,7 +274,9 @@ class EditorTopBar extends ConsumerWidget implements PreferredSizeWidget {
       children: [
         _BarIcon(
           icon: notablyBackIcon,
-          tooltip: 'Last page',
+          // Said "Last page" while it unwound page-jump history. It closes the
+          // document now, so the label had to follow.
+          tooltip: 'Back to library',
           onPressed: onBack,
         ),
         if (!phone) ...[

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/design.dart';
 import '../../library/providers.dart';
 import '../stickers/sticker_library.dart';
+import '../../../core/platform/pick_files.dart';
 
 /// Bottom sheet for choosing a sticker to drop on the page.
 ///
@@ -63,7 +64,7 @@ class _StickerPickerSheetState extends ConsumerState<StickerPickerSheet> {
 
   Future<void> _addCustom() async {
     if (_busy) return;
-    final result = await FilePicker.pickFiles(
+    final result = await pickFilesCompat(
       type: FileType.custom,
       allowedExtensions: const ['png', 'gif', 'webp', 'jpg', 'jpeg'],
       withData: true,

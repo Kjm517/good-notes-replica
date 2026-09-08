@@ -78,9 +78,30 @@ rm -rf "$LINK_BACKUP"
 # go_router does client-side routing, so every path must serve index.html.
 # Generated rather than copied: this directory is wiped on each build, and a
 # missing rewrite 404s every deep link (/settings, /doc/<id>) on refresh.
+#
+# The COOP/COEP pair is what makes SharedArrayBuffer available, which drift
+# needs for its fast storage implementation. Without them the browser reports
+# "missing browser features: {dedicatedWorkersInSharedWorkers,
+# sharedArrayBuffers}" and falls back to a slower path that does more work on
+# the one thread the UI runs on.
+#
+# require-corp is safe for what this app loads: jsdelivr (pdf.js) and both
+# Google Fonts origins all send `cross-origin-resource-policy: cross-origin`,
+# and the Worker / Supabase calls are CORS requests, which COEP allows. Adding
+# a cross-origin resource that sends neither will break silently, so check for
+# that header before embedding anything new.
 cat > "$DEPLOY_DIR/vercel.json" <<'JSON'
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    }
+  ]
 }
 JSON
 

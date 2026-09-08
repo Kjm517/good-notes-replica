@@ -100,6 +100,11 @@ class SyncEngine {
   /// worker every quiet period.
   final Map<String, DateTime> _downloadBackoffUntil = {};
 
+  /// Assets this platform cannot store at any size — web's base64 ceiling.
+  /// Retrying these wastes the whole download every time, so they are dropped
+  /// for the run rather than backed off.
+  final Set<String> _oversizedAssets = {};
+
   /// Consecutive failures per asset, so a file the worker will never serve
   /// backs off towards [_downloadBackoffMax] instead of being retried at a
   /// fixed 45 seconds until the battery runs out.
@@ -1506,6 +1511,9 @@ class SyncEngine {
     // Calling download() here only fails and used to look like endless sync.
     if (local?.remoteKey == null) return;
 
+    // Permanently skipped: too big for this platform to store at all.
+    if (_oversizedAssets.contains(assetId)) return;
+
     final backoffUntil = _downloadBackoffUntil[assetId];
     if (backoffUntil != null && backoffUntil.isAfter(DateTime.now())) {
       return;
@@ -1534,6 +1542,14 @@ class SyncEngine {
       _lastDownloadError = null;
     } else {
       _lastDownloadError = _files?.lastDownloadError ?? _lastDownloadError;
+      // A file too large for this platform's storage will not become small
+      // later. Retrying it re-downloaded a whole textbook every backoff
+      // window and reset the progress badge each time, which is what made a
+      // failed sync look like one that was almost finished.
+      if (_files?.oversizedForThisPlatform ?? false) {
+        _oversizedAssets.add(assetId);
+        return;
+      }
       final attempts = (_downloadAttempts[assetId] ?? 0) + 1;
       _downloadAttempts[assetId] = attempts;
       var wait = _downloadBackoff * (1 << (attempts - 1).clamp(0, 5));

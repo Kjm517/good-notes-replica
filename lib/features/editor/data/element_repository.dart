@@ -14,6 +14,7 @@ import '../../../core/models/enums.dart';
 import '../../../core/models/image_element.dart';
 import '../../../core/models/text_element.dart';
 import '../../library/data/asset_repository.dart';
+import '../../../core/platform/pick_files.dart';
 
 /// Data access for canvas elements (images today; text/shapes later).
 class ElementRepository {
@@ -46,7 +47,7 @@ class ElementRepository {
     required double maxWidth,
     Offset? at,
   }) async {
-    final result = await FilePicker.pickFiles(
+    final result = await pickFilesCompat(
       type: FileType.image,
       withData: kIsWeb,
     );

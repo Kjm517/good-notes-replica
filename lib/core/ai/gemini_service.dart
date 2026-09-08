@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+
+import 'ai_gateway_client.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
@@ -46,12 +48,21 @@ class GeminiService {
         _modelName = model ?? _kDefaultModel;
 
   final String _apiKey;
+
+  /// Built lazily so a local-only build never constructs an HTTP client.
+  AiGatewayClient? _gateway;
   final String _modelName;
 
-  bool get enabled => _apiKey.isNotEmpty;
+  /// Whether a quiz can be generated at all.
+  ///
+  /// A bundled key is no longer required: the Worker holds one. Keeping the
+  /// old key check here would have disabled AI on exactly the builds that are
+  /// doing the right thing by shipping without a secret.
+  bool get enabled => aiGatewayAvailable || _apiKey.isNotEmpty;
 
   /// Coarse key type for logs — never the secret itself.
   String get keyKind {
+    if (aiGatewayAvailable) return 'server-side (no key in this app)';
     if (_apiKey.startsWith('AQ.')) return 'auth key';
     if (_apiKey.startsWith('AIza')) return 'standard key';
     return 'api key';
@@ -75,7 +86,8 @@ class GeminiService {
   }) async {
     if (!enabled) {
       throw StateError(
-        'Gemini API key not configured. Add GEMINI_API_KEY to .env and rebuild.',
+        'AI is not configured. Set NOTABLY_FILE_ENDPOINT so the app can reach '
+        'the Worker, or add GEMINI_API_KEY for a local-only build.',
       );
     }
 
@@ -333,6 +345,13 @@ ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstru
   Future<GeminiTextResult> _generateParts(
     List<Map<String, dynamic>> parts,
   ) async {
+    // Server first. The Worker holds the key, caches identical work, and stops
+    // when the month's budget is gone — none of which the client can do. The
+    // direct path below stays only for a build with no Worker configured, and
+    // ships a key inside the bundle, so it is not the one to prefer.
+    if (aiGatewayAvailable) {
+      return _generateViaGateway(parts);
+    }
     Object? lastError;
     for (final model in {_modelName, ..._kFallbackModels}) {
       for (final useSearch in [true, false]) {
@@ -350,6 +369,56 @@ ${additionalInstructions != null ? '\nAdditional instructions: $additionalInstru
       }
     }
     throw StateError('Gemini request failed: $lastError');
+  }
+
+  /// Sends the same content to the Worker instead of to Google.
+  ///
+  /// Gemini's parts list is flattened back into one prompt plus images: the
+  /// gateway is vendor-neutral by design, so it takes text and pictures rather
+  /// than any one provider's request shape.
+  Future<GeminiTextResult> _generateViaGateway(
+    List<Map<String, dynamic>> parts,
+  ) async {
+    final prompt = StringBuffer();
+    final images = <AiGatewayImage>[];
+    for (final part in parts) {
+      final text = part['text'];
+      if (text is String) {
+        prompt.writeln(text);
+        continue;
+      }
+      final inline = part['inlineData'];
+      if (inline is Map) {
+        final data = inline['data'];
+        final mime = inline['mimeType'];
+        if (data is String && mime is String) {
+          images.add(
+            AiGatewayImage(bytes: base64Decode(data), mimeType: mime),
+          );
+        }
+      }
+    }
+    try {
+      final result = await (_gateway ??= AiGatewayClient()).generate(
+        prompt: prompt.toString(),
+        images: images,
+        // The old direct call asked for 65536; the gateway caps this server
+        // side, and a smaller ceiling is also a smaller bill.
+        maxOutputTokens: 16384,
+        operation: 'quiz',
+      );
+      return GeminiTextResult(
+        text: result.text,
+        // The gateway reports cost rather than raw token counts, and nothing
+        // downstream reads these beyond logging.
+        promptTokenCount: 0,
+        candidatesTokenCount: 0,
+      );
+    } on AiGatewayException catch (e) {
+      // Preserved as a StateError so existing quiz error handling — including
+      // the offline queue — keeps working unchanged.
+      throw StateError(e.message);
+    }
   }
 
   Future<GeminiTextResult> _generateWithModel(

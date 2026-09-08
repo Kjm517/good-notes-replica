@@ -11,6 +11,12 @@ import '../search/pdf_page_text.dart';
 import '../search/pdf_text_line.dart';
 import 'quiz_align.dart';
 import 'quiz_highlight_finder.dart';
+import 'dart:ui' as ui;
+
+import '../pages/page_background_service.dart';
+import 'figure_finder.dart';
+import 'figure_labels.dart';
+import 'figure_pixels.dart';
 import 'quiz_models.dart';
 import 'quiz_quality.dart';
 
@@ -57,6 +63,39 @@ class QuizSourceMatch {
 /// treated as a lead, not a fact — the page whose text actually states the
 /// answer wins, and the highlighter is drawn from that page's own text
 /// geometry rather than from a guessed rectangle.
+/// What a figure harvest found, and enough about how to explain an empty one.
+///
+/// "No questions" has two very different causes: pages with no text layer at
+/// all (an image import, or a scan whose labels are pixels), versus pages with
+/// text that simply holds no labelled figure. Telling a student to try a
+/// different document is only right for the first.
+class FigureHarvest {
+  const FigureHarvest({
+    required this.questions,
+    required this.pagesRead,
+    required this.pagesWithText,
+    this.pagesWithFigure = 0,
+  });
+
+  const FigureHarvest.empty()
+      : questions = const [],
+        pagesRead = 0,
+        pagesWithText = 0,
+        pagesWithFigure = 0;
+
+  final List<QuizQuestion> questions;
+  final int pagesRead;
+
+  /// Pages where an illustration was actually found in the pixels.
+  final int pagesWithFigure;
+
+  /// Pages that had a readable text layer. Zero means the source is images.
+  final int pagesWithText;
+
+  bool get isEmpty => questions.isEmpty;
+  bool get hasNoTextLayer => pagesRead > 0 && pagesWithText == 0;
+}
+
 class QuizSourceLocator {
   QuizSourceLocator(this._db, this._pages, this._assets);
 
@@ -84,6 +123,125 @@ class QuizSourceLocator {
       _reader = null;
       unawaited(reader?.close());
     });
+  }
+
+  /// Harvests identification questions from the figures on [pages].
+  ///
+  /// Costs no tokens: a diagram's labels are already in the PDF's text layer,
+  /// with boxes. Reuses the warm document the highlighter keeps open, so a
+  /// textbook is not reopened to read it a second time.
+  Future<FigureHarvest> figureQuestions(
+    List<NotePage> pages, {
+    int maxQuestions = 25,
+    /// Renders pages so the illustration can be located in the pixels. Without
+    /// it the labels alone decide what counts as a figure, which is how a
+    /// lecture slide's subtitle became a quiz answer.
+    PageBackgroundService? backgrounds,
+  }) async {
+    if (pages.isEmpty) return const FigureHarvest.empty();
+    final reader = _acquireReader();
+    final out = <QuizQuestion>[];
+    var pagesWithText = 0;
+    var pagesWithFigure = 0;
+    try {
+      for (final page in pages) {
+        if (out.length >= maxQuestions) break;
+        final lines = await reader.lines(page);
+        if (lines.isEmpty) continue;
+        pagesWithText++;
+        // A page of references is short lines at many indents, which is
+        // exactly what the figure test looks for — so skip those first.
+        if (isReferenceLines(lines)) continue;
+
+        // Look for the picture *before* judging the text. Doing it the other
+        // way round meant a slide's bullets decided there was no figure, and
+        // the diagram sitting next to them was never even examined.
+        final regions = await _figuresOn(page, lines, backgrounds);
+        if (regions.isEmpty) continue;
+        pagesWithFigure++;
+
+        for (final region in regions) {
+          if (out.length >= maxQuestions) break;
+          // Only the lines inside the picture. The slide's title and bullets
+          // sit outside it, so they cannot become answers.
+          final inside = [
+            for (final line in lines)
+              if (_within(region.box, line)) line,
+          ];
+          final labels = harvestFigureLabels(inside, assumeFigure: true);
+          if (labels.length < 2) continue;
+          out.addAll(
+            identificationFromLabels(
+              page.pageIndex,
+              labels,
+              max: maxQuestions - out.length,
+              region: region.box,
+            ),
+          );
+        }
+      }
+    } finally {
+      _releaseReader();
+    }
+    return FigureHarvest(
+      questions: out,
+      pagesRead: pages.length,
+      pagesWithText: pagesWithText,
+      pagesWithFigure: pagesWithFigure,
+    );
+  }
+
+  /// Whether a text line falls within [region], allowing a little overhang for
+  /// a label that sits just outside the artwork it points at.
+  static bool _within(QuizHighlight region, PdfTextLine line, {double slack = 0.03}) =>
+      line.x >= region.x - slack &&
+      line.y >= region.y - slack &&
+      line.x + line.w <= region.x + region.w + slack &&
+      line.y + line.h <= region.y + region.h + slack;
+
+  /// Where the pictures are on [page], read from the rendered pixels.
+  ///
+  /// Returns empty when rendering is unavailable, which deliberately means no
+  /// questions: guessing from text alone is what produced bad ones.
+  Future<List<FigureRegion>> _figuresOn(
+    NotePage page,
+    List<PdfTextLine> lines,
+    PageBackgroundService? backgrounds,
+  ) async {
+    if (backgrounds == null || !backgrounds.hasBackground(page)) {
+      debugPrint('Figure scan skipped page ${page.pageIndex}: no renderer');
+      return const [];
+    }
+    ui.Image? image;
+    try {
+      image = await backgrounds.loadThumbnail(
+        page,
+        targetWidth: kFigureScanWidth.toDouble(),
+      );
+      if (image == null) {
+        debugPrint('Figure scan: page ${page.pageIndex} did not render');
+        return const [];
+      }
+      final scan = await scanPage(image);
+      if (scan == null) {
+        debugPrint('Figure scan: page ${page.pageIndex} pixels unreadable');
+        return const [];
+      }
+      return findFigureRegions(
+        rgba: scan.rgba,
+        width: scan.width,
+        height: scan.height,
+        textBoxes: [
+          for (final line in lines)
+            QuizHighlight(x: line.x, y: line.y, w: line.w, h: line.h),
+        ],
+      );
+    } catch (e) {
+      debugPrint('Figure scan failed on page ${page.pageIndex}: $e');
+      return const [];
+    } finally {
+      image?.dispose();
+    }
   }
 
   /// Closes the warm document. Wired to the provider's disposal.
@@ -358,6 +516,18 @@ class _PageReader {
 
   Future<PdfDocument?> _openDocument(String assetId) {
     return _documents.putIfAbsent(assetId, () async {
+      // Web has no openFile; fall back to the bytes, which OPFS now serves
+      // without the old base64 round trip.
+      if (kIsWeb) {
+        final bytes = await _assets.getBytes(assetId);
+        if (bytes == null) return null;
+        try {
+          return await PdfDocument.openData(bytes);
+        } catch (e) {
+          debugPrint('Highlight lookup could not open the PDF: $e');
+          return null;
+        }
+      }
       final path = await _assets.localPathOf(assetId);
       if (path == null) return null;
       try {

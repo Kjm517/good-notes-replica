@@ -14,6 +14,7 @@
  */
 
 import { requireUid } from './auth';
+import { handleAiGenerate, handleAiUsage } from './ai/gateway';
 import { handleAdmin } from './admin';
 import { handleUserTelemetry } from './user-telemetry';
 import { deleteDeviceToken, saveDeviceToken } from './notifications';
@@ -47,6 +48,34 @@ export interface Env {
   PAYMONGO_WEBHOOK_SECRET?: string;
   /** Bootstrap super-admin Supabase UUIDs (comma-separated). */
   ADMIN_UIDS?: string;
+
+  // ---- AI gateway ---------------------------------------------------
+  /** Usage and budget counters. Without it, spending is untracked. */
+  AI_USAGE?: D1Database;
+  /** Workers AI binding — the free-tier first choice. */
+  AI?: { run: (model: string, input: unknown) => Promise<unknown> };
+  /** Never sent to the client; the app calls /ai/generate instead. */
+  GEMINI_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
+  AI_TEXT_PROVIDER?: string;
+  AI_TEXT_MODEL?: string;
+  AI_VISION_PROVIDER?: string;
+  AI_VISION_MODEL?: string;
+  AI_FALLBACK_PROVIDER?: string;
+  AI_FALLBACK_MODEL?: string;
+  AI_PREMIUM_PROVIDER?: string;
+  AI_PREMIUM_MODEL?: string;
+  AI_QUALITY?: string;
+  AI_PROMPT_VERSION?: string;
+  AI_CACHE_ENABLED?: string;
+  AI_CACHE_SCOPE?: string;
+  ENABLE_IMAGE_GENERATION?: string;
+  MONTHLY_AI_BUDGET?: string;
+  WARNING_BUDGET?: string;
+  MAX_AI_REQUESTS_PER_USER?: string;
+  MAX_VISION_REQUESTS_PER_USER?: string;
+  MAX_QUESTIONS_PER_GENERATION?: string;
+  MAX_DOCUMENT_PROCESSING_MB?: string;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -77,6 +106,12 @@ export default {
     // ---- Billing (PayMongo) -----------------------------------------
     if (url.pathname.startsWith('/billing/')) {
       return handleBilling(request, env, url);
+    }
+
+    // ---- AI gateway --------------------------------------------------
+    // The only route allowed to hold a model vendor's key.
+    if (url.pathname.startsWith('/ai/')) {
+      return handleAiRoutes(request, env, url);
     }
 
     const key = url.searchParams.get('key');
@@ -236,6 +271,27 @@ async function handleAdminRoutes(
     // missing account.
     else if ((e as Error).name === 'AdminCheckUnavailable') status = 503;
     else if (message.includes('Admin access')) status = 403;
+    return withCors(json({ error: message }, status));
+  }
+}
+
+async function handleAiRoutes(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  try {
+    switch (`${request.method} ${url.pathname}`) {
+      case 'POST /ai/generate':
+        return withCors(await handleAiGenerate(request, env));
+      case 'GET /ai/usage':
+        return withCors(await handleAiUsage(request, env));
+      default:
+        return withCors(json({ error: 'Not found' }, 404));
+    }
+  } catch (e) {
+    const message = (e as Error).message;
+    const status = message.includes('Authorization') ? 401 : 500;
     return withCors(json({ error: message }, status));
   }
 }

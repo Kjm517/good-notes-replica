@@ -303,9 +303,14 @@ class PageBackgroundService {
     NotePage page, {
     double targetWidth = 300,
   }) async {
-    final existing = _thumbs[page.id];
+    // Keyed by width as well as page. The cache used to hold one thumbnail per
+    // page whatever size was asked for, so a small render — the figure scan
+    // asks for 240px — was handed straight back to callers that had requested
+    // something ten times larger. That is what made a cropped diagram soft.
+    final key = _thumbKey(page.id, targetWidth);
+    final existing = _thumbs[key];
     if (existing != null) {
-      _touch(_thumbs, page.id);
+      _touch(_thumbs, key);
       return existing.clone();
     }
     ui.Image? image;
@@ -330,7 +335,7 @@ class PageBackgroundService {
       debugPrint('[bg] thumb failed for page ${page.id}: $e');
     }
     if (image != null) {
-      _thumbs[page.id] = image;
+      _thumbs[key] = image;
       _touch(_thumbs, page.id);
       _trim(_thumbs, _maxThumbs);
       return image.clone();
@@ -369,6 +374,10 @@ class PageBackgroundService {
     return _pdfDocs.putIfAbsent(assetId, () async {
       try {
         Future<PdfDocument?> openFromDisk() async {
+          // pdfrx's web backend has no file or random-access reader — only
+          // openData. OPFS gives web a real file, but PDFium still wants the
+          // bytes, so web always takes the in-memory route below.
+          if (kIsWeb) return null;
           final path = await _assets.localPathOf(assetId);
           if (path == null) return null;
           if (!await assetExists(localPath: path)) return null;
@@ -600,8 +609,21 @@ class PageBackgroundService {
 
   /// A cached image for [page] if one is already available, without doing any
   /// work — used to paint something immediately instead of a blank page.
-  ui.Image? cachedOrThumb(NotePage page) =>
-      (_cache[page.id] ?? _thumbs[page.id])?.clone();
+  ui.Image? cachedOrThumb(NotePage page) {
+    final full = _cache[page.id];
+    if (full != null) return full.clone();
+    // Any size will do here: this exists to paint something immediately
+    // rather than a blank page, so the largest one already decoded wins.
+    ui.Image? best;
+    for (final entry in _thumbs.entries) {
+      if (!entry.key.startsWith('${page.id}@')) continue;
+      if (best == null || entry.value.width > best.width) best = entry.value;
+    }
+    return best?.clone();
+  }
+
+  static String _thumbKey(String pageId, double targetWidth) =>
+      '$pageId@${targetWidth.round()}';
 
   /// Drops cached PDF handles and page textures for [assetId] so a later
   /// attach / re-import is not stuck on the first "missing file" failure.

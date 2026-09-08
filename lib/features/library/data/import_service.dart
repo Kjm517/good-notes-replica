@@ -13,6 +13,7 @@ import '../../../core/db/database.dart';
 import '../../../core/platform/local_file.dart';
 import '../../../core/models/enums.dart';
 import 'asset_repository.dart';
+import '../../../core/platform/pick_files.dart';
 
 /// Reports import progress: [fraction] 0..1 and a human-readable [label].
 typedef ImportProgress = void Function(double fraction, String label);
@@ -83,7 +84,7 @@ class ImportService {
   /// anything awaited first (a closing sheet, a database read) leaves
   /// `input.click()` silently ignored. See [pickPdfFiles].
   static Future<FilePickerResult?> pickImageFiles() {
-    return FilePicker.pickFiles(
+    return pickFilesCompat(
       type: FileType.image,
       allowMultiple: true,
       // Only load bytes on web. On iOS/Android the picker can OOM on large
@@ -97,7 +98,7 @@ class ImportService {
   ///
   /// Must be started on the user's tap — see [pickImageFiles].
   static Future<FilePickerResult?> pickPdfFiles() {
-    return FilePicker.pickFiles(
+    return pickFilesCompat(
       type: FileType.custom,
       allowedExtensions: ['pdf', ...kOfficeExtensions],
       // Only ask for bytes on web. On Android the picker loads the whole file

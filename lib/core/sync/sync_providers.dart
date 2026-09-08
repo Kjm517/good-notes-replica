@@ -264,6 +264,15 @@ Future<Map<String, String>> _missingLocalFileDocuments(AppDatabase db) async {
           .write(AssetsCompanion(localPath: Value(recovered)));
       continue;
     }
+    // "Missing" means the bytes are still on their way. A file this platform
+    // cannot store is not on its way and never will be, and counting it here
+    // locked the document behind a gate that read "Waiting for file…" forever.
+    // Leave it unlocked so the document opens and the page itself explains
+    // why the background is blank.
+    if (!supportsFileStorage &&
+        (asset.sizeBytes ?? 0) > kMaxWebInlineAssetBytes) {
+      continue;
+    }
     missing[entry.key] = entry.value;
   }
   return missing;

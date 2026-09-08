@@ -9,6 +9,7 @@ import '../../app/design.dart';
 import '../../core/sync/user_telemetry.dart';
 import '../auth/providers.dart';
 import 'settings_widgets.dart';
+import '../../core/platform/pick_files.dart';
 
 enum BugCategory { crash, sync, annotation, aiQuiz, other }
 
@@ -48,7 +49,7 @@ class _BugReportSheetState extends ConsumerState<BugReportSheet> {
 
   Future<void> _pickFiles() async {
     if (_attachments.length >= _maxAttachments) return;
-    final result = await FilePicker.pickFiles(
+    final result = await pickFilesCompat(
       allowMultiple: true,
       withData: kIsWeb,
     );

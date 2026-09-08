@@ -26,3 +26,61 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 # Create admin Auth users from Team (Project Settings → API → service_role):
 #   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 # Then open the app on web → Settings → Admin console (or /admin/overview).
+
+# ---------------------------------------------------------------------------
+# AI gateway
+#
+# The app used to call Google directly with a key bundled into the APK, which
+# anyone could read with `unzip`. It now calls POST /ai/generate here, and the
+# keys live only on the server.
+#
+# Defaults below are chosen for an app with no revenue: free tier first, image
+# generation off, caching on, and a monthly ceiling low enough that a mistake
+# is survivable. Raise them when users justify it.
+# ---------------------------------------------------------------------------
+
+# Usage counters and the budget check. Create once with:
+#   wrangler d1 create notably-ai-usage
+# then paste the returned database_id below.
+# [[d1_databases]]
+# binding = "AI_USAGE"
+# database_name = "notably-ai-usage"
+# database_id = "PASTE_ID_HERE"
+
+# Cloudflare Workers AI — has a daily free allowance, so it goes first.
+# [ai]
+# binding = "AI"
+
+
+# Free tier leads; the paid model is only reached when it is exhausted.
+AI_TEXT_PROVIDER = "workers-ai"
+AI_TEXT_MODEL = "free/@cf/meta/llama-3.1-8b-instruct"
+AI_VISION_PROVIDER = "workers-ai"
+AI_VISION_MODEL = "free/@cf/meta/llama-3.2-11b-vision-instruct"
+AI_FALLBACK_PROVIDER = "gemini"
+AI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+
+# Premium stays unset. Setting it is not enough on its own — AI_QUALITY must
+# also be "quality" before it is ever reached.
+# AI_PREMIUM_PROVIDER = "openrouter"
+# AI_PREMIUM_MODEL = "google/gemini-3.5-flash"
+
+AI_QUALITY = "economy"
+AI_PROMPT_VERSION = "v1"
+AI_CACHE_ENABLED = "true"
+# "user" scopes cache entries per account. Safer, and gives up most of the
+# saving, because a hash collision already means the input bytes were identical.
+AI_CACHE_SCOPE = "global"
+ENABLE_IMAGE_GENERATION = "false"
+
+# Hard stops. MONTHLY_AI_BUDGET is checked before every paid call.
+MONTHLY_AI_BUDGET = "10"
+WARNING_BUDGET = "5"
+MAX_AI_REQUESTS_PER_USER = "25"
+MAX_VISION_REQUESTS_PER_USER = "10"
+MAX_QUESTIONS_PER_GENERATION = "50"
+MAX_DOCUMENT_PROCESSING_MB = "50"
+
+# Keys are secrets, never vars:
+#   wrangler secret put GEMINI_API_KEY
+#   wrangler secret put OPENROUTER_API_KEY

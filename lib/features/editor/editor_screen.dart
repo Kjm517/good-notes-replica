@@ -28,6 +28,7 @@ import 'widgets/element_actions.dart';
 import 'widgets/page_settings_sheet.dart';
 import 'widgets/selection_actions.dart';
 import 'widgets/zoom_cluster.dart';
+import '../../core/platform/pick_files.dart';
 
 /// The notebook / PDF editor: a continuously scrolling page view plus tools.
 class EditorScreen extends ConsumerWidget {
@@ -358,7 +359,7 @@ class _EditorState extends ConsumerState<_Editor> {
             ),
             FilledButton(
               onPressed: () {
-                picked = FilePicker.pickFiles(
+                picked = pickFilesCompat(
                   type: FileType.custom,
                   allowedExtensions: const ['pdf'],
                   withData: kIsWeb,
@@ -374,7 +375,7 @@ class _EditorState extends ConsumerState<_Editor> {
     if (go != true || !mounted) return false;
 
     final result = await (picked ??
-        FilePicker.pickFiles(
+        pickFilesCompat(
           type: FileType.custom,
           allowedExtensions: const ['pdf'],
           withData: kIsWeb,
