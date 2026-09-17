@@ -67,6 +67,7 @@ final documentTextServiceProvider = Provider<DocumentTextService>((ref) {
     ref.watch(databaseProvider),
     ref.watch(assetRepositoryProvider),
     files: ref.watch(fileSyncProvider),
+    sharedPdf: ref.watch(pageBackgroundServiceProvider).sharedPdf,
   );
 });
 

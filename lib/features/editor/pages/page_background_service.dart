@@ -370,6 +370,16 @@ class PageBackgroundService {
     return frame.image;
   }
 
+  /// The one PDFium document this service keeps per asset, for other
+  /// services (outline, search text) to read from.
+  ///
+  /// On web a PDF is parsed entirely in PDFium's memory, and a 4,900-page
+  /// textbook costs it around a gigabyte. Three services each opening their
+  /// own copy is what pushed the tab far enough that SQLite's OPFS reads
+  /// started failing with "disk I/O error". Callers must not dispose the
+  /// result; it lives as long as this service's cache does.
+  Future<PdfDocument> sharedPdf(String assetId) => _openPdf(assetId);
+
   Future<PdfDocument> _openPdf(String assetId) {
     return _pdfDocs.putIfAbsent(assetId, () async {
       try {
