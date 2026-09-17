@@ -152,7 +152,11 @@ flutter:
   uses-material-design: true
 
   assets:
-    - .env
+    # `.env` itself is deliberately NOT bundled: it holds the raw vendor keys
+    # and a Flutter asset is plaintext inside the APK/IPA, readable with
+    # `unzip`. `scripts/sync-env.sh` writes `assets/env` instead, with the
+    # server-only keys removed. main.dart tries `.env` first and falls back
+    # to `assets/env`, so local runs and shipped builds both work.
     - assets/env
     - assets/quiz/stop_words.txt
     - assets/branding/notably_logo.png

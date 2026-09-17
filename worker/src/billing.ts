@@ -525,14 +525,22 @@ export async function handleBillingWebhook(
   const payload = await request.text();
   const signature = request.headers.get('Paymongo-Signature');
 
-  if (env.PAYMONGO_WEBHOOK_SECRET) {
-    const valid = await verifyPayMongoWebhookSignature(
-      payload,
-      signature,
-      env.PAYMONGO_WEBHOOK_SECRET,
-    );
-    if (!valid) return json({ error: 'Invalid webhook signature.' }, 401);
+  // Fail closed. This endpoint is unauthenticated by design — PayMongo calls
+  // it, not the app — so the signature is the *only* thing separating a real
+  // payment from a forged one. Skipping the check when the secret happens to
+  // be unset meant a missing or mis-rotated secret silently turned this into
+  // "anyone can POST payment.paid with any uid and plan, and be granted
+  // Premium for free". An unconfigured webhook is a broken deployment, and
+  // it should look like one rather than quietly trusting its callers.
+  if (!env.PAYMONGO_WEBHOOK_SECRET) {
+    return json({ error: 'Webhook secret is not configured.' }, 503);
   }
+  const valid = await verifyPayMongoWebhookSignature(
+    payload,
+    signature,
+    env.PAYMONGO_WEBHOOK_SECRET,
+  );
+  if (!valid) return json({ error: 'Invalid webhook signature.' }, 401);
 
   let body: unknown;
   try {
