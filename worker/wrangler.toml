@@ -56,7 +56,7 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 # Free tier leads; the paid model is only reached when it is exhausted.
 AI_TEXT_PROVIDER = "workers-ai"
-AI_TEXT_MODEL = "free/@cf/meta/llama-3.1-8b-instruct"
+AI_TEXT_MODEL = "free/@cf/meta/llama-3.1-8b-instruct-fp8"
 AI_VISION_PROVIDER = "workers-ai"
 AI_VISION_MODEL = "free/@cf/meta/llama-3.2-11b-vision-instruct"
 AI_FALLBACK_PROVIDER = "gemini"

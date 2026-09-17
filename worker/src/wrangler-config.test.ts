@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import { describe, expect, it } from 'vitest';
+
+import toml from '../wrangler.toml?raw';
 
 /**
  * Which TOML table each top-level key ends up in.
@@ -30,7 +29,6 @@ function tablesOf(toml: string): Map<string, string> {
 }
 
 describe('wrangler.toml', () => {
-  const toml = readFileSync(join(__dirname, '..', 'wrangler.toml'), 'utf8');
   const owner = tablesOf(toml);
 
   // Without a provider and model pair the gateway builds an empty chain and
@@ -57,5 +55,28 @@ describe('wrangler.toml', () => {
   it('declares the Workers AI binding', () => {
     expect(toml).toMatch(/^\[ai\]\s*$/m);
     expect(owner.get('binding')).toBe('ai');
+  });
+});
+
+describe('AI models are priced', () => {
+  /**
+   * A model with no entry in MODEL_PRICES is charged at UNKNOWN_MODEL_PRICE
+   * ($5/$15 per M), which is deliberately dear so nothing unpriced slips past
+   * a budget check. That is right for a surprise model and wrong for the free
+   * tier: a Workers AI id that drifts out of the table starts eating the
+   * monthly ceiling despite costing nothing.
+   */
+  it('prices every configured Workers AI model as free', async () => {
+    const { MODEL_PRICES } = await import('./ai/pricing');
+    const configured = [...toml.matchAll(/^AI_\w*MODEL\s*=\s*"([^"]+)"/gm)].map(
+      (m) => m[1],
+    );
+    const workersAi = configured.filter((m) => m.startsWith('free/'));
+    expect(workersAi.length).toBeGreaterThan(0);
+    for (const model of workersAi) {
+      expect(MODEL_PRICES).toHaveProperty(model);
+      expect((MODEL_PRICES as Record<string, { inPerM: number }>)[model].inPerM)
+        .toBe(0);
+    }
   });
 });
