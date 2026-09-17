@@ -54,11 +54,27 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 # this file, because a `[table]` header here would capture every var under
 # it and empty out [vars].
 
-# Free tier leads; the paid model is only reached when it is exhausted.
-AI_TEXT_PROVIDER = "workers-ai"
-AI_TEXT_MODEL = "free/@cf/meta/llama-3.1-8b-instruct-fp8"
-AI_VISION_PROVIDER = "workers-ai"
-AI_VISION_MODEL = "free/@cf/meta/llama-3.2-11b-vision-instruct"
+# Both paths go to Gemini, and the free tier is deliberately unused.
+#
+# Everything this app asks a model for is one long JSON array of quiz
+# questions, and the free Workers AI models cannot deliver that. The 8B text
+# model prefaces the array with "Here are 20 questions..." and wraps it in a
+# markdown fence; the 11B vision model gets the shape right and then runs out
+# of output tokens partway through, because its ceiling is far below Gemini's.
+# Either way the array does not parse and the quiz fails.
+#
+# This was measured, not assumed — a "reply OK" smoke test passes on the free
+# models and tells you nothing, which is how a broken quiz feature reached
+# production earlier today. A quiz costs a fraction of a cent on Gemini.
+#
+# A document with no selectable text falls back to sending page images, so the
+# vision path carries the same JSON requirement as the text path. Neither can
+# be moved to the free tier without the parser being made to tolerate prose,
+# fences and truncation first.
+AI_TEXT_PROVIDER = "gemini"
+AI_TEXT_MODEL = "gemini-3.5-flash-lite"
+AI_VISION_PROVIDER = "gemini"
+AI_VISION_MODEL = "gemini-3.5-flash-lite"
 AI_FALLBACK_PROVIDER = "gemini"
 AI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
 

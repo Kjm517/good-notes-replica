@@ -66,17 +66,28 @@ describe('AI models are priced', () => {
    * tier: a Workers AI id that drifts out of the table starts eating the
    * monthly ceiling despite costing nothing.
    */
-  it('prices every configured Workers AI model as free', async () => {
+  it('prices every configured model, so none is billed at the unknown rate', async () => {
     const { MODEL_PRICES } = await import('./ai/pricing');
     const configured = [...toml.matchAll(/^AI_\w*MODEL\s*=\s*"([^"]+)"/gm)].map(
       (m) => m[1],
     );
-    const workersAi = configured.filter((m) => m.startsWith('free/'));
-    expect(workersAi.length).toBeGreaterThan(0);
-    for (const model of workersAi) {
+    expect(configured.length).toBeGreaterThan(0);
+    for (const model of configured) {
       expect(MODEL_PRICES).toHaveProperty(model);
-      expect((MODEL_PRICES as Record<string, { inPerM: number }>)[model].inPerM)
-        .toBe(0);
+    }
+  });
+
+  it('keeps free/ models priced at zero when any are configured', async () => {
+    const { MODEL_PRICES } = await import('./ai/pricing');
+    const prices = MODEL_PRICES as Record<string, { inPerM: number }>;
+    const configured = [...toml.matchAll(/^AI_\w*MODEL\s*=\s*"([^"]+)"/gm)]
+      .map((m) => m[1])
+      .filter((m) => m.startsWith('free/'));
+    // None configured today: the free Workers AI models cannot return the long
+    // JSON array a quiz needs. If one is reintroduced it must still be priced
+    // at zero, or the budget check spends the monthly ceiling on free calls.
+    for (const model of configured) {
+      expect(prices[model].inPerM).toBe(0);
     }
   });
 });
