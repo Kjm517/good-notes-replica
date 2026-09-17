@@ -50,6 +50,18 @@ class LibraryRepository {
     return query.watch();
   }
 
+  /// Every live folder this account owns, for the "Move to folder" picker.
+  Future<List<Document>> folders() {
+    final query = _db.select(_db.documents)
+      ..where((d) =>
+          d.type.equalsValue(DocumentType.folder) &
+          d.trashedAt.isNull() &
+          d.deletedAt.isNull() &
+          _owned(d))
+      ..orderBy([(d) => OrderingTerm.asc(d.title)]);
+    return query.get();
+  }
+
   Stream<List<Document>> watchStarred() {
     final query = _db.select(_db.documents)
       ..where((d) =>

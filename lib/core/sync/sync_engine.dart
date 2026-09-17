@@ -1451,12 +1451,13 @@ class SyncEngine {
     var local = await (_db.select(
       _db.assets,
     )..where((a) => a.id.equals(assetId))).getSingleOrNull();
-    if (await _assetBytesOnDevice(local, assetId)) {
-      _downloadBackoffUntil.remove(assetId);
-      _downloadAttempts.remove(assetId);
-      return;
-    }
 
+    // No metadata row yet: fetch it *before* the bytes check. The check
+    // recovers files already on disk by writing their path onto the row —
+    // with no row that write hit nothing, the early return below skipped the
+    // insert, and a device whose database was rebuilt while its files
+    // survived showed every notebook as "Waiting for file…" with the file
+    // sitting right there.
     if (local == null) {
       final record = await _remote.fetchById(RemoteCollection.assets, assetId);
       if (record == null || record.isDeleted) return;
@@ -1480,6 +1481,16 @@ class SyncEngine {
       local = await (_db.select(
         _db.assets,
       )..where((a) => a.id.equals(assetId))).getSingleOrNull();
+    }
+
+    if (await _assetBytesOnDevice(local, assetId)) {
+      _downloadBackoffUntil.remove(assetId);
+      _downloadAttempts.remove(assetId);
+      return;
+    }
+
+    if (local == null) {
+      return;
     } else if (local.remoteKey == null && !local.dirty) {
       // A dirty row is holding a local change that has not been pushed yet —
       // a key just cleared by [verifyRemoteCopies], say. Overwriting it with
@@ -1519,6 +1530,13 @@ class SyncEngine {
       return;
     }
 
+    // A file imported on this device while a long download is running used
+    // to wait for the whole download — with its editor locked on
+    // "Uploading…" the entire time — because push only runs at the start of
+    // a sync. The user's own import is the thing they are waiting to open,
+    // so let it go ahead of the next file fetch.
+    await _pushPendingUploadsFirst();
+
     _emitProgress(
       _lastProgress.clamp(0.60, 0.74),
       'Downloading file…',
@@ -1555,6 +1573,26 @@ class SyncEngine {
       var wait = _downloadBackoff * (1 << (attempts - 1).clamp(0, 5));
       if (wait > _downloadBackoffMax) wait = _downloadBackoffMax;
       _downloadBackoffUntil[assetId] = DateTime.now().add(wait);
+    }
+  }
+
+  bool _pushingUploads = false;
+
+  /// Uploads any locally imported files that are still waiting for R2 before
+  /// the next download starts. Skipped on native pull when nothing is pending,
+  /// so the common case costs one count query.
+  Future<void> _pushPendingUploadsFirst() async {
+    if (_pushingUploads || _paused) return;
+    if (await _pendingFileUploadCount() == 0) return;
+    _pushingUploads = true;
+    try {
+      await _pushAssets();
+    } catch (e) {
+      // The download this was queued ahead of should still run; the failed
+      // upload is retried on the next scheduled sync as before.
+      debugPrint('Upload-before-download failed: $e');
+    } finally {
+      _pushingUploads = false;
     }
   }
 

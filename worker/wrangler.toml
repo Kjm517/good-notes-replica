@@ -48,8 +48,11 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 # database_id = "PASTE_ID_HERE"
 
 # Cloudflare Workers AI — has a daily free allowance, so it goes first.
-# [ai]
-# binding = "AI"
+# Without this binding the "free tier first" chain below is a no-op: every
+# request skipped straight to Gemini, and when its credits ran out the quiz
+# feature was simply down.
+[ai]
+binding = "AI"
 
 
 # Free tier leads; the paid model is only reached when it is exhausted.

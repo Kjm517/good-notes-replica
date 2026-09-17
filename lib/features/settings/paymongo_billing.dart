@@ -198,7 +198,13 @@ final payMongoBillingServiceProvider = Provider<PayMongoBillingService?>((ref) {
 
 /// Polls worker entitlement while signed in so admin grants apply without
 /// restarting the app.
-const _entitlementPollInterval = Duration(seconds: 12);
+///
+/// Every 12 seconds — the previous cadence — was ~7,000 requests per signed-in
+/// user per day, enough for a handful of open tabs to burn through the
+/// Worker's free daily quota and take file sync down with it. Checkout has
+/// its own fast poll ([QrCheckoutScreen]) and the app also refreshes on
+/// resume, so a slow background tick is all a grant needs.
+const _entitlementPollInterval = Duration(minutes: 5);
 
 final payMongoSyncProvider = Provider<void>((ref) {
   if (!ref.watch(payMongoSignedInProvider)) return;

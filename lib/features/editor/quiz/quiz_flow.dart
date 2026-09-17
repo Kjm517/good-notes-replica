@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/design.dart';
 import '../../../app/page_routes.dart';
 import '../../../app/providers.dart';
+import '../../../core/ai/ai_gateway_client.dart';
 import '../../../core/ai/gemini_service.dart';
 import '../../../core/db/database.dart';
 import '../../../core/models/outline_entry.dart';
@@ -507,14 +508,27 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
 
   String _aiFailureMessage(Object error) {
     final raw = error.toString();
-    if (raw.contains('API key') || raw.contains('not configured')) {
+    final lower = raw.toLowerCase();
+    // With the gateway the key lives on the server, so "not configured" or
+    // "quota exhausted" in the message is the server saying every model it
+    // tried refused — nothing the user can fix by adding a key. Only a build
+    // that bundles its own key can act on that advice.
+    if (aiGatewayAvailable) {
+      if (lower.contains('not configured') ||
+          lower.contains('quota') ||
+          lower.contains('depleted') ||
+          lower.contains('every configured model') ||
+          lower.contains('resource exhausted') ||
+          raw.contains('HTTP 429')) {
+        return 'AI quizzes are temporarily unavailable. Try again later.';
+      }
+    } else if (raw.contains('API key') || raw.contains('not configured')) {
       return 'Add a Gemini API key to generate quizzes.';
     }
     if (isQuizNetworkError(error)) {
       return kNoWifiOrMobileData;
     }
-    if (raw.contains('HTTP 429') ||
-        raw.toLowerCase().contains('resource exhausted')) {
+    if (raw.contains('HTTP 429') || lower.contains('resource exhausted')) {
       return 'Gemini is busy. Try again in a moment.';
     }
     if (raw.contains('HTTP 404') ||
