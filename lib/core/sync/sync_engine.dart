@@ -1214,37 +1214,43 @@ class SyncEngine {
       }
 
       final ensuredAssets = <String>{};
-      for (final record in pages) {
-        final local = await (_db.select(
-          _db.notePages,
-        )..where((p) => p.id.equals(record.id))).getSingleOrNull();
-        if (local != null &&
-            !remoteWins(
-              localUpdatedAt: local.updatedAt,
-              remoteUpdatedAt: record.updatedAt,
-              remoteDeletedAt: record.deletedAt,
-            )) {
-          if (!record.isDeleted) {
-            final skippedPdf = record.data['pdfAssetId'] as String?;
-            final skippedBg = record.data['bgAssetId'] as String?;
-            if (skippedPdf != null && ensuredAssets.add(skippedPdf)) {
-              await _ensureAsset(skippedPdf);
-            }
-            if (skippedBg != null && ensuredAssets.add(skippedBg)) {
-              await _ensureAsset(skippedBg);
-            }
-          }
-          processed++;
-          if (processed == total || processed - lastEmitted >= 25) {
-            lastEmitted = processed;
-            emitPageProgress();
-          }
-          continue;
-        }
 
-        await _db
-            .into(_db.notePages)
-            .insertOnConflictUpdate(
+      // Written in chunks, each chunk one transaction.
+      //
+      // A row at a time meant a select and an upsert per page, and every
+      // upsert its own implicit transaction. For a 4,900-page textbook that
+      // is around ten thousand separate writes, each one a flush through a
+      // single OPFS access handle on web — slow, and enough contention that
+      // reads from the UI started failing outright with SQLITE_IOERR while a
+      // large document synced. One read and one transaction per chunk keeps
+      // the same behaviour and asks the file for roughly fifty round trips
+      // instead.
+      const chunkSize = 200;
+      for (var start = 0; start < pages.length; start += chunkSize) {
+        final chunk = pages.skip(start).take(chunkSize).toList();
+        final locals = {
+          for (final row in await (_db.select(_db.notePages)
+                ..where((p) => p.id.isIn([for (final r in chunk) r.id])))
+              .get())
+            row.id: row,
+        };
+
+        // Assets are fetched over the network, so they are gathered here and
+        // handled after the transaction closes rather than inside it.
+        final pendingAssets = <String>[];
+        final writes = <NotePagesCompanion>[];
+
+        for (final record in chunk) {
+          final local = locals[record.id];
+          final keepLocal = local != null &&
+              !remoteWins(
+                localUpdatedAt: local.updatedAt,
+                remoteUpdatedAt: record.updatedAt,
+                remoteDeletedAt: record.deletedAt,
+              );
+
+          if (!keepLocal) {
+            writes.add(
               NotePagesCompanion.insert(
                 id: record.id,
                 documentId: documentId,
@@ -1274,19 +1280,31 @@ class SyncEngine {
                 remoteUpdatedAt: Value(record.updatedAt),
               ),
             );
+          }
 
-        // PDF / image pages point at an asset; make sure its metadata (and, when
-        // possible, its bytes) land on this device — otherwise the editor paints
-        // blank pages and logs "Missing PDF asset".
-        final pdfId = record.data['pdfAssetId'] as String?;
-        final bgId = record.data['bgAssetId'] as String?;
-        if (pdfId != null && ensuredAssets.add(pdfId)) {
-          await _ensureAsset(pdfId);
+          // PDF / image pages point at an asset; make sure its metadata (and,
+          // when possible, its bytes) land on this device — otherwise the
+          // editor paints blank pages and logs "Missing PDF asset". A row the
+          // local copy wins still needs its asset.
+          if (keepLocal && record.isDeleted) continue;
+          for (final key in const ['pdfAssetId', 'bgAssetId']) {
+            final id = record.data[key] as String?;
+            if (id != null && ensuredAssets.add(id)) pendingAssets.add(id);
+          }
         }
-        if (bgId != null && ensuredAssets.add(bgId)) {
-          await _ensureAsset(bgId);
+
+        if (writes.isNotEmpty) {
+          await _db.batch((b) => b.insertAllOnConflictUpdate(
+                _db.notePages,
+                writes,
+              ));
         }
-        processed++;
+
+        for (final id in pendingAssets) {
+          await _ensureAsset(id);
+        }
+
+        processed += chunk.length;
         if (processed == total || processed - lastEmitted >= 25) {
           lastEmitted = processed;
           emitPageProgress();
