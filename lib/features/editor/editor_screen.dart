@@ -66,13 +66,67 @@ class EditorScreen extends ConsumerWidget {
       loading: () => const _EditorPlaceholder(
         child: CircularProgressIndicator(),
       ),
-      error: (e, _) => _EditorPlaceholder(child: Text('Error: $e')),
+      error: (e, _) => _EditorPlaceholder(
+        child: _OpenFailed(
+          error: e,
+          onRetry: () => ref.invalidate(documentStreamProvider(documentId)),
+        ),
+      ),
       data: (doc) {
         if (doc == null) {
           return const _EditorPlaceholder(child: Text('Notebook not found'));
         }
         return _Editor(document: doc);
       },
+    );
+  }
+}
+
+/// Shown when the document row could not be read.
+///
+/// This used to print the exception straight onto the page, which meant a
+/// transient storage error greeted the user with a raw SQL statement and no
+/// way forward. On web the database lives in OPFS, and a read can fail while
+/// a large sync is writing — a failure that is usually over by the time it is
+/// read, so the useful thing to offer is another go rather than the query
+/// that happened to be in flight. The detail still goes to the console.
+class _OpenFailed extends StatelessWidget {
+  const _OpenFailed({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    debugPrint('Could not open document: $error');
+    final t = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.refresh_rounded, size: 34, color: t.textFaint),
+          const SizedBox(height: 14),
+          Text(
+            'Could not open this notebook',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: t.text,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Your notes are safe. This can happen while a large document is '
+            'still syncing — try again in a moment.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: t.textMuted),
+          ),
+          const SizedBox(height: 18),
+          FilledButton(onPressed: onRetry, child: const Text('Try again')),
+        ],
+      ),
     );
   }
 }
