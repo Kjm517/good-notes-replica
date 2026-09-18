@@ -176,7 +176,20 @@ final payMongoSignedInProvider = Provider<bool>((ref) {
 });
 
 /// Whether wallet checkout can run (native + signed-in user).
+/// Whether wallet checkout (GCash / Maya / card) may be *offered*.
+///
+/// Web only, and that is a policy requirement rather than a preference.
+/// Google Play and the App Store both require a purchase of digital content
+/// made inside the app to go through their own billing; selling a
+/// subscription through PayMongo in a store build is a payments-policy
+/// violation, and the penalty is removal rather than a rejection notice.
+///
+/// This gates the *sale*, not the entitlement. Premium bought on the web is
+/// resolved server-side by [payMongoEntitlementRefreshProvider], so it still
+/// applies on Android and iOS — the store build simply cannot take the
+/// payment. Native builds sell through RevenueCat instead.
 final payMongoAvailableProvider = Provider<bool>((ref) {
+  if (!kIsWeb) return false;
   return ref.watch(payMongoSignedInProvider);
 });
 

@@ -329,6 +329,13 @@ async function handleUserRoutes(
     // Device push tokens. Registered by the app after the user allows
     // notifications, and deleted on sign-out so a shared phone does not keep
     // receiving the previous account's pushes.
+    // Account deletion. Play and the App Store both require this to exist in
+    // the app, and it has to remove the data rather than just the login.
+    if (route === 'POST /user/account/delete') {
+      const { handleAccountDelete } = await import('./account');
+      return withCors(await handleAccountDelete(request, env));
+    }
+
     if (route === 'POST /user/devices' || route === 'DELETE /user/devices') {
       const uid = await requireUid(request, env);
       const body = (await request.json()) as {

@@ -174,6 +174,17 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
       } else if (_selectedPayMongo != null && _useWallets) {
         await _subscribeViaPayMongo(_selectedPayMongo!);
       } else if (!_useStore && !_useWallets) {
+        // No payment method is configured. In debug that means a developer is
+        // working on the paywall without keys, and granting the plan outright
+        // keeps the rest of the flow testable. In a release build it would
+        // mean handing out Premium to anyone who taps Subscribe — which is
+        // exactly what a store build with no RevenueCat key looks like, now
+        // that wallet checkout is web-only.
+        if (!kDebugMode) {
+          throw StateError(
+            'Subscriptions are not available on this device yet.',
+          );
+        }
         await Future<void>.delayed(const Duration(milliseconds: 400));
         await ref.read(billingPlanProvider.notifier).activate(
               widget.plan,
