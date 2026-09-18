@@ -87,7 +87,7 @@ class _BugReportSheetState extends ConsumerState<BugReportSheet> {
     }
 
     final subject = _subject.text.trim().isEmpty
-        ? 'Notably bug report'
+        ? 'Navie bug report'
         : _subject.text.trim();
     final description = _description.text.trim();
     if (description.isEmpty) {
@@ -105,7 +105,7 @@ class _BugReportSheetState extends ConsumerState<BugReportSheet> {
       ..writeln('Diagnostics: ${_attachDiagnostics ? 'yes' : 'no'}')
       ..writeln()
       ..writeln('—')
-      ..writeln('Notably · $_deviceLabel · ${user.email ?? user.uid}');
+      ..writeln('Navie · $_deviceLabel · ${user.email ?? user.uid}');
 
     final payload = <Map<String, String>>[];
     for (final f in _attachments.take(3)) {
@@ -183,7 +183,7 @@ class _BugReportSheetState extends ConsumerState<BugReportSheet> {
               const SizedBox(height: 4),
               Text(
                 signedIn
-                    ? 'Reports go to the Notably admin console for the team to review.'
+                    ? 'Reports go to the Navie admin console for the team to review.'
                     : 'Sign in first so your report appears on the admin Bug reports page.',
                 style: TextStyle(fontSize: 13, color: t.textMuted),
               ),

@@ -287,7 +287,7 @@ class _QuizFlowState extends ConsumerState<QuizFlow> {
     }
     if (!mounted) return;
     setState(() {
-      _status = 'Asking Notably...';
+      _status = 'Asking Navie...';
       _progress = 0.88;
     });
     List<QuizQuestion> questions;
@@ -1205,7 +1205,7 @@ class _SetupView extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'Notably writes a practice exam for you',
+              'Navie writes a practice exam for you',
               style: TextStyle(
                 fontSize: 13.5,
                 height: 1.45,

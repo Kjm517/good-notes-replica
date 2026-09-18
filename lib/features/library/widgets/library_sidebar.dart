@@ -121,7 +121,7 @@ class _Brand extends StatelessWidget {
           const AppMark(size: 26),
           const SizedBox(width: 10),
           Text(
-            'Notably',
+            'Navie',
             style: TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 17,

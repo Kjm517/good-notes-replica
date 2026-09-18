@@ -128,7 +128,7 @@ class _PermissionNotice extends StatelessWidget {
                 children: [
                   Text(
                     permanentlyDenied
-                        ? 'Your device is blocking notifications for Notably. '
+                        ? 'Your device is blocking notifications for Navie. '
                             'Turn them on in system settings.'
                         : 'Notifications are switched on here, but the system '
                             'has not allowed them yet.',

@@ -103,7 +103,7 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
         content: Text(
           isPremium
               ? 'Payment received — Premium is active.'
-              : 'Back in Notably — checking your payment…',
+              : 'Back in Navie — checking your payment…',
         ),
       ),
     );
@@ -175,7 +175,7 @@ class _NotablyAppState extends ConsumerState<NotablyApp>
     }
 
     return MaterialApp.router(
-      title: 'Notably',
+      title: 'Navie',
       scaffoldMessengerKey: _scaffoldMessengerKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),

@@ -37,12 +37,12 @@ void main() {
     expect(find.text('Report a bug'), findsOneWidget);
     expect(find.text('System'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('About Notably'),
+      find.text('About Navie'),
       120,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    expect(find.text('About Notably'), findsOneWidget);
+    expect(find.text('About Navie'), findsOneWidget);
     expect(find.text('Version 1.0.0'), findsOneWidget);
   });
 }

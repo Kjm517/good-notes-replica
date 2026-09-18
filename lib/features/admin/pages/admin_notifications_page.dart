@@ -267,7 +267,7 @@ class _Composer extends StatelessWidget {
             maxLength: 60,
             decoration: const InputDecoration(
               labelText: 'Title',
-              hintText: 'New in Notably',
+              hintText: 'New in Navie',
             ),
           ),
           const SizedBox(height: 8),

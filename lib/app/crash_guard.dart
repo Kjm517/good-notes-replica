@@ -86,7 +86,7 @@ class StartupFailureApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Notably',
+      title: 'Navie',
       debugShowCheckedModeBanner: false,
       home: Scaffold(
         body: SafeArea(
@@ -100,7 +100,7 @@ class StartupFailureApp extends StatelessWidget {
                   const Icon(Icons.error_outline, size: 40),
                   const SizedBox(height: 16),
                   Text(
-                    'Notably could not start',
+                    'Navie could not start',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8),

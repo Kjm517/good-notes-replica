@@ -330,7 +330,7 @@ class _Hero extends StatelessWidget {
         const AppMark(size: 128),
         const SizedBox(height: 10),
         Text(
-          creatingAccount ? 'Create your account' : 'Welcome to Notably',
+          creatingAccount ? 'Create your account' : 'Welcome to Navie',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 25,
@@ -345,7 +345,7 @@ class _Hero extends StatelessWidget {
           child: Text(
             creatingAccount
                 ? 'Your notebooks, PDFs and highlights, on every device.'
-                : 'Take notes comfortably, on every device.',
+                : 'Navigate your knowledge.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, height: 1.5, color: t.textMuted),
           ),

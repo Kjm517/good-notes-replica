@@ -81,7 +81,7 @@ class AdminConsoleGate extends ConsumerWidget {
                   ],
                   const SizedBox(height: 8),
                   Text(
-                    'Staff sign-in is separate from the Notably app account. '
+                    'Staff sign-in is separate from the Navie app account. '
                     'Add this uid to public.admins in Supabase.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: t.textFaint, height: 1.4),

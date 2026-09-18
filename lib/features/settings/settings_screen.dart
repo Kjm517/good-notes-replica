@@ -122,12 +122,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           icon: Icons.install_desktop_outlined,
                           title: pwaIsStandalone()
                               ? 'Installed'
-                              : 'Install Notably',
+                              : 'Install Navie',
                           subtitle: pwaIsStandalone()
                               ? 'Running as an installed app'
                               : pwaInstallAvailable()
                                   ? 'Add to your home screen or apps list'
-                                  : 'Chrome menu → Cast, save, and share → Install Notably',
+                                  : 'Chrome menu → Cast, save, and share → Install Navie',
                           onTap: pwaIsStandalone()
                               ? null
                               : () async {
@@ -590,7 +590,7 @@ class _AboutSection extends StatelessWidget {
       children: [
         SettingsRow(
           icon: Icons.info_outline_rounded,
-          title: 'About Notably',
+          title: 'About Navie',
           subtitle: 'Version $kAppVersion',
           trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
           onTap: () => AboutNotablySheet.show(context),

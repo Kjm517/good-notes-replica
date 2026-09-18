@@ -294,8 +294,8 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
       SnackBar(
         content: Text(
           kIsWeb
-              ? 'Complete payment, then return to Notably.'
-              : 'Complete payment — you\'ll be brought back to Notably automatically.',
+              ? 'Complete payment, then return to Navie.'
+              : 'Complete payment — you\'ll be brought back to Navie automatically.',
         ),
         duration: const Duration(seconds: 6),
       ),

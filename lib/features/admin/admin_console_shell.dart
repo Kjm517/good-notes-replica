@@ -268,7 +268,7 @@ class _AdminSidebar extends ConsumerWidget {
                   const AppMark(size: 32),
                   const SizedBox(width: 10),
                   Text(
-                    'Notably',
+                    'Navie',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,

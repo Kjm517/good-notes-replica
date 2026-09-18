@@ -1,11 +1,11 @@
 {
-    "name": "Notably",
-    "short_name": "Notably",
+    "name": "Navie",
+    "short_name": "Navie",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#5759D3",
     "theme_color": "#5257D4",
-    "description": "Take notes comfortably. Think notably — handwriting, PDFs, and quizzes on every device.",
+    "description": "Navigate your knowledge — handwriting, PDFs, and quizzes on every device.",
     "orientation": "any",
     "prefer_related_applications": false,
     "icons": [

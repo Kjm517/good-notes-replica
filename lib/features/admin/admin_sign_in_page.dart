@@ -128,7 +128,7 @@ class _AdminHeroPanel extends StatelessWidget {
               const AppMark(size: 36),
               const SizedBox(width: 11),
               const Text(
-                'Notably',
+                'Navie',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
@@ -244,7 +244,7 @@ class _AdminSignInForm extends StatelessWidget {
             ),
             const SizedBox(height: 7),
             Text(
-              'Use your staff account — separate from the Notably app login.',
+              'Use your staff account — separate from the Navie app login.',
               style: TextStyle(fontSize: 13.5, color: t.textMuted),
             ),
             if (error != null) ...[
