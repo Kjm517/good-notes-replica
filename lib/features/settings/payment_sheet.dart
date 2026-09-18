@@ -217,7 +217,19 @@ class _PaymentSheetState extends ConsumerState<PaymentSheet> {
       package = packageForPlan(offerings, widget.plan);
     }
     if (package == null) {
-      throw StateError('This plan is not available yet. Check RevenueCat offerings.');
+      // Reached whenever the store has no package for this plan — most often
+      // because the products exist in Play but no RevenueCat Offering maps
+      // them yet. That is a setup step on our side, so the user is told the
+      // plan is unavailable and the actionable detail goes to the log rather
+      // than into a sentence telling a student to check a dashboard they
+      // cannot open.
+      debugPrint(
+        'No RevenueCat package for ${widget.plan}. Check that Play products '
+        'exist and an Offering maps them.',
+      );
+      throw StateError(
+        'This plan is not available yet. Please try again later.',
+      );
     }
     final result = await purchasePackage(package);
     ref.read(customerInfoProvider.notifier).apply(result.customerInfo);
