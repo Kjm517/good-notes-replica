@@ -110,6 +110,16 @@ const CORS_BASE_HEADERS: Record<string, string> = {
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://notably-sigma.vercel.app',
   '.vercel.app',
+  // Cloudflare Pages, including its per-deployment preview subdomains. Without
+  // this the app served from Pages cannot call its own API: the browser blocks
+  // the read and every request looks like a network failure rather than a
+  // refused origin, which is a slow thing to diagnose.
+  '.pages.dev',
+  // The site is deployed as a Worker with static assets, so it is served from
+  // this account's own workers.dev subdomain. Scoped to that subdomain rather
+  // than all of workers.dev, which would let any Worker on any account call
+  // this API from a browser.
+  '.notably.workers.dev',
 ];
 
 function allowedOrigins(env: { ALLOWED_ORIGINS?: string }): string[] {

@@ -25,6 +25,26 @@ describe('CORS origin allowlist', () => {
     expect(isOriginAllowed('https://notably-sigma.vercel.app', env)).toBe(true);
   });
 
+  it('allows Cloudflare Pages, where the site is served from', () => {
+    expect(isOriginAllowed('https://navie.pages.dev', env)).toBe(true);
+    expect(isOriginAllowed('https://abc123.navie.pages.dev', env)).toBe(true);
+  });
+
+  it('refuses a lookalike of the Pages domain', () => {
+    expect(isOriginAllowed('https://evil-pages.dev', env)).toBe(false);
+    expect(isOriginAllowed('https://notpages.dev', env)).toBe(false);
+  });
+
+  it('allows the site on this account\'s workers.dev subdomain', () => {
+    expect(isOriginAllowed('https://navie.notably.workers.dev', env)).toBe(true);
+  });
+
+  it('refuses another account\'s workers.dev subdomain', () => {
+    expect(isOriginAllowed('https://evil.someone-else.workers.dev', env))
+      .toBe(false);
+    expect(isOriginAllowed('https://evil-notably.workers.dev', env)).toBe(false);
+  });
+
   it('allows Vercel preview deployments', () => {
     expect(
       isOriginAllowed('https://notably-2ovmvfu6a-karens.vercel.app', env),

@@ -105,5 +105,21 @@ cat > "$DEPLOY_DIR/vercel.json" <<'JSON'
 }
 JSON
 
+# The same two rules again for Cloudflare Pages, which reads _headers and
+# _redirects rather than vercel.json. Both files are written every build so the
+# output can be deployed to either host without remembering to do anything.
+cat > "$DEPLOY_DIR/_headers" <<'HEADERS'
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+HEADERS
+
+# No _redirects file on purpose. go_router needs every path to serve
+# index.html, and the usual `/* /index.html 200` is refused by Cloudflare:
+# it strips `.html` and `/index` itself, sees the rule match its own output
+# and calls it an infinite loop. The same job is done by
+# not_found_handling = "single-page-application" in wrangler.web.toml, which
+# is Cloudflare's supported way to say it.
+
 echo "Built: $OUT"
 echo "Mirrored for Vercel: $DEPLOY_DIR"
