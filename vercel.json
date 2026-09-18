@@ -1,11 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
 
-  "//": "Flutter web cannot be built by Vercel's builders. This project is deployed manually from vercel_out/ (see scripts/build-web.sh). That directory is gitignored, so a git-triggered build from this repo publishes an EMPTY site over the real one. Disabling git deployments is what stops that.",
+  "//": "Flutter web cannot be built by Vercel's builders. This project is deployed manually from vercel_out/ (see scripts/build-web.sh). That directory is gitignored, so a git-triggered build from this repo has nothing to publish. Disabling git deployments is what stops that. It is false for every branch, not just main: naming main left every feature branch firing a preview build that could only ever fail, which is where the red Error rows in the Vercel dashboard came from.",
 
   "git": {
-    "deploymentEnabled": {
-      "main": false
-    }
+    "deploymentEnabled": false
   }
 }
