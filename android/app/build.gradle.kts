@@ -23,7 +23,11 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.notably.notably"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned ahead of flutter.compileSdkVersion (36): permission_handler_android
+    // is compiled against 37 and the build refuses to link against a lower one.
+    // Compiling against a newer SDK is backward compatible; targetSdk, which is
+    // what actually changes runtime behaviour, is left on Flutter's value.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
