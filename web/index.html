@@ -18,18 +18,25 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="Notably — handwritten notes, PDFs, and quizzes.">
+  <meta name="description" content="Navie — Learn. Note. Navigate. Handwritten notes, PDFs, and quizzes.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
+  <!-- iOS only honours its own capability flag for home-screen launches.
+       Without it, "Add to Home Screen" opens inside Safari chrome instead of
+       standalone — which matters here because iPad is the main device for the
+       students this is aimed at, and the web app is the only build they can
+       install today. Safari 18 reads mobile-web-app-capable above; older iOS,
+       which plenty of exam-year iPads still run, needs this one. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="notably">
+  <meta name="apple-mobile-web-app-title" content="Navie">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png?v=solo"/>
 
-  <title>Notably</title>
+  <title>Navie</title>
   <link rel="manifest" href="manifest.json">
   <style>
     html, body {

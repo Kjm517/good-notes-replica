@@ -1,3 +1,6 @@
+@Tags(['native-pdf'])
+library;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:notably/features/editor/quiz/quiz_highlight_finder.dart';
 import 'package:notably/features/editor/search/pdf_page_text.dart';

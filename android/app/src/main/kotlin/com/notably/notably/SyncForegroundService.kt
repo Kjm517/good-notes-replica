@@ -28,13 +28,13 @@ class SyncForegroundService : Service() {
                     "File sync",
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "Shown while Notably uploads or downloads files"
+                    description = "Shown while Navie uploads or downloads files"
                     setShowBadge(false)
                 },
             )
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Notably")
+            .setContentTitle("Navie")
             .setContentText("Syncing files in the background")
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)

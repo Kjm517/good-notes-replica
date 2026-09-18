@@ -36,7 +36,7 @@ class QuizUpgradeSheet extends StatelessWidget {
     final t = context.tokens;
     final bottom = MediaQuery.paddingOf(context).bottom;
     final body = subtitle ??
-        'Notably reads your PDF and writes a practice quiz from it — '
+        'Navie reads your PDF and writes a practice quiz from it — '
             'multiple choice, true/false and short answer, graded instantly.';
 
     final gold = t.premium;

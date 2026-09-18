@@ -11,6 +11,7 @@ import '../legal/legal_sheet.dart';
 import '../settings/entitlements.dart';
 import 'data/auth_repository.dart';
 import 'providers.dart';
+import 'sign_in_help_sheet.dart';
 
 /// Sign in or create an account. When Supabase is configured, signing in is
 /// required to enter the app — it also enables syncing your notes across
@@ -304,6 +305,20 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                                 _error = null;
                               }),
                     ),
+                    const SizedBox(height: 4),
+                    // Someone stuck here cannot use the in-app bug reporter —
+                    // it needs the account they cannot get into — so this is
+                    // the only route they have for telling us.
+                    TextButton(
+                      onPressed: () => SignInHelpSheet.show(context),
+                      child: Text(
+                        'Trouble signing in?',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: context.tokens.textMuted,
+                        ),
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -330,7 +345,7 @@ class _Hero extends StatelessWidget {
         const AppMark(size: 128),
         const SizedBox(height: 10),
         Text(
-          creatingAccount ? 'Create your account' : 'Welcome to Notably',
+          creatingAccount ? 'Create your account' : 'Welcome to Navie',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 25,
@@ -345,7 +360,7 @@ class _Hero extends StatelessWidget {
           child: Text(
             creatingAccount
                 ? 'Your notebooks, PDFs and highlights, on every device.'
-                : 'Take notes comfortably, on every device.',
+                : 'Learn. Note. Navigate.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, height: 1.5, color: t.textMuted),
           ),

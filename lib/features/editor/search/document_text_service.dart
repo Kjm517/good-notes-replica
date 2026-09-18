@@ -39,13 +39,39 @@ class SearchHit {
 /// parser. It happens **once, in the background**, and the result is stored on
 /// the page row — searching a 4,895-page book then costs one SQL query instead
 /// of re-parsing 150 MB.
+/// Largest PDF handed to Syncfusion's pure-Dart parser, which works
+/// synchronously on the UI thread. Above this, PDFium (worker-backed on web,
+/// native elsewhere) is the only parser that gets the file.
+const int kMaxSyncfusionParseBytes = 24 * 1024 * 1024;
+
 class DocumentTextService {
-  DocumentTextService(this._db, this._assets, {FileSync? files})
-      : _files = files;
+  DocumentTextService(
+    this._db,
+    this._assets, {
+    FileSync? files,
+    Future<PdfDocument> Function(String assetId)? sharedPdf,
+  })  : _files = files,
+        _sharedPdf = sharedPdf;
 
   final AppDatabase _db;
   final AssetRepository _assets;
   final FileSync? _files;
+
+  /// Borrows the editor's already-open PDFium document instead of parsing a
+  /// second copy of the file. Null in tests, where each call opens its own.
+  final Future<PdfDocument> Function(String assetId)? _sharedPdf;
+
+  /// Opens [assetId] through PDFium: the shared instance when one is wired,
+  /// otherwise a private one the caller must dispose. The bool says which.
+  Future<(PdfDocument, bool)?> _openPdfium(String assetId) async {
+    final shared = _sharedPdf;
+    if (shared != null) {
+      return (await shared(assetId), false);
+    }
+    final bytes = await _assets.getBytes(assetId);
+    if (bytes == null) return null;
+    return (await PdfDocument.openData(Uint8List.fromList(bytes)), true);
+  }
 
   /// In-flight text jobs, chained per document so a quiz extract and Find
   /// don't parse the same PDF at once — and a second caller waits instead of
@@ -173,13 +199,11 @@ class DocumentTextService {
         return;
       }
 
-      final bytes = await _assets.getBytes(assetId);
-      if (bytes == null) return;
-
       // pdfrx (PDFium) works on web and is cheaper than Syncfusion for search.
       try {
-        final copy = Uint8List.fromList(bytes);
-        final pdf = await PdfDocument.openData(copy);
+        final opened = await _openPdfium(assetId);
+        if (opened == null) return;
+        final (pdf, owned) = opened;
         try {
           await _extractPages(
             pages,
@@ -192,11 +216,18 @@ class DocumentTextService {
           );
           return;
         } finally {
-          pdf.dispose();
+          if (owned) pdf.dispose();
         }
       } catch (e) {
         debugPrint('pdfrx text extract failed for $documentId: $e');
       }
+
+      // Same UI-thread parser as the outline path; a big file that PDFium
+      // could not read is not worth freezing the editor over.
+      if (size != null && size > kMaxSyncfusionParseBytes) return;
+
+      final bytes = await _assets.getBytes(assetId);
+      if (bytes == null) return;
 
       final document = sf.PdfDocument(inputBytes: bytes);
       final extractor = sf.PdfTextExtractor(document);
@@ -332,6 +363,25 @@ class DocumentTextService {
       return;
     }
 
+    // PDFium first: on web it runs in a worker, so a textbook's bookmarks
+    // cost the UI nothing. Syncfusion below parses the whole file
+    // synchronously on the main thread — for a 4,900-page book that froze
+    // the tab for minutes on open — so it is reserved for small files where
+    // its heading heuristics are worth the parse.
+    final pdfiumEntries = await _outlineFromPdfium(assetId, documentId);
+    if (pdfiumEntries != null && pdfiumEntries.isNotEmpty) {
+      await _storeOutline(documentId, pdfiumEntries);
+      return;
+    }
+    if (size != null && size > kMaxSyncfusionParseBytes) {
+      debugPrint(
+        'Skipping heading scan for $documentId: '
+        '${(size / 1e6).round()} MB is too large to parse on the UI thread',
+      );
+      await _storeOutline(documentId, const []);
+      return;
+    }
+
     final bytes = await _assets.getBytes(assetId);
     if (bytes == null) return;
 
@@ -347,6 +397,44 @@ class DocumentTextService {
       await _storeOutline(documentId, const []);
     } finally {
       document.dispose();
+    }
+  }
+
+  /// Bookmarks via PDFium. Null when the file could not be opened.
+  Future<List<OutlineEntry>?> _outlineFromPdfium(
+    String assetId,
+    String documentId,
+  ) async {
+    try {
+      final opened = await _openPdfium(assetId);
+      if (opened == null) return null;
+      final (pdf, owned) = opened;
+      try {
+        final entries = <OutlineEntry>[];
+        void walk(List<PdfOutlineNode> nodes, int depth) {
+          for (final node in nodes) {
+            final page = node.dest?.pageNumber;
+            if (page != null && page >= 1) {
+              entries.add(
+                OutlineEntry(
+                  title: node.title.trim(),
+                  pageIndex: page - 1,
+                  depth: depth,
+                ),
+              );
+            }
+            walk(node.children, depth + 1);
+          }
+        }
+
+        walk(await pdf.loadOutline(), 0);
+        return entries;
+      } finally {
+        if (owned) pdf.dispose();
+      }
+    } catch (e) {
+      debugPrint('pdfrx outline failed for $documentId: $e');
+      return null;
     }
   }
 

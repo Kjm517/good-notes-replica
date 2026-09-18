@@ -79,7 +79,7 @@ class PushService {
         unawaited(
           NotificationService.instance.show(
             id: message.messageId.hashCode,
-            title: n.title ?? 'Notably',
+            title: n.title ?? 'Navie',
             body: n.body ?? '',
             silent: silent(),
           ),

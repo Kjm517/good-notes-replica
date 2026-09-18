@@ -18,6 +18,7 @@ import '../legal/legal_sheet.dart';
 import 'entitlements.dart';
 import 'about_notably_sheet.dart';
 import 'bug_report_sheet.dart';
+import 'delete_account.dart';
 import 'paymongo_billing.dart';
 import 'manage_plan_sheet.dart';
 import 'notification_settings_card.dart';
@@ -121,12 +122,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           icon: Icons.install_desktop_outlined,
                           title: pwaIsStandalone()
                               ? 'Installed'
-                              : 'Install Notably',
+                              : 'Install Navie',
                           subtitle: pwaIsStandalone()
                               ? 'Running as an installed app'
                               : pwaInstallAvailable()
                                   ? 'Add to your home screen or apps list'
-                                  : 'Chrome menu → Cast, save, and share → Install Notably',
+                                  : 'Chrome menu → Cast, save, and share → Install Navie',
                           onTap: pwaIsStandalone()
                               ? null
                               : () async {
@@ -144,20 +145,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ],
                     ),
                   ),
-                if (kIsWeb)
-                  SettingsSection(
-                    label: 'Admin',
-                    child: SettingsGroupCard(
-                      children: [
-                        SettingsRow(
-                          icon: Icons.admin_panel_settings_outlined,
-                          title: 'Admin console',
-                          subtitle: 'Staff sign-in (separate from this account)',
-                          onTap: () => context.push('/admin/overview'),
-                        ),
-                      ],
-                    ),
-                  ),
+                // No admin entry here on purpose. The console is for staff, and
+                // advertising it in every user's settings invites people to
+                // tap it, meet a sign-in wall they cannot pass, and wonder
+                // what they are missing. Staff reach it by going to
+                // /admin/overview directly — the route is unchanged, and it
+                // has its own sign-in, so nothing here was protecting it.
                 SettingsSection(
                   label: 'About',
                   child: _AboutSection(),
@@ -589,7 +582,7 @@ class _AboutSection extends StatelessWidget {
       children: [
         SettingsRow(
           icon: Icons.info_outline_rounded,
-          title: 'About Notably',
+          title: 'About Navie',
           subtitle: 'Version $kAppVersion',
           trailing: Icon(Icons.chevron_right_rounded, color: t.textFaint),
           onTap: () => AboutNotablySheet.show(context),
@@ -633,6 +626,134 @@ class _SupportSection extends ConsumerWidget {
             final repo = ref.read(authRepositoryProvider);
             await repo?.signOut();
           },
+        ),
+        // Required to be reachable from inside the app: both stores expect an
+        // account that can be created here to be deletable here too.
+        if (ref.watch(authStateProvider).asData?.value != null)
+          SettingsRow(
+            icon: Icons.person_remove_outlined,
+            title: 'Delete account',
+            subtitle: 'Erases your notes and this account, permanently',
+            iconColor: Theme.of(context).colorScheme.error,
+            onTap: () => _confirmDeleteAccount(context, ref),
+          ),
+      ],
+    );
+  }
+}
+
+/// Asks twice, in effect: the switch is typing the word, not tapping a button,
+/// because there is no undo and nothing to restore from afterwards.
+Future<void> _confirmDeleteAccount(BuildContext context, WidgetRef ref) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (_) => const _DeleteAccountDialog(),
+  );
+  if (confirmed != true || !context.mounted) return;
+
+  final messenger = ScaffoldMessenger.of(context);
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const AlertDialog(
+      content: Row(
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 16),
+          Expanded(child: Text('Deleting your account…')),
+        ],
+      ),
+    ),
+  );
+
+  try {
+    await ref.read(deleteAccountProvider)();
+    if (context.mounted) Navigator.of(context).pop();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Your account has been deleted.')),
+    );
+  } catch (e) {
+    if (context.mounted) Navigator.of(context).pop();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('$e'),
+        duration: const Duration(seconds: 8),
+      ),
+    );
+  }
+}
+
+
+/// Confirmation for account deletion.
+///
+/// A widget rather than a `StatefulBuilder` around a locally-created
+/// controller: the field has to outlive the dismiss animation, and disposing
+/// its controller as soon as `showDialog` returned tripped
+/// `_dependents.isEmpty` — the text field was still mounted and listening.
+/// Owning the controller here ties it to the element that actually uses it.
+class _DeleteAccountDialog extends StatefulWidget {
+  const _DeleteAccountDialog();
+
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool get _ready => _controller.text.trim().toUpperCase() == 'DELETE';
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return AlertDialog(
+      title: const Text('Delete account'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'This erases your notebooks, drawings, imported files and this '
+            'account from every device. It cannot be undone, and there is no '
+            'copy to restore from.',
+            style: TextStyle(fontSize: 13.5, color: t.textSecondary),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Type DELETE to confirm',
+            style: AppTokens.sectionLabel(t.textMuted),
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(hintText: 'DELETE'),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text('Cancel', style: TextStyle(color: t.textMuted)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+          onPressed: _ready ? () => Navigator.pop(context, true) : null,
+          child: const Text('Delete for ever'),
         ),
       ],
     );

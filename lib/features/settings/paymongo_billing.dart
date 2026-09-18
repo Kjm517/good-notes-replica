@@ -176,7 +176,20 @@ final payMongoSignedInProvider = Provider<bool>((ref) {
 });
 
 /// Whether wallet checkout can run (native + signed-in user).
+/// Whether wallet checkout (GCash / Maya / card) may be *offered*.
+///
+/// Web only, and that is a policy requirement rather than a preference.
+/// Google Play and the App Store both require a purchase of digital content
+/// made inside the app to go through their own billing; selling a
+/// subscription through PayMongo in a store build is a payments-policy
+/// violation, and the penalty is removal rather than a rejection notice.
+///
+/// This gates the *sale*, not the entitlement. Premium bought on the web is
+/// resolved server-side by [payMongoEntitlementRefreshProvider], so it still
+/// applies on Android and iOS — the store build simply cannot take the
+/// payment. Native builds sell through RevenueCat instead.
 final payMongoAvailableProvider = Provider<bool>((ref) {
+  if (!kIsWeb) return false;
   return ref.watch(payMongoSignedInProvider);
 });
 
@@ -198,7 +211,13 @@ final payMongoBillingServiceProvider = Provider<PayMongoBillingService?>((ref) {
 
 /// Polls worker entitlement while signed in so admin grants apply without
 /// restarting the app.
-const _entitlementPollInterval = Duration(seconds: 12);
+///
+/// Every 12 seconds — the previous cadence — was ~7,000 requests per signed-in
+/// user per day, enough for a handful of open tabs to burn through the
+/// Worker's free daily quota and take file sync down with it. Checkout has
+/// its own fast poll ([QrCheckoutScreen]) and the app also refreshes on
+/// resume, so a slow background tick is all a grant needs.
+const _entitlementPollInterval = Duration(minutes: 5);
 
 final payMongoSyncProvider = Provider<void>((ref) {
   if (!ref.watch(payMongoSignedInProvider)) return;

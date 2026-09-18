@@ -843,6 +843,18 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
             },
           ),
           ListTile(
+            leading: const Icon(Icons.drive_file_move_outlined),
+            title: const Text('Move to folder'),
+            onTap: () async {
+              Navigator.pop(sheetContext);
+              final target = await _pickFolder(context, repo, d);
+              if (target == null) return;
+              // `null` from the picker means cancelled; the sentinel means
+              // the library root, which is a parentId of null.
+              repo.move(d.id, target == _libraryRoot ? null : target);
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.info_outline_rounded),
             title: const Text('Details'),
             onTap: () async {
@@ -866,6 +878,11 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Moved "${d.title}" to Trash'),
+                  // Flutter keeps a snackbar with an action on screen until
+                  // it is tapped unless told otherwise — this one followed
+                  // the user into Settings and Billing history.
+                  persist: false,
+                  duration: const Duration(seconds: 5),
                   action: SnackBarAction(
                     label: 'Undo',
                     onPressed: () => repo.restore(d.id),
@@ -878,6 +895,75 @@ Future<void> showDocumentActions(BuildContext context, Document d) async {
         ],
       ),
     ),
+  );
+}
+
+/// Picker value for "move to the top level of the library".
+const _libraryRoot = '';
+
+/// Lets the user choose a destination folder for [d]. Returns the folder id,
+/// [_libraryRoot] for the top level, or null when cancelled. A folder cannot
+/// be moved into itself, so it is left out of its own list.
+Future<String?> _pickFolder(
+  BuildContext context,
+  LibraryRepository repo,
+  Document d,
+) async {
+  final folders = (await repo.folders()).where((f) => f.id != d.id).toList();
+  if (!context.mounted) return null;
+  return showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    constraints: const BoxConstraints(maxWidth: 600),
+    builder: (sheetContext) {
+      final t = sheetContext.tokens;
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                'Move to',
+                style: Theme.of(sheetContext)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontSize: 19),
+              ),
+            ),
+            if (d.parentId != null)
+              ListTile(
+                leading: Icon(Icons.home_outlined, color: t.textSecondary),
+                title: const Text('Library (top level)'),
+                onTap: () => Navigator.pop(sheetContext, _libraryRoot),
+              ),
+            if (folders.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                child: Text(
+                  'No folders yet — create one from the New menu.',
+                  style: TextStyle(color: t.textMuted),
+                ),
+              ),
+            for (final f in folders)
+              ListTile(
+                leading: Icon(
+                  Icons.folder_rounded,
+                  color: f.id == d.parentId ? t.textFaint : t.accentText,
+                ),
+                title: Text(f.title),
+                trailing: f.id == d.parentId
+                    ? Text('Current', style: AppTokens.mono(size: 11, color: t.textMuted))
+                    : null,
+                enabled: f.id != d.parentId,
+                onTap: () => Navigator.pop(sheetContext, f.id),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      );
+    },
   );
 }
 

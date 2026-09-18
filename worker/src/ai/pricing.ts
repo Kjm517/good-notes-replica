@@ -31,6 +31,12 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
 
   // Cloudflare Workers AI — billed in neurons with a daily free allowance.
   // Treated as free up to the allowance, then cheap.
+  // Cloudflare retired the un-suffixed llama-3.1-8b-instruct on 2026-05-30.
+  // Requests for it fail with a 5028 and fall through to the paid fallback,
+  // so every quiz was quietly billed to Gemini instead of using the free
+  // allowance. The -fp8 build is the current one.
+  'free/@cf/meta/llama-3.1-8b-instruct-fp8': { inPerM: 0, outPerM: 0 },
+  // Kept so an older deployment still prices as free rather than unknown.
   'free/@cf/meta/llama-3.1-8b-instruct': { inPerM: 0, outPerM: 0 },
   'free/@cf/meta/llama-3.2-11b-vision-instruct': {
     inPerM: 0,

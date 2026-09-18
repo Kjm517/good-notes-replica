@@ -71,7 +71,7 @@ class _LegalSheetState extends State<LegalSheet>
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: Text(
-              'Notably legal',
+              'Navie legal',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),

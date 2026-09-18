@@ -316,7 +316,7 @@ class AppMark extends StatelessWidget {
       width: size,
       height: size,
       fit: BoxFit.contain,
-      semanticLabel: 'Notably',
+      semanticLabel: 'Navie',
       gaplessPlayback: true,
       errorBuilder: (context, error, stackTrace) {
         debugPrint('AppMark asset failed ($_asset): $error');

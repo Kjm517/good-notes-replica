@@ -10,7 +10,7 @@ import 'package:timezone/timezone.dart' as tz;
 /// Android channel for anything the server or a schedule pushes at the user.
 const _channel = AndroidNotificationChannel(
   'notably_general',
-  'Notably',
+  'Navie',
   description: 'Plan reminders and announcements.',
   importance: Importance.defaultImportance,
 );

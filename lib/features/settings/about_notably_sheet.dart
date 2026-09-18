@@ -32,7 +32,7 @@ class AboutNotablySheet extends StatelessWidget {
               const AppMark(size: 72),
               const SizedBox(height: 16),
               Text(
-                'Notably',
+                'Navie',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
@@ -45,7 +45,7 @@ class AboutNotablySheet extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'Take notes comfortably. Think notably.\n\n'
+                'Learn. Note. Navigate.\n\n'
                 'Handwrite, mark up PDFs, and turn them into practice quizzes. '
                 'The same library on phone, tablet, and web.',
                 textAlign: TextAlign.center,
@@ -57,7 +57,7 @@ class AboutNotablySheet extends StatelessWidget {
               ),
               const SizedBox(height: 20),
               Text(
-                '© ${DateTime.now().year} Notably',
+                '© ${DateTime.now().year} Navie',
                 style: AppTokens.mono(size: 10, color: t.textFaint),
               ),
             ],

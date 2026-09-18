@@ -1214,37 +1214,43 @@ class SyncEngine {
       }
 
       final ensuredAssets = <String>{};
-      for (final record in pages) {
-        final local = await (_db.select(
-          _db.notePages,
-        )..where((p) => p.id.equals(record.id))).getSingleOrNull();
-        if (local != null &&
-            !remoteWins(
-              localUpdatedAt: local.updatedAt,
-              remoteUpdatedAt: record.updatedAt,
-              remoteDeletedAt: record.deletedAt,
-            )) {
-          if (!record.isDeleted) {
-            final skippedPdf = record.data['pdfAssetId'] as String?;
-            final skippedBg = record.data['bgAssetId'] as String?;
-            if (skippedPdf != null && ensuredAssets.add(skippedPdf)) {
-              await _ensureAsset(skippedPdf);
-            }
-            if (skippedBg != null && ensuredAssets.add(skippedBg)) {
-              await _ensureAsset(skippedBg);
-            }
-          }
-          processed++;
-          if (processed == total || processed - lastEmitted >= 25) {
-            lastEmitted = processed;
-            emitPageProgress();
-          }
-          continue;
-        }
 
-        await _db
-            .into(_db.notePages)
-            .insertOnConflictUpdate(
+      // Written in chunks, each chunk one transaction.
+      //
+      // A row at a time meant a select and an upsert per page, and every
+      // upsert its own implicit transaction. For a 4,900-page textbook that
+      // is around ten thousand separate writes, each one a flush through a
+      // single OPFS access handle on web — slow, and enough contention that
+      // reads from the UI started failing outright with SQLITE_IOERR while a
+      // large document synced. One read and one transaction per chunk keeps
+      // the same behaviour and asks the file for roughly fifty round trips
+      // instead.
+      const chunkSize = 200;
+      for (var start = 0; start < pages.length; start += chunkSize) {
+        final chunk = pages.skip(start).take(chunkSize).toList();
+        final locals = {
+          for (final row in await (_db.select(_db.notePages)
+                ..where((p) => p.id.isIn([for (final r in chunk) r.id])))
+              .get())
+            row.id: row,
+        };
+
+        // Assets are fetched over the network, so they are gathered here and
+        // handled after the transaction closes rather than inside it.
+        final pendingAssets = <String>[];
+        final writes = <NotePagesCompanion>[];
+
+        for (final record in chunk) {
+          final local = locals[record.id];
+          final keepLocal = local != null &&
+              !remoteWins(
+                localUpdatedAt: local.updatedAt,
+                remoteUpdatedAt: record.updatedAt,
+                remoteDeletedAt: record.deletedAt,
+              );
+
+          if (!keepLocal) {
+            writes.add(
               NotePagesCompanion.insert(
                 id: record.id,
                 documentId: documentId,
@@ -1274,19 +1280,31 @@ class SyncEngine {
                 remoteUpdatedAt: Value(record.updatedAt),
               ),
             );
+          }
 
-        // PDF / image pages point at an asset; make sure its metadata (and, when
-        // possible, its bytes) land on this device — otherwise the editor paints
-        // blank pages and logs "Missing PDF asset".
-        final pdfId = record.data['pdfAssetId'] as String?;
-        final bgId = record.data['bgAssetId'] as String?;
-        if (pdfId != null && ensuredAssets.add(pdfId)) {
-          await _ensureAsset(pdfId);
+          // PDF / image pages point at an asset; make sure its metadata (and,
+          // when possible, its bytes) land on this device — otherwise the
+          // editor paints blank pages and logs "Missing PDF asset". A row the
+          // local copy wins still needs its asset.
+          if (keepLocal && record.isDeleted) continue;
+          for (final key in const ['pdfAssetId', 'bgAssetId']) {
+            final id = record.data[key] as String?;
+            if (id != null && ensuredAssets.add(id)) pendingAssets.add(id);
+          }
         }
-        if (bgId != null && ensuredAssets.add(bgId)) {
-          await _ensureAsset(bgId);
+
+        if (writes.isNotEmpty) {
+          await _db.batch((b) => b.insertAllOnConflictUpdate(
+                _db.notePages,
+                writes,
+              ));
         }
-        processed++;
+
+        for (final id in pendingAssets) {
+          await _ensureAsset(id);
+        }
+
+        processed += chunk.length;
         if (processed == total || processed - lastEmitted >= 25) {
           lastEmitted = processed;
           emitPageProgress();
@@ -1451,12 +1469,13 @@ class SyncEngine {
     var local = await (_db.select(
       _db.assets,
     )..where((a) => a.id.equals(assetId))).getSingleOrNull();
-    if (await _assetBytesOnDevice(local, assetId)) {
-      _downloadBackoffUntil.remove(assetId);
-      _downloadAttempts.remove(assetId);
-      return;
-    }
 
+    // No metadata row yet: fetch it *before* the bytes check. The check
+    // recovers files already on disk by writing their path onto the row —
+    // with no row that write hit nothing, the early return below skipped the
+    // insert, and a device whose database was rebuilt while its files
+    // survived showed every notebook as "Waiting for file…" with the file
+    // sitting right there.
     if (local == null) {
       final record = await _remote.fetchById(RemoteCollection.assets, assetId);
       if (record == null || record.isDeleted) return;
@@ -1480,6 +1499,16 @@ class SyncEngine {
       local = await (_db.select(
         _db.assets,
       )..where((a) => a.id.equals(assetId))).getSingleOrNull();
+    }
+
+    if (await _assetBytesOnDevice(local, assetId)) {
+      _downloadBackoffUntil.remove(assetId);
+      _downloadAttempts.remove(assetId);
+      return;
+    }
+
+    if (local == null) {
+      return;
     } else if (local.remoteKey == null && !local.dirty) {
       // A dirty row is holding a local change that has not been pushed yet —
       // a key just cleared by [verifyRemoteCopies], say. Overwriting it with
@@ -1519,6 +1548,13 @@ class SyncEngine {
       return;
     }
 
+    // A file imported on this device while a long download is running used
+    // to wait for the whole download — with its editor locked on
+    // "Uploading…" the entire time — because push only runs at the start of
+    // a sync. The user's own import is the thing they are waiting to open,
+    // so let it go ahead of the next file fetch.
+    await _pushPendingUploadsFirst();
+
     _emitProgress(
       _lastProgress.clamp(0.60, 0.74),
       'Downloading file…',
@@ -1555,6 +1591,26 @@ class SyncEngine {
       var wait = _downloadBackoff * (1 << (attempts - 1).clamp(0, 5));
       if (wait > _downloadBackoffMax) wait = _downloadBackoffMax;
       _downloadBackoffUntil[assetId] = DateTime.now().add(wait);
+    }
+  }
+
+  bool _pushingUploads = false;
+
+  /// Uploads any locally imported files that are still waiting for R2 before
+  /// the next download starts. Skipped on native pull when nothing is pending,
+  /// so the common case costs one count query.
+  Future<void> _pushPendingUploadsFirst() async {
+    if (_pushingUploads || _paused) return;
+    if (await _pendingFileUploadCount() == 0) return;
+    _pushingUploads = true;
+    try {
+      await _pushAssets();
+    } catch (e) {
+      // The download this was queued ahead of should still run; the failed
+      // upload is retried on the next scheduled sync as before.
+      debugPrint('Upload-before-download failed: $e');
+    } finally {
+      _pushingUploads = false;
     }
   }
 

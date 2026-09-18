@@ -438,7 +438,7 @@ class _QrActions extends StatelessWidget {
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(file.path)],
-          text: 'Notably Premium — ${formatPhp(amountPhp)}. '
+          text: 'Navie Premium — ${formatPhp(amountPhp)}. '
               'Scan with GCash, Maya, or any bank app.',
         ),
       );

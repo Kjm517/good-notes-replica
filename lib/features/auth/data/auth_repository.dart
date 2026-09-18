@@ -184,7 +184,7 @@ class AuthRepository {
           );
         }
       });
-      // On native the browser is a separate app, so coming back to Notably
+      // On native the browser is a separate app, so coming back to Navie
       // without a session means the round trip failed. Detecting that beats
       // spinning for the full timeout, which is what a bad redirect URL used
       // to look like.

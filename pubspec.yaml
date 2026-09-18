@@ -119,17 +119,20 @@ flutter_launcher_icons:
 flutter_native_splash:
   color: "#000000"
   color_dark: "#000000"
-  # Padded square, not the bare wordmark. The generated iOS storyboard pins the
+  # Padded square, not the bare logo. The generated iOS storyboard pins the
   # image view to all four edges with scaleAspectFit, so whatever is handed to
-  # it is scaled up until it touches the window — a bare 1057x400 logo came out
-  # spanning the full width of an iPad. The margins have to be baked into the
-  # asset; a square canvas keeps them even in both orientations.
-  image: assets/branding/notably_logo_splash_padded.png
+  # it is scaled up until it touches the window — a bare logo came out spanning
+  # the full width of an iPad. The margins have to be baked into the asset; a
+  # square canvas keeps them even in both orientations. Both files below are
+  # the solo mark on a square black canvas, generated from
+  # assets/branding/notably-solo-logo.png.
+  image: assets/branding/navie_splash_padded.png
   android_12:
-    # Same art as the main splash — never the launcher/app icon.
+    # Android 12+ masks this to a circle and only shows the middle of the
+    # canvas, so the art is inset further here than in the image above.
     color: "#000000"
     color_dark: "#000000"
-    image: assets/branding/notably_logo_splash.png
+    image: assets/branding/navie_splash_android12.png
     icon_background_color: "#000000"
     icon_background_color_dark: "#000000"
   android: true
@@ -152,7 +155,11 @@ flutter:
   uses-material-design: true
 
   assets:
-    - .env
+    # `.env` itself is deliberately NOT bundled: it holds the raw vendor keys
+    # and a Flutter asset is plaintext inside the APK/IPA, readable with
+    # `unzip`. `scripts/sync-env.sh` writes `assets/env` instead, with the
+    # server-only keys removed. main.dart tries `.env` first and falls back
+    # to `assets/env`, so local runs and shipped builds both work.
     - assets/env
     - assets/quiz/stop_words.txt
     - assets/branding/notably_logo.png

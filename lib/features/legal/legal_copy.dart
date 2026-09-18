@@ -1,10 +1,15 @@
 /// In-app legal copy for Apple App Store and Google Play listings.
 ///
-/// This is Notably's published terms, not a substitute for independent legal
+/// This is Navie's published terms, not a substitute for independent legal
 /// advice. Update [kLegalEffectiveDate] when you change the text.
 const kLegalEffectiveDate = '24 August 2026';
-const kLegalContactEmail = 'support@notably.app';
-const kLegalOperator = 'Notably';
+// On the domain we actually own. The previous address was on notably.app,
+// which is not ours and publishes a null MX record, so every message sent to
+// it bounced — including the ones the Privacy Policy and Terms tell people to
+// send. Route this to a real inbox (Cloudflare Email Routing forwards it for
+// free) before relying on it.
+const kLegalContactEmail = 'support@navienotes.com';
+const kLegalOperator = 'Navie';
 
 enum LegalDoc { terms, privacy }
 
@@ -21,7 +26,7 @@ final kTermsSections = <LegalSection>[
   LegalSection(
     'Agreement',
     'These Terms of Use (“Terms”) are an agreement between you and $kLegalOperator '
-        '(“Notably”, “we”, “us”) for your use of the Notably apps on iOS, Android, '
+        '(“Navie”, “we”, “us”) for your use of the Navie apps on iOS, Android, '
         'and the web, including related websites, cloud sync, and paid features '
         '(together, the “Service”).\n\n'
         'By creating an account, signing in, or tapping Agree, you accept these '
@@ -30,7 +35,7 @@ final kTermsSections = <LegalSection>[
   ),
   LegalSection(
     'Eligibility',
-    'Notably is a digital notebook for students and anyone who takes notes — '
+    'Navie is a digital notebook for students and anyone who takes notes — '
         'including children, similar to other handwriting apps. There is no minimum '
         'age to use the app on a device a parent or school provides.\n\n'
         'If you are under 18, a parent or guardian must review these Terms and our '
@@ -45,7 +50,7 @@ final kTermsSections = <LegalSection>[
   ),
   LegalSection(
     'The Service',
-    'Notably is a digital notebook. You can create notebooks, write by hand, import '
+    'Navie is a digital notebook. You can create notebooks, write by hand, import '
         'and mark up PDFs and images, organise a library, search your materials, '
         'and (where available) generate practice quizzes from documents.\n\n'
         'We may change, suspend, or discontinue features. We do not guarantee that '
@@ -55,7 +60,7 @@ final kTermsSections = <LegalSection>[
   LegalSection(
     'Your content',
     'You keep ownership of notes, handwriting, PDFs, images, and other material '
-        'you upload (“Your Content”). You grant Notably a limited licence to host, '
+        'you upload (“Your Content”). You grant Navie a limited licence to host, '
         'back up, transmit, and display Your Content solely to operate and improve '
         'the Service for you (for example cloud sync and on-device or cloud quiz '
         'generation).\n\n'
@@ -100,7 +105,7 @@ final kTermsSections = <LegalSection>[
     'Acceptable use',
     'You agree not to reverse engineer the apps except as allowed by law, overload '
         'or disrupt the Service, attempt unauthorised access, scrape other users’ '
-        'data, or use Notably to violate academic integrity rules of your school '
+        'data, or use Navie to violate academic integrity rules of your school '
         'in a way that is unlawful. We may rate-limit or refuse service for abuse.',
   ),
   LegalSection(
@@ -149,7 +154,7 @@ final kTermsSections = <LegalSection>[
 final kPrivacySections = <LegalSection>[
   LegalSection(
     'Who we are',
-    '$kLegalOperator provides Notably. This Privacy Policy explains what personal '
+    '$kLegalOperator provides Navie. This Privacy Policy explains what personal '
         'data we collect, why, and your choices. It applies to iOS, Android, and '
         'web. Effective date: $kLegalEffectiveDate.\n\n'
         'Contact: $kLegalContactEmail.',
@@ -173,7 +178,7 @@ final kPrivacySections = <LegalSection>[
     'How we use data',
     'We use data to create and secure your account, sync your library across '
         'devices, provide Premium and quizzes, prevent fraud and abuse, comply '
-        'with law, and improve Notably. We do not sell your personal information.',
+        'with law, and improve Navie. We do not sell your personal information.',
   ),
   LegalSection(
     'Processors',
@@ -203,7 +208,7 @@ final kPrivacySections = <LegalSection>[
   ),
   LegalSection(
     'Children',
-    'Notably may be used by children (for example school notes and homework) with '
+    'Navie may be used by children (for example school notes and homework) with '
         'a parent’s or guardian’s permission. We do not target advertising at '
         'children, and we do not sell children’s personal information.\n\n'
         'Cloud accounts, Google Sign-In, payments, and AI quizzes process personal '

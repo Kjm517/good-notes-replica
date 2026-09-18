@@ -1,0 +1,26 @@
+# Deploys the built Flutter web app as a Worker serving static assets.
+#
+# Separate from worker/wrangler.toml, which is the API. This one has no code —
+# it exists so the site is served by Cloudflare rather than Vercel, whose free
+# tier is for non-commercial use and caps bandwidth at 100 GB. Cloudflare's
+# static assets are unmetered.
+#
+# Deploy with:  wrangler deploy -c wrangler.web.toml
+name = "navie"
+compatibility_date = "2026-09-18"
+
+# The real address. Both are custom domains rather than routes, so Cloudflare
+# issues and renews the certificates and creates the DNS records itself; the
+# workers.dev subdomain keeps working alongside them.
+routes = [
+  { pattern = "navienotes.com", custom_domain = true },
+  { pattern = "www.navienotes.com", custom_domain = true },
+]
+
+[assets]
+directory = "./vercel_out"
+# go_router does client-side routing, so a path with no file behind it still
+# has to return index.html with its URL intact — otherwise refreshing
+# /doc/<id> 404s. Cloudflare rejects the _redirects rule that usually does
+# this, so it is said here instead.
+not_found_handling = "single-page-application"

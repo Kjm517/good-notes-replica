@@ -76,19 +76,137 @@ export interface Env {
   MAX_VISION_REQUESTS_PER_USER?: string;
   MAX_QUESTIONS_PER_GENERATION?: string;
   MAX_DOCUMENT_PROCESSING_MB?: string;
+
+  /**
+   * Browser origins allowed to call this Worker, comma-separated. An entry
+   * starting with `.` matches any subdomain of it. Unset falls back to
+   * [DEFAULT_ALLOWED_ORIGINS]; localhost is always allowed for development.
+   */
+  ALLOWED_ORIGINS?: string;
 }
 
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
+const CORS_BASE_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization,Content-Type',
   'Access-Control-Max-Age': '86400',
 };
 
+/**
+ * Browser origins allowed to call this Worker.
+ *
+ * Previously `*`. That was never an open door on its own — auth is a bearer
+ * token kept in localStorage, which one origin cannot read from another, so a
+ * hostile page has no token to send and gets a 401. Narrowing it is defence in
+ * depth: if a token ever does leak, a page on some other domain still cannot
+ * spend it from the victim's browser.
+ *
+ * Native apps (Android/iOS) send no `Origin` header at all — CORS is a browser
+ * mechanism — so they are unaffected by anything here.
+ *
+ * Add deployments with the `ALLOWED_ORIGINS` var in wrangler.toml
+ * (comma-separated). An entry starting with `.` matches any subdomain of it,
+ * which is what keeps Vercel preview URLs working.
+ */
+const DEFAULT_ALLOWED_ORIGINS = [
+  // The app's own address.
+  'https://navienotes.com',
+  'https://www.navienotes.com',
+  'https://notably-sigma.vercel.app',
+  '.vercel.app',
+  // Cloudflare Pages, including its per-deployment preview subdomains. Without
+  // this the app served from Pages cannot call its own API: the browser blocks
+  // the read and every request looks like a network failure rather than a
+  // refused origin, which is a slow thing to diagnose.
+  '.pages.dev',
+  // The site is deployed as a Worker with static assets, so it is served from
+  // this account's own workers.dev subdomain. Scoped to that subdomain rather
+  // than all of workers.dev, which would let any Worker on any account call
+  // this API from a browser.
+  '.notably.workers.dev',
+];
+
+function allowedOrigins(env: { ALLOWED_ORIGINS?: string }): string[] {
+  const configured = (env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  return configured.length > 0 ? configured : DEFAULT_ALLOWED_ORIGINS;
+}
+
+/** True for localhost / 127.0.0.1 on any port, so `flutter run -d chrome` works. */
+function isLocalhostOrigin(origin: string): boolean {
+  try {
+    const { hostname, protocol } = new URL(origin);
+    if (protocol !== 'http:' && protocol !== 'https:') return false;
+    return hostname === 'localhost' || hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+export function isOriginAllowed(
+  origin: string | null,
+  env: { ALLOWED_ORIGINS?: string },
+): boolean {
+  if (!origin) return false;
+  if (isLocalhostOrigin(origin)) return true;
+  let host: string;
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== 'https:') return false;
+    host = parsed.hostname;
+  } catch {
+    return false;
+  }
+  return allowedOrigins(env).some((entry) =>
+    entry.startsWith('.')
+      ? host === entry.slice(1) || host.endsWith(entry)
+      : entry === origin,
+  );
+}
+
+/**
+ * CORS headers for this request. An allowed browser origin is reflected back;
+ * anything else gets none, which is what makes the browser block the read.
+ *
+ * `Vary: Origin` is required because the response differs per origin — without
+ * it a cache can hand one origin's allow header to another.
+ */
+function corsHeadersFor(
+  request: Request,
+  env: { ALLOWED_ORIGINS?: string },
+): Record<string, string> {
+  const origin = request.headers.get('Origin');
+  if (!isOriginAllowed(origin, env)) return { Vary: 'Origin' };
+  return {
+    ...CORS_BASE_HEADERS,
+    'Access-Control-Allow-Origin': origin!,
+    Vary: 'Origin',
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // CORS is applied here, once, to whatever the router returns. Doing it at
+    // each `return` instead meant every new route had to remember to, and the
+    // headers could not depend on the request's Origin.
+    const response = await route(request, env);
+    const headers = new Headers(response.headers);
+    for (const [key, value] of Object.entries(corsHeadersFor(request, env))) {
+      headers.set(key, value);
+    }
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  },
+};
+
+async function route(request: Request, env: Env): Promise<Response> {
+  {
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204 });
     }
 
     const url = new URL(request.url);
@@ -143,7 +261,7 @@ export default {
       case 'GET /file': {
         const object = await env.BUCKET.get(objectKey);
         if (!object) return json({ error: 'Not found' }, 404);
-        const headers = new Headers(CORS_HEADERS);
+        const headers = new Headers();
         object.writeHttpMetadata(headers);
         headers.set('etag', object.httpEtag);
         return new Response(object.body, { headers });
@@ -210,8 +328,8 @@ export default {
       default:
         return json({ error: 'Not found' }, 404);
     }
-  },
-};
+  }
+}
 
 async function handleUserRoutes(
   request: Request,
@@ -224,6 +342,13 @@ async function handleUserRoutes(
     // Device push tokens. Registered by the app after the user allows
     // notifications, and deleted on sign-out so a shared phone does not keep
     // receiving the previous account's pushes.
+    // Account deletion. Play and the App Store both require this to exist in
+    // the app, and it has to remove the data rather than just the login.
+    if (route === 'POST /user/account/delete') {
+      const { handleAccountDelete } = await import('./account');
+      return withCors(await handleAccountDelete(request, env));
+    }
+
     if (route === 'POST /user/devices' || route === 'DELETE /user/devices') {
       const uid = await requireUid(request, env);
       const body = (await request.json()) as {
@@ -371,18 +496,15 @@ function stripLeadingSlashes(key: string): string {
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
   });
 }
 
+/**
+ * Kept so the route handlers read the same as before. CORS headers are now
+ * added once at the `fetch` boundary, which is the only place that can see the
+ * request's Origin, so there is nothing left to do per response.
+ */
 function withCors(response: Response): Response {
-  const headers = new Headers(response.headers);
-  for (const [key, value] of Object.entries(CORS_HEADERS)) {
-    headers.set(key, value);
-  }
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return response;
 }

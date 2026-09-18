@@ -54,6 +54,7 @@ assets/env
 /android/app/profile
 /android/app/release
 .dart_defines.web.json
+.dart_defines.app.json
 
 # Vercel CLI project link (org/project IDs, local only)
 .vercel
