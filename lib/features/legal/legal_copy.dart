@@ -3,7 +3,12 @@
 /// This is Navie's published terms, not a substitute for independent legal
 /// advice. Update [kLegalEffectiveDate] when you change the text.
 const kLegalEffectiveDate = '24 August 2026';
-const kLegalContactEmail = 'support@notably.app';
+// On the domain we actually own. The previous address was on notably.app,
+// which is not ours and publishes a null MX record, so every message sent to
+// it bounced — including the ones the Privacy Policy and Terms tell people to
+// send. Route this to a real inbox (Cloudflare Email Routing forwards it for
+// free) before relying on it.
+const kLegalContactEmail = 'support@navienotes.com';
 const kLegalOperator = 'Navie';
 
 enum LegalDoc { terms, privacy }

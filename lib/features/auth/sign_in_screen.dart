@@ -11,6 +11,7 @@ import '../legal/legal_sheet.dart';
 import '../settings/entitlements.dart';
 import 'data/auth_repository.dart';
 import 'providers.dart';
+import 'sign_in_help_sheet.dart';
 
 /// Sign in or create an account. When Supabase is configured, signing in is
 /// required to enter the app — it also enables syncing your notes across
@@ -303,6 +304,20 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                                 _creatingAccount = !_creatingAccount;
                                 _error = null;
                               }),
+                    ),
+                    const SizedBox(height: 4),
+                    // Someone stuck here cannot use the in-app bug reporter —
+                    // it needs the account they cannot get into — so this is
+                    // the only route they have for telling us.
+                    TextButton(
+                      onPressed: () => SignInHelpSheet.show(context),
+                      child: Text(
+                        'Trouble signing in?',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: context.tokens.textMuted,
+                        ),
+                      ),
                     ),
                   ],
                 ],
