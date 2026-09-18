@@ -45,7 +45,7 @@ class AboutNotablySheet extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'Navigate your knowledge.\n\n'
+                'Learn. Note. Navigate.\n\n'
                 'Handwrite, mark up PDFs, and turn them into practice quizzes. '
                 'The same library on phone, tablet, and web.',
                 textAlign: TextAlign.center,

@@ -345,7 +345,7 @@ class _Hero extends StatelessWidget {
           child: Text(
             creatingAccount
                 ? 'Your notebooks, PDFs and highlights, on every device.'
-                : 'Navigate your knowledge.',
+                : 'Learn. Note. Navigate.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, height: 1.5, color: t.textMuted),
           ),
