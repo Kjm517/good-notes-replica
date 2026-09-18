@@ -1,0 +1,10 @@
+# Tags used by `flutter test`.
+#
+# `native-pdf` marks tests that need pdfrx's native PDFium engine. It never
+# loads under `flutter test` — the tests hang and then time out at 30s — so the
+# whole suite is run with `--exclude-tags=native-pdf`. Tagging the file rather
+# than listing every other file by hand means a newly added test is included
+# automatically instead of being silently skipped.
+tags:
+  native-pdf:
+    description: Needs pdfrx's native engine; cannot run under `flutter test`.
