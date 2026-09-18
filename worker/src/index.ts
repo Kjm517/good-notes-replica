@@ -108,6 +108,9 @@ const CORS_BASE_HEADERS: Record<string, string> = {
  * which is what keeps Vercel preview URLs working.
  */
 const DEFAULT_ALLOWED_ORIGINS = [
+  // The app's own address.
+  'https://navienotes.com',
+  'https://www.navienotes.com',
   'https://notably-sigma.vercel.app',
   '.vercel.app',
   // Cloudflare Pages, including its per-deployment preview subdomains. Without

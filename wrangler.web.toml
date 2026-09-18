@@ -9,6 +9,14 @@
 name = "navie"
 compatibility_date = "2026-09-18"
 
+# The real address. Both are custom domains rather than routes, so Cloudflare
+# issues and renews the certificates and creates the DNS records itself; the
+# workers.dev subdomain keeps working alongside them.
+routes = [
+  { pattern = "navienotes.com", custom_domain = true },
+  { pattern = "www.navienotes.com", custom_domain = true },
+]
+
 [assets]
 directory = "./vercel_out"
 # go_router does client-side routing, so a path with no file behind it still

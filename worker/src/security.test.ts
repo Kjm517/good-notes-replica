@@ -21,6 +21,16 @@ function fakeBucket() {
 describe('CORS origin allowlist', () => {
   const env = {};
 
+  it('allows the app on its own domain, with and without www', () => {
+    expect(isOriginAllowed('https://navienotes.com', env)).toBe(true);
+    expect(isOriginAllowed('https://www.navienotes.com', env)).toBe(true);
+  });
+
+  it('refuses a lookalike of the app domain', () => {
+    expect(isOriginAllowed('https://navienotes.com.evil.io', env)).toBe(false);
+    expect(isOriginAllowed('https://notnavienotes.com', env)).toBe(false);
+  });
+
   it('allows the production web app', () => {
     expect(isOriginAllowed('https://notably-sigma.vercel.app', env)).toBe(true);
   });
