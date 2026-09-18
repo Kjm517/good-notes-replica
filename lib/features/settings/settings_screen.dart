@@ -145,20 +145,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ],
                     ),
                   ),
-                if (kIsWeb)
-                  SettingsSection(
-                    label: 'Admin',
-                    child: SettingsGroupCard(
-                      children: [
-                        SettingsRow(
-                          icon: Icons.admin_panel_settings_outlined,
-                          title: 'Admin console',
-                          subtitle: 'Staff sign-in (separate from this account)',
-                          onTap: () => context.push('/admin/overview'),
-                        ),
-                      ],
-                    ),
-                  ),
+                // No admin entry here on purpose. The console is for staff, and
+                // advertising it in every user's settings invites people to
+                // tap it, meet a sign-in wall they cannot pass, and wonder
+                // what they are missing. Staff reach it by going to
+                // /admin/overview directly — the route is unchanged, and it
+                // has its own sign-in, so nothing here was protecting it.
                 SettingsSection(
                   label: 'About',
                   child: _AboutSection(),
